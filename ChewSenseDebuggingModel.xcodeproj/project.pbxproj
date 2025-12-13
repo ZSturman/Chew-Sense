@@ -6,25 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXContainerItemProxy section */
-		EF7BFA342EEBCA9F00E0611E /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = EF7BFA1E2EEBCA9D00E0611E /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = EF7BFA252EEBCA9D00E0611E;
-			remoteInfo = ChewSenseDebuggingModel;
-		};
-		EF7BFA3E2EEBCA9F00E0611E /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = EF7BFA1E2EEBCA9D00E0611E /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = EF7BFA252EEBCA9D00E0611E;
-			remoteInfo = ChewSenseDebuggingModel;
-		};
-/* End PBXContainerItemProxy section */
+/* Begin PBXBuildFile section */
+		EF6F1D072EED0DCC0076E1CC /* ChewNet.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = EF6F1D062EED0DCC0076E1CC /* ChewNet.mlpackage */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		EF7BFA262EEBCA9D00E0611E /* ChewSenseDebuggingModel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChewSenseDebuggingModel.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF6F1CFD2EED0D9C0076E1CC /* ChewSense.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChewSense.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF6F1D062EED0DCC0076E1CC /* ChewNet.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = ChewNet.mlpackage; sourceTree = "<group>"; };
 		EF7BFA332EEBCA9F00E0611E /* ChewSenseDebuggingModelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChewSenseDebuggingModelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EF7BFA3D2EEBCA9F00E0611E /* ChewSenseDebuggingModelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChewSenseDebuggingModelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -48,7 +36,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		EF7BFA232EEBCA9D00E0611E /* Frameworks */ = {
+		EF6F1CFA2EED0D9C0076E1CC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -75,6 +63,7 @@
 		EF7BFA1D2EEBCA9D00E0611E = {
 			isa = PBXGroup;
 			children = (
+				EF6F1D062EED0DCC0076E1CC /* ChewNet.mlpackage */,
 				EF7BFA282EEBCA9D00E0611E /* ChewSenseDebuggingModel */,
 				EF7BFA362EEBCA9F00E0611E /* ChewSenseDebuggingModelTests */,
 				EF7BFA402EEBCA9F00E0611E /* ChewSenseDebuggingModelUITests */,
@@ -85,9 +74,9 @@
 		EF7BFA272EEBCA9D00E0611E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				EF7BFA262EEBCA9D00E0611E /* ChewSenseDebuggingModel.app */,
 				EF7BFA332EEBCA9F00E0611E /* ChewSenseDebuggingModelTests.xctest */,
 				EF7BFA3D2EEBCA9F00E0611E /* ChewSenseDebuggingModelUITests.xctest */,
+				EF6F1CFD2EED0D9C0076E1CC /* ChewSense.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,27 +84,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		EF7BFA252EEBCA9D00E0611E /* ChewSenseDebuggingModel */ = {
+		EF6F1CFC2EED0D9C0076E1CC /* ChewSense */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = EF7BFA472EEBCA9F00E0611E /* Build configuration list for PBXNativeTarget "ChewSenseDebuggingModel" */;
+			buildConfigurationList = EF6F1D032EED0D9C0076E1CC /* Build configuration list for PBXNativeTarget "ChewSense" */;
 			buildPhases = (
-				EF7BFA222EEBCA9D00E0611E /* Sources */,
-				EF7BFA232EEBCA9D00E0611E /* Frameworks */,
-				EF7BFA242EEBCA9D00E0611E /* Resources */,
+				EF6F1CF92EED0D9C0076E1CC /* Sources */,
+				EF6F1CFA2EED0D9C0076E1CC /* Frameworks */,
+				EF6F1CFB2EED0D9C0076E1CC /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			fileSystemSynchronizedGroups = (
-				EF7BFA282EEBCA9D00E0611E /* ChewSenseDebuggingModel */,
-			);
-			name = ChewSenseDebuggingModel;
+			name = ChewSense;
 			packageProductDependencies = (
 			);
-			productName = ChewSenseDebuggingModel;
-			productReference = EF7BFA262EEBCA9D00E0611E /* ChewSenseDebuggingModel.app */;
-			productType = "com.apple.product-type.application";
+			productName = ChewSense;
+			productReference = EF6F1CFD2EED0D9C0076E1CC /* ChewSense.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 		EF7BFA322EEBCA9F00E0611E /* ChewSenseDebuggingModelTests */ = {
 			isa = PBXNativeTarget;
@@ -128,7 +114,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				EF7BFA352EEBCA9F00E0611E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				EF7BFA362EEBCA9F00E0611E /* ChewSenseDebuggingModelTests */,
@@ -151,7 +136,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				EF7BFA3F2EEBCA9F00E0611E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				EF7BFA402EEBCA9F00E0611E /* ChewSenseDebuggingModelUITests */,
@@ -173,7 +157,7 @@
 				LastSwiftUpdateCheck = 2610;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
-					EF7BFA252EEBCA9D00E0611E = {
+					EF6F1CFC2EED0D9C0076E1CC = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
 					EF7BFA322EEBCA9F00E0611E = {
@@ -200,15 +184,15 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				EF7BFA252EEBCA9D00E0611E /* ChewSenseDebuggingModel */,
 				EF7BFA322EEBCA9F00E0611E /* ChewSenseDebuggingModelTests */,
 				EF7BFA3C2EEBCA9F00E0611E /* ChewSenseDebuggingModelUITests */,
+				EF6F1CFC2EED0D9C0076E1CC /* ChewSense */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		EF7BFA242EEBCA9D00E0611E /* Resources */ = {
+		EF6F1CFB2EED0D9C0076E1CC /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -232,7 +216,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		EF7BFA222EEBCA9D00E0611E /* Sources */ = {
+		EF6F1CF92EED0D9C0076E1CC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -243,6 +227,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EF6F1D072EED0DCC0076E1CC /* ChewNet.mlpackage in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -255,20 +240,45 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXTargetDependency section */
-		EF7BFA352EEBCA9F00E0611E /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = EF7BFA252EEBCA9D00E0611E /* ChewSenseDebuggingModel */;
-			targetProxy = EF7BFA342EEBCA9F00E0611E /* PBXContainerItemProxy */;
-		};
-		EF7BFA3F2EEBCA9F00E0611E /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = EF7BFA252EEBCA9D00E0611E /* ChewSenseDebuggingModel */;
-			targetProxy = EF7BFA3E2EEBCA9F00E0611E /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin XCBuildConfiguration section */
+		EF6F1D042EED0D9C0076E1CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MF8J7AY2X3;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSense";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EF6F1D052EED0D9C0076E1CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MF8J7AY2X3;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSense";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		EF7BFA452EEBCA9F00E0611E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -390,70 +400,6 @@
 			};
 			name = Release;
 		};
-		EF7BFA482EEBCA9F00E0611E /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = MF8J7AY2X3;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSenseDebuggingModel";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		EF7BFA492EEBCA9F00E0611E /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = MF8J7AY2X3;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSenseDebuggingModel";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 		EF7BFA4B2EEBCA9F00E0611E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -541,20 +487,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		EF6F1D032EED0D9C0076E1CC /* Build configuration list for PBXNativeTarget "ChewSense" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EF6F1D042EED0D9C0076E1CC /* Debug */,
+				EF6F1D052EED0D9C0076E1CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		EF7BFA212EEBCA9D00E0611E /* Build configuration list for PBXProject "ChewSenseDebuggingModel" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				EF7BFA452EEBCA9F00E0611E /* Debug */,
 				EF7BFA462EEBCA9F00E0611E /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		EF7BFA472EEBCA9F00E0611E /* Build configuration list for PBXNativeTarget "ChewSenseDebuggingModel" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				EF7BFA482EEBCA9F00E0611E /* Debug */,
-				EF7BFA492EEBCA9F00E0611E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
