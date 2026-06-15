@@ -449,6 +449,7 @@ final class VideoEditorViewModel: ObservableObject {
 
         let updatedContent = lines.joined(separator: "\n")
         try updatedContent.write(to: csvURL, atomically: true, encoding: .utf8)
+        try CanonicalBundleWriter.refreshCoarseLabels(csvURL: csvURL)
 
        // print("[VideoEditor] relabelCSV finished: totalRows=\(totalRows), chewingRows=\(chewingRows), nonChewingRows=\(nonChewingRows), unparsableRows=\(unparsableRows)")
     }

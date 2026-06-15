@@ -101,7 +101,7 @@ struct RecordingsListView: View {
                                 }
                             }
                             .tag(folder)
-                            .swipeActions {
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
                                     selectedSession = folder
                                     if let zip = zipForFolder(folder) {
@@ -114,6 +114,9 @@ struct RecordingsListView: View {
                                     Label("Share", systemImage: "square.and.arrow.up")
                                 }
                                 .tint(.blue)
+         
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     if selectedFolder == folder {
                                         selectedFolder = nil
@@ -149,19 +152,6 @@ struct RecordingsListView: View {
                     Section("Labelled") {
                         ForEach(labelledFolders, id: \.self) { folder in
                             HStack {
-                                Button(action: {
-                                    selectedSession = folder
-                                    if let zip = zipForFolder(folder) {
-                                        itemsToShare = [zip]
-                                    } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-                                    }
-                                    showShareSheet = true
-                                }) {
-                                    Label("Share", systemImage: "square.and.arrow.up")
-                                }
-                                .buttonStyle(.bordered)
-                                
                                 VStack(alignment: .leading) {
                                     Text(folder.lastPathComponent)
                                         .font(.body)
@@ -175,7 +165,7 @@ struct RecordingsListView: View {
                                 Spacer()
                             }
                             .tag(folder)
-                            .swipeActions {
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
                                     selectedSession = folder
                                     if let zip = zipForFolder(folder) {
@@ -188,6 +178,9 @@ struct RecordingsListView: View {
                                     Label("Share", systemImage: "square.and.arrow.up")
                                 }
                                 .tint(.blue)
+         
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     if selectedFolder == folder {
                                         selectedFolder = nil
@@ -236,14 +229,52 @@ struct RecordingsListView: View {
                                 }
                             }
                             .tag(folder)
-                        }
-                    }
-                    Section {
-                        Button(role: .destructive) {
-                            selectedFolder = nil
-                            showDeleteAllAlert = true
-                        } label: {
-                            Label("Delete All Recordings", systemImage: "trash")
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    selectedSession = folder
+                                    if let zip = zipForFolder(folder) {
+                                        itemsToShare = [zip]
+                                    } else {
+                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                    }
+                                    showShareSheet = true
+                                } label: {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
+                                .tint(.blue)
+         
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    if selectedFolder == folder {
+                                        selectedFolder = nil
+                                    }
+                                    controller.deleteSessionFolder(folder)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .contextMenu {
+                                Button {
+                                    selectedSession = folder
+                                    if let zip = zipForFolder(folder) {
+                                        itemsToShare = [zip]
+                                    } else {
+                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                    }
+                                    showShareSheet = true
+                                } label: {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
+                                Button(role: .destructive) {
+                                    if selectedFolder == folder {
+                                        selectedFolder = nil
+                                    }
+                                    controller.deleteSessionFolder(folder)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
@@ -253,21 +284,32 @@ struct RecordingsListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if !sessionFolders.isEmpty {
-                    Button(action: {
-                        selectedSession = nil
-                        var urls: [URL] = []
-                        for f in sessionFolders {
-                            if let zip = zipForFolder(f) {
-                                urls.append(zip)
-                            } else {
-                                let files = (try? FileManager.default.contentsOfDirectory(at: f, includingPropertiesForKeys: nil)) ?? []
-                                urls.append(contentsOf: files)
+                    Menu {
+                        Button {
+                            selectedSession = nil
+                            var urls: [URL] = []
+                            for f in sessionFolders {
+                                if let zip = zipForFolder(f) {
+                                    urls.append(zip)
+                                } else {
+                                    let files = (try? FileManager.default.contentsOfDirectory(at: f, includingPropertiesForKeys: nil)) ?? []
+                                    urls.append(contentsOf: files)
+                                }
                             }
+                            itemsToShare = urls
+                            showShareSheet = true
+                        } label: {
+                            Label("Share All", systemImage: "square.and.arrow.up")
                         }
-                        itemsToShare = urls
-                        showShareSheet = true
-                    }) {
-                        Label("Share All", systemImage: "square.and.arrow.up")
+
+                        Button(role: .destructive) {
+                            selectedFolder = nil
+                            showDeleteAllAlert = true
+                        } label: {
+                            Label("Delete All", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }

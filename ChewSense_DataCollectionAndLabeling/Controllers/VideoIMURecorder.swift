@@ -107,6 +107,11 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     // Time
     private let hostClock = CMClockGetHostTimeClock()
     private let hostTimescale: Int32 = 1_000_000_000 // ns
+    private var videoStartHostTimeSeconds: Double?
+    private var firstVideoFrameHostTimeSeconds: Double?
+    private var firstMotionHostTimeSeconds: Double?
+    private var lastMotionHostTimeSeconds: Double?
+    private var motionSampleCount: Int = 0
 
     private var csvFileHandle: FileHandle?
     private var csvURL: URL?
@@ -178,6 +183,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             csvFileHandle?.closeFile()
             csvFileHandle = nil
             self.postprocessCSVIfNeeded()
+            self.writeCanonicalBundle()
             completion()
             return
         }
@@ -189,6 +195,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                 self.csvFileHandle?.closeFile()
                 self.csvFileHandle = nil
                 self.postprocessCSVIfNeeded()
+                self.writeCanonicalBundle()
                 completion()
             }
         default:
@@ -196,6 +203,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             csvFileHandle?.closeFile()
             csvFileHandle = nil
             self.postprocessCSVIfNeeded()
+            self.writeCanonicalBundle()
             completion()
         }
     }
@@ -246,7 +254,13 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         writer.add(videoInput)
 
         writer.startWriting()
-        writer.startSession(atSourceTime: CMClockGetTime(hostClock))
+        let origin = CMClockGetTime(hostClock)
+        videoStartHostTimeSeconds = CMTimeGetSeconds(origin)
+        firstVideoFrameHostTimeSeconds = nil
+        firstMotionHostTimeSeconds = nil
+        lastMotionHostTimeSeconds = nil
+        motionSampleCount = 0
+        writer.startSession(atSourceTime: origin)
     }
 
     private func setupMotion() {
@@ -276,6 +290,11 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
 
     // MARK: IMU ingest & flush
     private func ingest(_ m: CMDeviceMotion) {
+        if firstMotionHostTimeSeconds == nil {
+            firstMotionHostTimeSeconds = m.timestamp
+        }
+        lastMotionHostTimeSeconds = m.timestamp
+        motionSampleCount += 1
         if batchStartSeconds == nil { batchStartSeconds = m.timestamp }
         let dt = m.timestamp - (batchStartSeconds ?? m.timestamp)
         let dtNs = UInt32(max(0, min(Double(UInt32.max)/1e9, dt)) * 1e9)
@@ -347,6 +366,13 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
               let videoInput = videoInput,
               writer.status == .writing else { return }
         videoWritingQueue.async {
+            if self.firstVideoFrameHostTimeSeconds == nil {
+                let presentationTime = CMSampleBufferGetPresentationTimeStamp(sb)
+                let seconds = CMTimeGetSeconds(presentationTime)
+                if seconds.isFinite {
+                    self.firstVideoFrameHostTimeSeconds = seconds
+                }
+            }
             if videoInput.isReadyForMoreMediaData {
                 videoInput.append(sb)
             }
@@ -414,5 +440,22 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             onError?(error)
         }
     }
-}
 
+    private func writeCanonicalBundle() {
+        do {
+            try CanonicalBundleWriter.writeInitialBundle(
+                videoURL: outputURL,
+                isEating: recordingLabel,
+                timing: CaptureTimingSnapshot(
+                    videoStartHostTime: videoStartHostTimeSeconds,
+                    firstVideoFrameHostTime: firstVideoFrameHostTimeSeconds,
+                    firstMotionHostTime: firstMotionHostTimeSeconds,
+                    lastMotionHostTime: lastMotionHostTimeSeconds,
+                    motionSampleCount: motionSampleCount
+                )
+            )
+        } catch {
+            onError?(error)
+        }
+    }
+}

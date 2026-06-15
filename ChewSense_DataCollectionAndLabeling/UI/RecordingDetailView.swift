@@ -5,7 +5,6 @@
 //  Created by Zachary Sturman on 11/13/25.
 //
 
-
 import SwiftUI
 import AVFoundation
 import AVKit
@@ -152,11 +151,13 @@ struct RecordingDetailView: View {
                 MarkerControls(
                     isLabelled: isLabelled || !hasValidCSV,
                     primaryTitle: primaryButtonTitle,
+                    isPrimaryDestructive: viewModel.selectedMarker != nil,
                     onPrevious: goToPreviousMarker,
                     onPrimary: primaryAction,
                     onNext: goToNextMarker
                 )
-                .padding(.horizontal)
+                .padding()
+                
 
                 // Conditional share/edit area
                 Group {
@@ -165,7 +166,7 @@ struct RecordingDetailView: View {
                             .font(.footnote)
                             .foregroundColor(.red)
                     } else if !isLabelled {
-                        VStack(spacing: 12) {
+                        HStack(spacing: 12) {
                             Button("Labelling finished") {
                                 viewModel.completeEditing()
                                 validationMessage = nil
@@ -173,6 +174,7 @@ struct RecordingDetailView: View {
                                 recorderController.setLabelled(true, for: folder)
                                 refreshMetadata()
                             }
+                            .buttonStyle(.borderedProminent)
                             .disabled(viewModel.hasUnclosedChewingSegment)
                             .simultaneousGesture(
                                 TapGesture().onEnded {
@@ -188,9 +190,10 @@ struct RecordingDetailView: View {
                                 viewModel.finishLater()
                                 validationMessage = nil
                             }
+                            .buttonStyle(.bordered)
                         }
                     } else if isLabelled && !isShared {
-                        VStack(spacing: 12) {
+                        HStack(spacing: 12) {
                             Button {
                                 prepareShareItems()
                                 showShareSheet = true
@@ -206,7 +209,7 @@ struct RecordingDetailView: View {
                             .buttonStyle(.bordered)
                         }
                     } else if isLabelled && isShared {
-                        VStack(spacing: 8) {
+                        HStack(spacing: 8) {
                             Text("Shared successfully")
                                 .font(.footnote)
                                 .foregroundStyle(.green)
@@ -320,6 +323,7 @@ struct RecordingDetailView: View {
 struct MarkerControls: View {
     var isLabelled: Bool
     var primaryTitle: String
+    var isPrimaryDestructive: Bool
     var onPrevious: () -> Void
     var onPrimary: () -> Void
     var onNext: () -> Void
@@ -332,11 +336,21 @@ struct MarkerControls: View {
             }
             .disabled(isLabelled)
 
-            Button(primaryTitle) {
-                onPrimary()
+            if isPrimaryDestructive {
+                Button(role: .destructive) {
+                    onPrimary()
+                } label: {
+                    Text(primaryTitle)
+                }
+                .disabled(isLabelled)
+            } else {
+                Button {
+                    onPrimary()
+                } label: {
+                    Text(primaryTitle)
+                }
+                .disabled(isLabelled)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isLabelled)
 
             Button(action: onNext) {
                 Image(systemName: "forward.end.alt")
