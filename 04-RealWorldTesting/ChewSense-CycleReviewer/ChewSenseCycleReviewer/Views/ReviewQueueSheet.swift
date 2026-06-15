@@ -16,6 +16,7 @@ struct ReviewQueuePanel: View {
     /// Show only unverified chews when true.
     @State private var unverifiedOnly: Bool = true
     @State private var showList: Bool = false
+    @State private var biteIndex: Int = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,10 @@ struct ReviewQueuePanel: View {
                 VStack(alignment: .leading, spacing: 12) {
                     progressBar
                     detailPane
+                    Divider()
+                    biteReviewPane
+                    Divider()
+                    finalPassPane
                     if showList {
                         Divider()
                         queueList.frame(minHeight: 180, maxHeight: 260)
@@ -162,7 +167,7 @@ struct ReviewQueuePanel: View {
 
     private var progressBar: some View {
         HStack(spacing: 8) {
-            Text("\(queueIndex + 1) of \(queue.count)")
+            Text(queue.isEmpty ? "0 of 0" : "\(queueIndex + 1) of \(queue.count)")
                 .font(.system(.callout, design: .monospaced).monospacedDigit())
             ProgressView(value: Double(queueIndex + 1), total: Double(max(1, queue.count)))
         }
@@ -215,11 +220,20 @@ struct ReviewQueuePanel: View {
                 }
                 next()
             } label: {
-                Label(currentVerified ? "Unverify ›" : "Verify ›", systemImage: "checkmark.seal.fill")
+                Label(currentVerified ? "Unaccept ›" : "Accept ›", systemImage: "checkmark.seal.fill")
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
             .help("Verify and advance (V)")
+
+            Button(role: .destructive) {
+                guard currentChew != nil else { return }
+                state.deleteSelectedOrAt(videoTime: playback.currentTime)
+                rebuildQueue(reset: false)
+            } label: {
+                Label("Reject", systemImage: "xmark.circle.fill")
+            }
+            .buttonStyle(.bordered)
         }
     }
 
@@ -305,8 +319,10 @@ struct ReviewQueuePanel: View {
         guard let chew = currentChew else { return }
         state.selectChew(id: chew.id)
         viewport.focus(on: chew, duration: max(playback.duration, 1))
-        playback.setLoop(start: chew.startTS, end: chew.endTS, enabled: false)
-        playback.seek(to: chew.startTS)
+        let context = max(state.loopPadding, 5.0 / max(state.chewCycles?.fps ?? 30.0, 1.0))
+        let start = max(0, chew.startTS - context)
+        let end = clampedPlaybackEnd(chew.endTS + context)
+        playback.playRange(start: start, end: end, loop: true)
     }
 
     private func playOrPauseCurrentChewFromStart() {
@@ -319,8 +335,133 @@ struct ReviewQueuePanel: View {
             return
         }
         state.selectChew(id: chew.id)
-        playback.setLoop(start: chew.startTS, end: chew.endTS, enabled: false)
-        playback.seek(to: chew.startTS)
+        let context = max(state.loopPadding, 5.0 / max(state.chewCycles?.fps ?? 30.0, 1.0))
+        let start = max(0, chew.startTS - context)
+        let end = clampedPlaybackEnd(chew.endTS + context)
+        playback.setLoop(start: start, end: end, enabled: true)
+        playback.seek(to: start)
         playback.play()
+    }
+
+    @ViewBuilder
+    private var biteReviewPane: some View {
+        if let bite = currentBite {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Food-entry event").font(.headline)
+                    Spacer()
+                    Text("\(biteIndex + 1) / \(state.bites.count)")
+                        .font(.caption.monospacedDigit())
+                }
+                Text("\(bite.id) at \(String(format: "%.3fs", bite.ts))")
+                    .font(.system(.caption, design: .monospaced))
+                HStack {
+                    Button { previousBite() } label: { Image(systemName: "arrow.left") }
+                        .disabled(biteIndex == 0)
+                    Button { cueCurrentBite() } label: { Label("Replay", systemImage: "play.fill") }
+                    Button { state.moveBite(id: bite.id, to: playback.currentTime) } label: {
+                        Label("Move here", systemImage: "scope")
+                    }
+                    Spacer()
+                    Button(role: .destructive) {
+                        state.rejectBite(id: bite.id)
+                        normalizeBiteIndex()
+                        cueCurrentBite()
+                    } label: {
+                        Label("Reject", systemImage: "xmark.circle")
+                    }
+                    Button {
+                        state.acceptBite(id: bite.id)
+                        nextBite()
+                    } label: {
+                        Label(
+                            state.isBiteVerified(id: bite.id) ? "Accepted" : "Accept",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                }
+                Button {
+                    state.addBite(at: playback.currentTime)
+                    biteIndex = max(0, state.bites.count - 1)
+                } label: {
+                    Label("Add missed bite at playhead", systemImage: "plus.circle")
+                }
+                .buttonStyle(.link)
+            }
+            .padding(10)
+            .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Food-entry events").font(.headline)
+                Text("No predicted bites. Use the full-video pass to add any missed events.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button {
+                    state.addBite(at: playback.currentTime)
+                    biteIndex = max(0, state.bites.count - 1)
+                } label: {
+                    Label("Add bite at playhead", systemImage: "plus.circle")
+                }
+            }
+        }
+    }
+
+    private var finalPassPane: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Final full-video pass").font(.headline)
+            Text(state.completionStatus)
+                .font(.caption)
+                .foregroundStyle(state.canFinalizeReview ? .green : .secondary)
+            HStack {
+                Button {
+                    playback.clearLoop()
+                    playback.seekToStart()
+                    playback.play()
+                } label: {
+                    Label("Watch full video", systemImage: "film")
+                }
+                Toggle(
+                    "Pass complete",
+                    isOn: Binding(
+                        get: { state.overrides.fullVideoPassCompleted },
+                        set: { _ in state.toggleFullVideoPassCompleted() }
+                    )
+                )
+                .toggleStyle(.checkbox)
+            }
+        }
+    }
+
+    private var currentBite: ReviewBite? {
+        state.bites.indices.contains(biteIndex) ? state.bites[biteIndex] : nil
+    }
+
+    private func normalizeBiteIndex() {
+        biteIndex = min(biteIndex, max(0, state.bites.count - 1))
+    }
+
+    private func cueCurrentBite() {
+        guard let bite = currentBite else { return }
+        state.selectBite(id: bite.id)
+        playback.playRange(
+            start: max(0, bite.ts - 1.0),
+            end: clampedPlaybackEnd(bite.ts + 1.0),
+            loop: true
+        )
+    }
+
+    private func nextBite() {
+        if biteIndex < state.bites.count - 1 { biteIndex += 1 }
+        cueCurrentBite()
+    }
+
+    private func previousBite() {
+        if biteIndex > 0 { biteIndex -= 1 }
+        cueCurrentBite()
+    }
+
+    private func clampedPlaybackEnd(_ requested: Double) -> Double {
+        playback.duration > 0 ? min(playback.duration, requested) : requested
     }
 }

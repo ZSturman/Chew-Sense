@@ -17,9 +17,11 @@ final class ReviewerState: ObservableObject {
 
     // MARK: Working chews + selection
     @Published private(set) var chews: [ReviewChew] = []
+    @Published private(set) var bites: [ReviewBite] = []
     @Published private(set) var eatingSegments: [EatingSegment] = []
     @Published private(set) var framePredictions: [FramePrediction] = []
     @Published var selectedChewID: String?
+    @Published var selectedBiteID: String?
     @Published var lastTouchedMarker: ChewMarker = .start
 
     // MARK: Playback-coupled state
@@ -74,6 +76,7 @@ final class ReviewerState: ObservableObject {
             overrides = OverridePersistence.loadIfPresent(session.overridesURL)
                 ?? .empty(sessionID: session.id)
             selectedChewID = nil
+            selectedBiteID = nil
             undoStack.removeAll()
             redoStack.removeAll()
             isDirty = false
@@ -92,6 +95,7 @@ final class ReviewerState: ObservableObject {
             alignedRows = []
             chewCycles = nil
             chews = []
+            bites = []
             eatingSegments = []
             framePredictions = []
             selectedChewID = nil
@@ -127,9 +131,29 @@ final class ReviewerState: ObservableObject {
     }
 
     func toggleVerified() {
+        if overrides.verified {
+            pushUndo()
+            overrides.verified = false
+            isDirty = true
+            return
+        }
+        guard canFinalizeReview else {
+            statusMessage = completionStatus
+            return
+        }
         pushUndo()
-        overrides.verified.toggle()
+        overrides.verified = true
         isDirty = true
+    }
+
+    func toggleFullVideoPassCompleted() {
+        pushUndo()
+        overrides.fullVideoPassCompleted.toggle()
+        overrides.verified = false
+        isDirty = true
+        statusMessage = overrides.fullVideoPassCompleted
+            ? "Full-video pass completed"
+            : "Full-video pass reopened"
     }
 
     // MARK: - Selection
@@ -146,6 +170,7 @@ final class ReviewerState: ObservableObject {
 
     func selectChew(id: String?) {
         selectedChewID = id
+        if id != nil { selectedBiteID = nil }
     }
 
     @discardableResult
@@ -199,6 +224,7 @@ final class ReviewerState: ObservableObject {
             return
         }
         pushUndo()
+        invalidateFinalVerification()
         let edit = ReviewOverrides.ChewEdit(
             id: nextManualChewID(),
             startTS: max(0, start),
@@ -223,6 +249,7 @@ final class ReviewerState: ObservableObject {
     func updateMarker(chewID: String, marker: ChewMarker, to time: Double, recordUndo: Bool = true) -> ReviewChew? {
         guard let chew = chews.first(where: { $0.id == chewID }) else { return nil }
         if recordUndo { pushUndo() }
+        invalidateFinalVerification()
         let clamped = clampMarker(chew: chew, marker: marker, proposed: time)
         let updated = chewWithUpdatedMarker(chew, marker: marker, time: clamped)
         applyChewEdit(updated)
@@ -246,6 +273,7 @@ final class ReviewerState: ObservableObject {
         let target = selectedChew ?? chews.first { $0.contains(videoTime) }
         guard let chew = target else { return }
         pushUndo()
+        invalidateFinalVerification()
         switch chew.source {
         case .added:
             overrides.addedChews.removeAll { $0.id == chew.id }
@@ -269,6 +297,7 @@ final class ReviewerState: ObservableObject {
             return
         }
         pushUndo()
+        invalidateFinalVerification()
         overrides.editedChews.removeAll { $0.id == id }
         overrides.deletedChewIDs.removeAll { $0 == id }
         rebuildPreview()
@@ -380,10 +409,45 @@ final class ReviewerState: ObservableObject {
     private func rebuildPreview() {
         alignedRows = OverrideApplier.apply(overrides, to: baseRows)
         chews = buildChews()
+        bites = buildBites()
         eatingSegments = Self.buildEatingSegments(from: alignedRows)
         if let sel = selectedChewID, !chews.contains(where: { $0.id == sel }) {
             selectedChewID = nil
         }
+    }
+
+    private func buildBites() -> [ReviewBite] {
+        var byID: [String: ReviewBite] = [:]
+        if let chewCycles {
+            for episode in chewCycles.episodes {
+                for bite in episode.bites {
+                    byID[bite.id] = ReviewBite(
+                        id: bite.id,
+                        ts: bite.ts,
+                        confidence: bite.confidence,
+                        source: .auto
+                    )
+                }
+            }
+        }
+        for id in overrides.deletedBiteIDs { byID.removeValue(forKey: id) }
+        for edit in overrides.editedBites {
+            byID[edit.id] = ReviewBite(
+                id: edit.id,
+                ts: edit.ts,
+                confidence: edit.confidence,
+                source: .edited
+            )
+        }
+        for edit in overrides.addedBites {
+            byID[edit.id] = ReviewBite(
+                id: edit.id,
+                ts: edit.ts,
+                confidence: edit.confidence,
+                source: .added
+            )
+        }
+        return byID.values.sorted { $0.ts < $1.ts }
     }
 
     private func buildChews() -> [ReviewChew] {
@@ -472,9 +536,24 @@ final class ReviewerState: ObservableObject {
     }
 
     var verifiedCount: Int { overrides.verifiedChewIDs.count }
+    var verifiedBiteCount: Int { overrides.verifiedBiteIDs.count }
 
     func isVerified(id: String) -> Bool {
         overrides.verifiedChewIDs.contains(id)
+    }
+
+    func isBiteVerified(id: String) -> Bool {
+        overrides.verifiedBiteIDs.contains(id)
+    }
+
+    var selectedBite: ReviewBite? {
+        guard let id = selectedBiteID else { return nil }
+        return bites.first { $0.id == id }
+    }
+
+    func selectBite(id: String?) {
+        selectedBiteID = id
+        if id != nil { selectedChewID = nil }
     }
 
     // MARK: - Verify workflow
@@ -489,6 +568,103 @@ final class ReviewerState: ObservableObject {
             statusMessage = "Verified \(id)"
         }
         isDirty = true
+    }
+
+    func acceptBite(id: String) {
+        guard !overrides.verifiedBiteIDs.contains(id) else { return }
+        pushUndo()
+        overrides.verifiedBiteIDs.append(id)
+        isDirty = true
+        statusMessage = "Accepted \(id)"
+    }
+
+    func addBite(at time: Double) {
+        pushUndo()
+        invalidateFinalVerification()
+        let id = nextManualBiteID()
+        overrides.addedBites.append(.init(id: id, ts: max(0, time), confidence: 1.0))
+        rebuildPreview()
+        selectedBiteID = id
+        isDirty = true
+        statusMessage = "Added \(id)"
+    }
+
+    func moveBite(id: String, to time: Double) {
+        guard let bite = bites.first(where: { $0.id == id }) else { return }
+        pushUndo()
+        invalidateFinalVerification()
+        let edit = ReviewOverrides.BiteEdit(
+            id: id,
+            ts: max(0, time),
+            confidence: bite.confidence
+        )
+        overrides.verifiedBiteIDs.removeAll { $0 == id }
+        switch bite.source {
+        case .added:
+            if let index = overrides.addedBites.firstIndex(where: { $0.id == id }) {
+                overrides.addedBites[index] = edit
+            }
+        case .auto, .edited:
+            overrides.editedBites.removeAll { $0.id == id }
+            overrides.editedBites.append(edit)
+        }
+        rebuildPreview()
+        selectedBiteID = id
+        isDirty = true
+    }
+
+    func rejectBite(id: String) {
+        guard let bite = bites.first(where: { $0.id == id }) else { return }
+        pushUndo()
+        invalidateFinalVerification()
+        switch bite.source {
+        case .added:
+            overrides.addedBites.removeAll { $0.id == id }
+        case .auto, .edited:
+            overrides.editedBites.removeAll { $0.id == id }
+            if !overrides.deletedBiteIDs.contains(id) {
+                overrides.deletedBiteIDs.append(id)
+            }
+        }
+        overrides.verifiedBiteIDs.removeAll { $0 == id }
+        rebuildPreview()
+        selectedBiteID = nil
+        isDirty = true
+        statusMessage = "Rejected \(id)"
+    }
+
+    private func nextManualBiteID() -> String {
+        let existing = Set(bites.map(\.id))
+        var index = overrides.addedBites.count
+        while true {
+            let candidate = String(format: "manual_bite_%04d", index)
+            if !existing.contains(candidate) { return candidate }
+            index += 1
+        }
+    }
+
+    private func invalidateFinalVerification() {
+        overrides.verified = false
+        overrides.fullVideoPassCompleted = false
+    }
+
+    var canFinalizeReview: Bool {
+        let allChewsAccepted = Set(chews.map(\.id)).isSubset(
+            of: Set(overrides.verifiedChewIDs)
+        )
+        let allBitesAccepted = Set(bites.map(\.id)).isSubset(
+            of: Set(overrides.verifiedBiteIDs)
+        )
+        return allChewsAccepted && allBitesAccepted && overrides.fullVideoPassCompleted
+    }
+
+    var completionStatus: String {
+        let chewRemaining = max(0, chews.count - verifiedCount)
+        let biteRemaining = max(0, bites.count - verifiedBiteCount)
+        if chewRemaining > 0 { return "Review \(chewRemaining) remaining chew(s)" }
+        if biteRemaining > 0 { return "Review \(biteRemaining) remaining bite event(s)" }
+        if !overrides.fullVideoPassCompleted { return "Complete the final full-video pass" }
+        return "Ready to verify"
     }
 
     /// Mark the selected chew verified (idempotent) and advance to the next

@@ -61,6 +61,11 @@ struct ChewStripView: View {
                         .allowsHitTesting(false)
                 }
 
+                ForEach(state.bites) { bite in
+                    biteMarker(bite, range: range, span: span, width: width)
+                        .allowsHitTesting(false)
+                }
+
                 if case let .create(s, c) = activeDrag {
                     let lo = min(s, c), hi = max(s, c)
                     Rectangle()
@@ -248,11 +253,39 @@ struct ChewStripView: View {
         state.chews.first { $0.contains(t) }
     }
 
+    private func bite(near t: Double) -> ReviewBite? {
+        state.bites.min(by: { abs($0.ts - t) < abs($1.ts - t) }).flatMap {
+            abs($0.ts - t) <= 0.10 ? $0 : nil
+        }
+    }
+
+    private func biteMarker(
+        _ bite: ReviewBite,
+        range: ClosedRange<Double>,
+        span: Double,
+        width: CGFloat
+    ) -> some View {
+        let x = xFor(bite.ts, range: range, span: span, width: width)
+        let selected = state.selectedBiteID == bite.id
+        return VStack(spacing: 0) {
+            Circle()
+                .fill(state.isBiteVerified(id: bite.id) ? Color.green : Color.purple)
+                .frame(width: selected ? 10 : 7, height: selected ? 10 : 7)
+            Rectangle()
+                .fill(Color.purple)
+                .frame(width: selected ? 2 : 1, height: 55)
+        }
+        .offset(x: x - 4, y: 2)
+    }
+
     // MARK: - Tap
 
     private func handleTap(at loc: CGPoint, width: CGFloat, range: ClosedRange<Double>, span: Double) {
         let t = tFor(loc.x, range: range, span: span, width: width)
-        if let chew = chew(at: t) {
+        if let bite = bite(near: t) {
+            state.selectBite(id: bite.id)
+            playback.seek(to: bite.ts)
+        } else if let chew = chew(at: t) {
             // Cycle-selected state: select chew and seek to its start so the
             // user can hit Space to play just this cycle. Never auto-play.
             state.selectChew(id: chew.id)

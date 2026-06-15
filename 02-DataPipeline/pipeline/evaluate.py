@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from .config import PipelineConfig
-from .train import ChewNet
+from .train import ChewNet, TwoHeadChewNet
 from .splits import indices_for_split
 
 try:
@@ -71,11 +71,17 @@ def evaluate_model(
     num_outputs = ckpt.get("num_outputs", 1)
     mode = ckpt.get("mode", "binary")
     
-    model = ChewNet(
-        input_dim=ckpt["input_dim"],
-        hidden_dim=ckpt["hidden_dim"],
-        num_outputs=num_outputs,
-    )
+    if mode == "two_head":
+        model = TwoHeadChewNet(
+            input_dim=ckpt["input_dim"],
+            hidden_dim=ckpt["hidden_dim"],
+        )
+    else:
+        model = ChewNet(
+            input_dim=ckpt["input_dim"],
+            hidden_dim=ckpt["hidden_dim"],
+            num_outputs=num_outputs,
+        )
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     
@@ -107,6 +113,8 @@ def evaluate_model(
     
     if mode == "mouth_shape" and num_outputs > 1:
         metrics = _evaluate_regression(y, output, ckpt)
+    elif mode == "two_head":
+        metrics = _evaluate_two_head(y, output, config)
     else:
         metrics = _evaluate_binary(y, output, config)
     metrics["split"] = split_name
@@ -129,7 +137,11 @@ def evaluate_model(
                     ], dtype=bool)
                     if not mask.any():
                         continue
-                    sub_metrics = _evaluate_binary(y[mask], output[mask], config)
+                    sub_metrics = (
+                        _evaluate_two_head(y[mask], output[mask], config)
+                        if mode == "two_head"
+                        else _evaluate_binary(y[mask], output[mask], config)
+                    )
                     sub_metrics.pop("confusion_matrix", None)
                     per_act[activity] = sub_metrics
                 if per_act:
@@ -140,6 +152,36 @@ def evaluate_model(
     return metrics
 
 
+def _evaluate_two_head(
+    target: np.ndarray,
+    output: np.ndarray,
+    config: PipelineConfig,
+) -> dict[str, Any]:
+    metrics = _evaluate_binary(target[:, 0], output[:, 0], config)
+    valid = (
+        target[:, 3] >= 0.5
+        if target.shape[1] >= 4
+        else target[:, 0] >= config.evaluation.chew_threshold
+    )
+    if valid.any():
+        delta = output[valid, 1:3] - target[valid, 1:3]
+        phase_mse = float(np.mean(delta ** 2))
+        pred_angle = np.arctan2(output[valid, 1], output[valid, 2])
+        target_angle = np.arctan2(target[valid, 1], target[valid, 2])
+        angular_error = np.angle(np.exp(1j * (pred_angle - target_angle)))
+        phase_mae_radians = float(np.mean(np.abs(angular_error)))
+    else:
+        phase_mse = float("nan")
+        phase_mae_radians = float("nan")
+    metrics.update({
+        "mode": "two_head",
+        "phase_mse": phase_mse,
+        "phase_mae_radians": phase_mae_radians,
+        "phase_valid_windows": int(valid.sum()),
+    })
+    return metrics
+
+
 def _evaluate_binary(
     y_soft: np.ndarray,
     logits: np.ndarray,
@@ -147,17 +189,25 @@ def _evaluate_binary(
 ) -> dict[str, Any]:
     """Evaluate binary chewing classification."""
     ec = config.evaluation
-    y = (y_soft >= ec.chew_threshold).astype(np.int32)
+    y = (y_soft >= ec.chew_threshold).astype(np.int32).reshape(-1)
     
-    probs = 1.0 / (1.0 + np.exp(-logits))  # sigmoid
+    probs = (1.0 / (1.0 + np.exp(-logits))).reshape(-1)  # sigmoid
     preds = (probs >= ec.pred_threshold).astype(np.int32)
     
     acc = accuracy_score(y, preds)
-    auc = roc_auc_score(y, probs)
+    try:
+        auc = roc_auc_score(y, probs)
+    except ValueError:
+        auc = float("nan")
     prec = precision_score(y, preds, zero_division=0)
     rec = recall_score(y, preds, zero_division=0)
     f1 = f1_score(y, preds, zero_division=0)
-    cm = confusion_matrix(y, preds)
+    cm = confusion_matrix(y, preds, labels=[0, 1])
+    tn, fp, fn, tp = [int(v) for v in cm.ravel()]
+    n_positive = int(y.sum())
+    n_negative = int(len(y) - y.sum())
+    false_positive_rate = (fp / n_negative) if n_negative else 0.0
+    false_negative_rate = (fn / n_positive) if n_positive else 0.0
     
     print("\nEVALUATION RESULTS (Binary Classification)")
     print("-------------------------------------------")
@@ -177,9 +227,15 @@ def _evaluate_binary(
         "recall": float(rec),
         "f1": float(f1),
         "confusion_matrix": cm.tolist(),
+        "true_negative": tn,
+        "false_positive": fp,
+        "false_negative": fn,
+        "true_positive": tp,
+        "false_positive_rate": float(false_positive_rate),
+        "false_negative_rate": float(false_negative_rate),
         "n_samples": len(y),
-        "n_positive": int(y.sum()),
-        "n_negative": int(len(y) - y.sum()),
+        "n_positive": n_positive,
+        "n_negative": n_negative,
     }
 
 

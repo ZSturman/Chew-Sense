@@ -56,6 +56,24 @@ features:
   window_sec: 0.75      # Sliding window duration in seconds
   step_sec: 0.10        # Step size between windows in seconds
   # Sampling rate is auto-detected from data
+  # extended_chew_phase: when true, feature targets become a 4-vector
+  # [eating_soft, chew_phase_sin_mean, chew_phase_cos_mean, phase_valid]
+  # so the two-head ChewNet can learn reviewed chew-cycle phase while
+  # retaining binary-only sessions for the eating head.
+  # Requires Stage 02b video-assisted labels to have been ingested.
+  extended_chew_phase: false
+
+# =============================================================================
+# TWO-HEAD CHEW PHASE LOSS PARAMETERS
+# =============================================================================
+# Active when features.extended_chew_phase is true. The training loop
+# dispatches to TwoHeadChewNet and a composite BCE + MSE loss.
+
+chew_phase_head:
+  enabled: false              # Master switch for the two-head training path
+  eating_weight: 1.0          # α — BCE term on the eating logit
+  phase_weight: 0.5           # β — MSE term on (sin, cos) phase outputs
+  mask_when_not_eating: true  # Skip phase loss on rows where eating_soft < 0.5
 
 # =============================================================================
 # SOFT LABEL GENERATION PARAMETERS
@@ -90,6 +108,67 @@ runtime:
   low_threshold: 0.4    # Probability threshold to END chewing episode
   min_start_windows: 3  # Consecutive windows above high_threshold to confirm start
   min_end_windows: 2    # Consecutive windows below low_threshold to confirm end
+
+# =============================================================================
+# CLOSED-LOOP COLLECTION RECOMMENDATIONS
+# =============================================================================
+# These targets drive the "what should I record next?" list produced after
+# field-test retraining and bundled into the RealWorldTesting app on deploy.
+
+collection:
+  max_recommendations: 5
+  high_error_rate: 0.35
+  moderate_error_rate: 0.15
+  coverage_min_minutes: 3
+  coverage_max_minutes: 8
+  high_error_minutes: 8
+  moderate_error_minutes: 6
+  targets:
+    - activity: eating_soft
+      activity_label: Eating soft food
+      expected_label_class: positive
+      target_minutes: 8
+      aliases: [eating]
+    - activity: eating_hard
+      activity_label: Eating hard food
+      expected_label_class: positive
+      target_minutes: 8
+      aliases: []
+    - activity: drinking_water
+      activity_label: Drinking water
+      expected_label_class: negative
+      target_minutes: 6
+      aliases: [drinking]
+    - activity: not_eating
+      activity_label: Not eating / baseline
+      expected_label_class: negative
+      target_minutes: 6
+      aliases: [baseline, not-eating, noteating]
+    - activity: walking
+      activity_label: Walking
+      expected_label_class: negative
+      target_minutes: 6
+      aliases: []
+    - activity: head_shake
+      activity_label: Shaking head
+      expected_label_class: negative
+      target_minutes: 6
+      aliases: []
+    - activity: nodding
+      activity_label: Nodding
+      expected_label_class: negative
+      target_minutes: 6
+      aliases: []
+    - activity: talking
+      activity_label: Talking
+      expected_label_class: mixed
+      target_minutes: 6
+      aliases: []
+    - activity: singing
+      activity_label: Singing
+      expected_label_class: mixed
+      target_minutes: 6
+      aliases: []
 
 # =============================================================================
 # MOUTH SHAPE ESTIMATION

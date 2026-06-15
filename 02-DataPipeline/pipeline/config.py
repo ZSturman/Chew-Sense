@@ -52,6 +52,26 @@ class TrainingConfig:
 class FeaturesConfig:
     window_sec: float = 0.75
     step_sec: float = 0.10
+    # Phase 5: when True and chew_phase_sin/cos columns are present in the
+    # transformed CSV, the feature extractor emits an extra 2-D regression
+    # target (per-window mean sin / cos), enabling a two-head ChewNet.
+    extended_chew_phase: bool = False
+
+
+@dataclass
+class ChewPhaseHeadConfig:
+    """Two-head ChewNet configuration (Phase 5).
+
+    The chew-phase head is a 2-D regression target ``[sinθ, cosθ]`` aggregated
+    over each feature window. It is jointly trained with the existing eating
+    head via a composite loss ``α · BCE + β · MSE``.
+    """
+    enabled: bool = False
+    eating_weight: float = 1.0   # α — weight on the BCE eating head
+    phase_weight: float = 0.5    # β — weight on the MSE chew-phase head
+    # Only count phase loss on windows where the labeller marks eating
+    # (so silent windows don't drag the regression toward zero).
+    mask_when_not_eating: bool = True
 
 
 @dataclass
@@ -75,6 +95,36 @@ class RuntimeConfig:
     low_threshold: float = 0.4
     min_start_windows: int = 3
     min_end_windows: int = 2
+
+    # Chew-stroke / bite segmentation (mirrors BiteDetectorConfig defaults).
+    min_chew_period_sec: float = 0.35  # min seconds between two chew strokes
+    min_gap_sec: float = 1.5           # gap below which two episodes merge
+    min_bite_duration_sec: float = 1.0 # drop episodes shorter than this
+    rushed_chews_per_bite: int = 5     # below this, bite is "rushed"
+    bite_rate_window_sec: float = 300.0  # 5-min rolling window
+
+
+@dataclass
+class CollectionTargetConfig:
+    """Target coverage for one RealWorldTesting activity preset."""
+    activity: str
+    activity_label: str
+    expected_label_class: str
+    target_minutes: float
+    aliases: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CollectionConfig:
+    """Heuristic active-learning recommendation settings."""
+    max_recommendations: int = 5
+    high_error_rate: float = 0.35
+    moderate_error_rate: float = 0.15
+    coverage_min_minutes: int = 3
+    coverage_max_minutes: int = 8
+    high_error_minutes: int = 8
+    moderate_error_minutes: int = 6
+    targets: list[CollectionTargetConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -105,7 +155,9 @@ class PipelineConfig:
     soft_labels: SoftLabelsConfig = field(default_factory=SoftLabelsConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    collection: CollectionConfig = field(default_factory=CollectionConfig)
     mouth_shape: MouthShapeConfig = field(default_factory=MouthShapeConfig)
+    chew_phase_head: ChewPhaseHeadConfig = field(default_factory=ChewPhaseHeadConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     
     # Paths (set at runtime)
@@ -142,6 +194,7 @@ class PipelineConfig:
             "features": {
                 "window_sec": self.features.window_sec,
                 "step_sec": self.features.step_sec,
+                "extended_chew_phase": self.features.extended_chew_phase,
             },
             "soft_labels": {
                 "transition_sec": self.soft_labels.transition_sec,
@@ -159,6 +212,25 @@ class PipelineConfig:
                 "min_start_windows": self.runtime.min_start_windows,
                 "min_end_windows": self.runtime.min_end_windows,
             },
+            "collection": {
+                "max_recommendations": self.collection.max_recommendations,
+                "high_error_rate": self.collection.high_error_rate,
+                "moderate_error_rate": self.collection.moderate_error_rate,
+                "coverage_min_minutes": self.collection.coverage_min_minutes,
+                "coverage_max_minutes": self.collection.coverage_max_minutes,
+                "high_error_minutes": self.collection.high_error_minutes,
+                "moderate_error_minutes": self.collection.moderate_error_minutes,
+                "targets": [
+                    {
+                        "activity": target.activity,
+                        "activity_label": target.activity_label,
+                        "expected_label_class": target.expected_label_class,
+                        "target_minutes": target.target_minutes,
+                        "aliases": target.aliases,
+                    }
+                    for target in self.collection.targets
+                ],
+            },
             "mouth_shape": {
                 "enabled": self.mouth_shape.enabled,
                 "parameters": self.mouth_shape.parameters,
@@ -166,6 +238,12 @@ class PipelineConfig:
                 "video_fps": self.mouth_shape.video_fps,
                 "interpolation": self.mouth_shape.interpolation,
                 "temporal_smooth_sigma": self.mouth_shape.temporal_smooth_sigma,
+            },
+            "chew_phase_head": {
+                "enabled": self.chew_phase_head.enabled,
+                "eating_weight": self.chew_phase_head.eating_weight,
+                "phase_weight": self.chew_phase_head.phase_weight,
+                "mask_when_not_eating": self.chew_phase_head.mask_when_not_eating,
             },
         }
 
@@ -204,6 +282,17 @@ def load_config(config_path: Optional[Path] = None) -> PipelineConfig:
     soft_labels = SoftLabelsConfig(**data.get("soft_labels", {}))
     evaluation = EvaluationConfig(**data.get("evaluation", {}))
     runtime = RuntimeConfig(**data.get("runtime", {}))
+    collection_data = data.get("collection", {})
+    collection_targets = [
+        CollectionTargetConfig(**target)
+        for target in collection_data.get("targets", [])
+    ]
+    collection_kwargs = {
+        k: v for k, v in collection_data.items()
+        if k != "targets"
+    }
+    collection = CollectionConfig(**collection_kwargs)
+    collection.targets = collection_targets
     wandb = WandbConfig(**data.get("wandb", {}))
 
     ms_data = data.get("mouth_shape", {})
@@ -222,13 +311,23 @@ def load_config(config_path: Optional[Path] = None) -> PipelineConfig:
         temporal_smooth_sigma=ms_data.get("temporal_smooth_sigma", 0.0),
     )
 
+    cph_data = data.get("chew_phase_head", {})
+    chew_phase_head = ChewPhaseHeadConfig(
+        enabled=cph_data.get("enabled", False),
+        eating_weight=cph_data.get("eating_weight", 1.0),
+        phase_weight=cph_data.get("phase_weight", 0.5),
+        mask_when_not_eating=cph_data.get("mask_when_not_eating", True),
+    )
+
     return PipelineConfig(
         training=training,
         features=features,
         soft_labels=soft_labels,
         evaluation=evaluation,
         runtime=runtime,
+        collection=collection,
         mouth_shape=mouth_shape,
+        chew_phase_head=chew_phase_head,
         wandb=wandb,
     )
 

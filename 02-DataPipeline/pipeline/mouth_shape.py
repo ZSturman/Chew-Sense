@@ -1,5 +1,8 @@
-"""
-Mouth shape extraction: Extract mouth shape parameters from video using MediaPipe.
+"""Legacy mouth-shape feature extractor.
+
+The production mouth-state and chew-cycle path is
+``02b-VideoAssistedLabeling``. Keep this module only for compatibility and
+fixture-level comparison while old datasets are migrated.
 
 Processes .mov files frame-by-frame to compute 4 continuous mouth shape
 parameters from face landmarks:
@@ -57,6 +60,14 @@ class MouthShapeFrame:
     mouth_width: float
     jaw_displacement: float
     lip_compression: float
+
+
+@dataclass
+class FacePresenceFrame:
+    """Per-frame face-detection flag, for face-presence track."""
+    frame_idx: int
+    timestamp_sec: float
+    face_present: bool
 
 
 def _landmark_dist(landmarks, idx_a: int, idx_b: int) -> float:
@@ -121,7 +132,8 @@ def extract_mouth_shape_from_video(
     max_faces: int = 1,
     min_detection_confidence: float = 0.5,
     min_tracking_confidence: float = 0.5,
-) -> list[MouthShapeFrame]:
+    return_presence: bool = False,
+):
     """
     Extract mouth shape parameters from every frame of a video.
 
@@ -130,10 +142,15 @@ def extract_mouth_shape_from_video(
         max_faces: Maximum number of faces to detect (uses first)
         min_detection_confidence: MediaPipe detection confidence threshold
         min_tracking_confidence: MediaPipe tracking confidence threshold
+        return_presence: When True, returns
+            (mouth_frames, presence_frames, fps) so the caller can build a
+            face-presence track in the same single pass through the video.
 
     Returns:
-        List of MouthShapeFrame, one per video frame with a detected face.
-        Frames where no face is detected are skipped.
+        By default, list of MouthShapeFrame, one per video frame with a
+        detected face. Frames where no face is detected are skipped.
+        When `return_presence=True`, returns
+        (list[MouthShapeFrame], list[FacePresenceFrame], fps).
     """
     if not MEDIAPIPE_AVAILABLE:
         raise RuntimeError(
@@ -162,6 +179,7 @@ def extract_mouth_shape_from_video(
     )
 
     results: list[MouthShapeFrame] = []
+    presence: list[FacePresenceFrame] = []
     frame_idx = 0
 
     try:
@@ -174,17 +192,26 @@ def extract_mouth_shape_from_video(
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_result = face_mesh.process(rgb)
 
-            if mp_result.multi_face_landmarks:
+            ts = frame_idx / fps
+            face_present = bool(mp_result.multi_face_landmarks)
+            if face_present:
                 landmarks = mp_result.multi_face_landmarks[0].landmark
                 openness, width, jaw, compression = _compute_mouth_params(landmarks)
 
                 results.append(MouthShapeFrame(
                     frame_idx=frame_idx,
-                    timestamp_sec=frame_idx / fps,
+                    timestamp_sec=ts,
                     mouth_openness=openness,
                     mouth_width=width,
                     jaw_displacement=jaw,
                     lip_compression=compression,
+                ))
+
+            if return_presence:
+                presence.append(FacePresenceFrame(
+                    frame_idx=frame_idx,
+                    timestamp_sec=ts,
+                    face_present=face_present,
                 ))
 
             frame_idx += 1
@@ -193,6 +220,8 @@ def extract_mouth_shape_from_video(
         face_mesh.close()
 
     print(f"  Extracted {len(results)} / {frame_idx} frames with face detected")
+    if return_presence:
+        return results, presence, fps
     return results
 
 
@@ -238,3 +267,73 @@ def extract_and_save(
     df.to_csv(output_csv, index=False)
     print(f"  Saved: {output_csv} ({len(df)} rows)")
     return output_csv
+
+
+# ----------------------------------------------------------------------
+# Face-presence track
+# ----------------------------------------------------------------------
+
+def presence_frames_to_intervals(
+    presence: list[FacePresenceFrame],
+    fps: float,
+    smoothing_frames: int = 3,
+) -> list[dict]:
+    """
+    Collapse a per-frame face-presence flag into time intervals.
+
+    Short flips (< smoothing_frames consecutive frames) are absorbed into
+    the surrounding state so brief MediaPipe drop-outs don't create
+    spurious "face missing" bands in the review UI.
+    """
+    if not presence:
+        return []
+
+    flags = [p.face_present for p in presence]
+
+    # Smooth: any run shorter than `smoothing_frames` adopts its neighbours.
+    if smoothing_frames > 1 and len(flags) > smoothing_frames:
+        smoothed = list(flags)
+        run_start = 0
+        for i in range(1, len(smoothed) + 1):
+            if i == len(smoothed) or smoothed[i] != smoothed[run_start]:
+                run_len = i - run_start
+                if run_len < smoothing_frames and run_start > 0 and i < len(smoothed):
+                    fill = smoothed[run_start - 1]
+                    for j in range(run_start, i):
+                        smoothed[j] = fill
+                run_start = i
+        flags = smoothed
+
+    intervals: list[dict] = []
+    run_start = 0
+    for i in range(1, len(flags) + 1):
+        if i == len(flags) or flags[i] != flags[run_start]:
+            start_t = presence[run_start].timestamp_sec
+            end_t = presence[i - 1].timestamp_sec + (1.0 / fps if fps > 0 else 0.0)
+            intervals.append({
+                "start": float(start_t),
+                "end": float(end_t),
+                "present": bool(flags[run_start]),
+            })
+            run_start = i
+    return intervals
+
+
+def write_face_presence_json(
+    bundle_dir: Path,
+    presence: list[FacePresenceFrame],
+    fps: float,
+    smoothing_frames: int = 3,
+) -> Path:
+    """Write `face_presence.json` consumed by both the review UI and
+    the pipeline's training/eval masking layer."""
+    import json
+    bundle_dir = Path(bundle_dir)
+    intervals = presence_frames_to_intervals(presence, fps, smoothing_frames=smoothing_frames)
+    payload = {
+        "frame_rate": float(fps),
+        "intervals": intervals,
+    }
+    out = bundle_dir / "face_presence.json"
+    out.write_text(json.dumps(payload, indent=2))
+    return out

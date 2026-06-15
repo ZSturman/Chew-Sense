@@ -4,9 +4,23 @@
 
 This stage aggregates individual bites into **meal-level episodes** and analyzes eating patterns across the entire meal, including pace, consistency, and temporal structure.
 
-## Status: 📋 TODO - Not Yet Implemented
+## Status: ✅ Phase 6 shipped (2026-05-13)
 
-This stage depends on bite segmentation (Stage 02) being completed first.
+`meal_analyzer.py` implements `MealAnalyzer.analyze_meal(bites) → MealMetrics` and
+`detect_phases(bites) → [MealPhase]`. Wired into the dataset CLI:
+
+```bash
+# From a field-test bundle (runs bite detection automatically):
+python 02-DataPipeline/main_new.py meal-report \
+    --bundle 02-DataPipeline/data/user/field_tests/<session>
+
+# Or from a precomputed bite_events.csv:
+python 02-DataPipeline/main_new.py meal-report \
+    --bites <path>/bite_events.csv
+```
+
+Outputs land in `03-ModelEvaluation/reports/meals/<session>.{json,md}`.
+Tests: `02-DataPipeline/tests/test_meal_analyzer.py` (6 synthetic-bite cases).
 
 ## Motivation
 

@@ -15,7 +15,26 @@ enum OverridePersistence {
         let data = try encoder.encode(overrides)
         try data.write(to: session.overridesURL, options: .atomic)
 
+        let annotations = session.rawDir.appending(path: "annotations")
+        try fm.createDirectory(at: annotations, withIntermediateDirectories: true)
+        let revisionURL = nextRevisionURL(in: annotations)
+        try data.write(to: revisionURL, options: .atomic)
+
         try CSVLoader.writeAlignedLabels(mergedRows, to: session.alignedCSV)
+    }
+
+    private static func nextRevisionURL(in directory: URL) -> URL {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        let revisions = entries.compactMap { url -> Int? in
+            let stem = url.deletingPathExtension().lastPathComponent
+            guard stem.hasPrefix("review-overrides-v") else { return nil }
+            return Int(stem.replacingOccurrences(of: "review-overrides-v", with: ""))
+        }
+        let next = (revisions.max() ?? 0) + 1
+        return directory.appending(path: String(format: "review-overrides-v%04d.json", next))
     }
 
     static func loadIfPresent(_ url: URL) -> ReviewOverrides? {

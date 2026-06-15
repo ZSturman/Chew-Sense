@@ -253,7 +253,14 @@ def extract_features_from_csv(
         and mouth_shape_config.enabled
         and all(col in df.columns for col in mouth_shape_config.parameters)
     )
-    
+    # Two-head targets are always shape-compatible across sessions. Sessions
+    # without reviewed phase labels contribute to the eating head only via a
+    # zero phase-valid mask.
+    use_chew_phase = bool(getattr(config, "extended_chew_phase", False))
+    has_phase_targets = (
+        "chew_phase_sin" in df.columns and "chew_phase_cos" in df.columns
+    )
+
     X_list = []
     y_list = []
     
@@ -268,6 +275,27 @@ def extract_features_from_csv(
             # Multi-output: average each mouth shape param over window
             label_vec = [window[col].mean() for col in mouth_shape_config.parameters]
             y_list.append(label_vec)
+        elif use_chew_phase:
+            phase_valid = (
+                window["phase_label_valid"].astype(float)
+                if "phase_label_valid" in window.columns
+                else (
+                    window["label_valid"].astype(float)
+                    if has_phase_targets and "label_valid" in window.columns
+                    else pd.Series(
+                        np.ones(len(window)) if has_phase_targets else np.zeros(len(window)),
+                        index=window.index,
+                    )
+                )
+            )
+            # The fourth target is a training-only mask; model output remains
+            # [eating_logit, phase_sin, phase_cos].
+            y_list.append([
+                float(window[label_col].mean()),
+                float(window["chew_phase_sin"].mean()) if has_phase_targets else 0.0,
+                float(window["chew_phase_cos"].mean()) if has_phase_targets else 0.0,
+                float(phase_valid.mean()),
+            ])
         else:
             y_list.append(window[label_col].mean())
     

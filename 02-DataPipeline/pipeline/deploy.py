@@ -20,6 +20,7 @@ from .export import (
     compute_mlpackage_sha256,
     export_coreml,
     export_normalization_json,
+    generate_swift_collection_recommendations,
     generate_swift_constants,
 )
 
@@ -39,23 +40,25 @@ def _check_export_env() -> dict:
 
     Returns a dict with the resolved versions for logging. Does not exit; the
     caller decides whether to proceed.
+
+    NOTE: Uses importlib.metadata instead of direct imports to avoid loading
+    native extensions (torch, coremltools) in the main process before
+    subprocess.run is called.  Importing coremltools initialises native libs
+    that are not fork-safe; the fork inside subprocess.run then triggers a
+    SIGSEGV in the parent process on macOS arm64 with certain torch/coremltools
+    version combinations.
     """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
     info = {"python": sys.version.split()[0]}
-    try:
-        import torch  # type: ignore
-        info["torch"] = torch.__version__
-    except Exception as exc:  # pragma: no cover - torch is required elsewhere
-        info["torch"] = f"missing ({exc})"
-    try:
-        import coremltools as ct  # type: ignore
-        info["coremltools"] = ct.__version__
-    except Exception as exc:
-        info["coremltools"] = f"missing ({exc})"
-    try:
-        import numpy as np  # type: ignore
-        info["numpy"] = np.__version__
-    except Exception as exc:
-        info["numpy"] = f"missing ({exc})"
+    for pkg, key in (("torch", "torch"), ("coremltools", "coremltools"), ("numpy", "numpy")):
+        try:
+            info[key] = _pkg_version(pkg)
+        except PackageNotFoundError:
+            info[key] = "not installed"
+        except Exception as exc:
+            info[key] = f"unknown ({exc})"
 
     print("\n🔧 Export environment:")
     for key in ("python", "torch", "coremltools", "numpy"):
@@ -184,6 +187,21 @@ def _latest_registry_metadata(repo_root: Path) -> dict:
         return {}
 
 
+def _latest_registry_file(repo_root: Path, filename: str) -> Path | None:
+    """Return `filename` from the newest registry entry that contains it."""
+    runs_root = Path(repo_root) / "02-DataPipeline" / "model_registry" / "runs"
+    if not runs_root.exists():
+        return None
+    candidates = [
+        p for p in runs_root.iterdir()
+        if p.is_dir() and (p / filename).exists()
+    ]
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda p: (p / filename).stat().st_mtime)
+    return latest / filename
+
+
 def deploy_to_app(
     model_path: Path,
     repo_root: Path,
@@ -214,6 +232,16 @@ def deploy_to_app(
     """
     model_path = Path(model_path)
     repo_root = Path(repo_root)
+
+    # Lab-only safeguard: the visual auto-labeler in
+    # `pipeline/visual_labeler.py` is a dataset tool that must never be
+    # bundled into the shipped app. Refuse to deploy it.
+    from .visual_labeler import LAB_ONLY_MODEL_FILENAME
+    if model_path.name == LAB_ONLY_MODEL_FILENAME:
+        raise RuntimeError(
+            f"{model_path.name} is the lab-only visual auto-labeler and must "
+            "not be deployed to the iOS app. Only ChewNet (motion-only) ships."
+        )
 
     if exports_dir is None:
         exports_dir = repo_root / "02-DataPipeline" / DEFAULT_EXPORTS_DIR
@@ -318,7 +346,23 @@ def deploy_to_app(
     )
     deployed["swift_constants"] = swift_constants
 
-    # ---- 7. Diff snapshot
+    # ---- 7. Collection recommendations bundled with this app build
+    collection_plan_source = _latest_registry_file(repo_root, "collection_plan.json")
+    collection_plan_export = exports_dir / "collection_plan.json"
+    if collection_plan_source is not None:
+        shutil.copy2(collection_plan_source, collection_plan_export)
+        collection_plan_for_swift: Path | None = collection_plan_export
+        print(f"   ✅ Copied collection plan: {collection_plan_export}")
+    else:
+        collection_plan_for_swift = None
+        print("   ⚠️  No collection_plan.json found in the registry; generating an empty app plan.")
+
+    collection_swift = generated_dir / "CollectionRecommendations.swift"
+    generate_swift_collection_recommendations(collection_plan_for_swift, collection_swift)
+    deployed["collection_plan"] = collection_plan_export if collection_plan_source else None
+    deployed["collection_swift"] = collection_swift
+
+    # ---- 8. Diff snapshot
     after = {
         "MODEL_ID": _read_swift_constant(swift_constants, "MODEL_ID"),
         "DATASET_HASH": _read_swift_constant(swift_constants, "DATASET_HASH"),

@@ -42,6 +42,7 @@ def register_model(
     dataset_manifest: dict | Path | None = None,
     split_manifest: dict | Path | None = None,
     metrics: dict | None = None,
+    collection_plan: dict | Path | None = None,
     model_id: str | None = None,
     coreml_path: Path | None = None,
 ) -> Path:
@@ -49,8 +50,18 @@ def register_model(
     model_path = Path(model_path)
     repo_root = Path(repo_root)
 
+    # Lab-only safeguard: the visual auto-labeler is a dataset tool and
+    # must never be registered as a shippable ChewNet artifact.
+    from .visual_labeler import LAB_ONLY_MODEL_FILENAME
+    if model_path.name == LAB_ONLY_MODEL_FILENAME:
+        raise RuntimeError(
+            f"{model_path.name} is the lab-only visual auto-labeler and must "
+            "not be added to the model registry. Only ChewNet ships."
+        )
+
     dataset_data = _load_json_or_path(dataset_manifest)
     split_data = _load_json_or_path(split_manifest)
+    collection_plan_data = _load_json_or_path(collection_plan)
     dataset_hash = None
     if dataset_data:
         dataset_hash = dataset_data.get("dataset_hash")
@@ -68,6 +79,8 @@ def register_model(
         _write_json(run_dir / "split_manifest.json", split_data)
     if metrics is not None:
         _write_json(run_dir / "metrics.json", metrics)
+    if collection_plan_data is not None:
+        _write_json(run_dir / "collection_plan.json", collection_plan_data)
     _write_json(run_dir / "runtime_config.json", config.to_dict().get("runtime", {}))
 
     export_status = {"normalization": "not_attempted", "coreml": "not_attempted"}
@@ -97,6 +110,7 @@ def register_model(
         "model_path": str(model_path),
         "dataset_hash": dataset_hash,
         "registry_dir": str(run_dir),
+        "collection_plan_status": "available" if collection_plan_data is not None else "not_available",
         "export_status": export_status,
     }
     _write_json(run_dir / "metadata.json", metadata)

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "model_id": "chewnet-20260503-134131-816cea53",
+  "dataset_hash": "816cea53dd0231dc",
+  "generated_at": "2026-05-03T13:41:34.924483+00:00",
+  "source_split": "field_regression",
+  "recommendations": [
+    {
+      "id": "not_eating_false_positive_rate_moderate_001",
+      "activity": "not_eating",
+      "activity_label": "Not eating / baseline",
+      "expected_label_class": "negative",
+      "priority": 2,
+      "requested_minutes": 6,
+      "reason_codes": [
+        "false_positive_rate_moderate",
+        "coverage_gap"
+      ],
+      "reason": "Not eating / baseline has some false positives and needs more examples.",
+      "current_minutes": 1.62,
+      "target_minutes": 6.0
+    },
+    {
+      "id": "eating_hard_coverage_gap_002",
+      "activity": "eating_hard",
+      "activity_label": "Eating hard food",
+      "expected_label_class": "positive",
+      "priority": 3,
+      "requested_minutes": 8,
+      "reason_codes": [
+        "coverage_gap"
+      ],
+      "reason": "Eating hard food is under target coverage (0.0/8.0 min).",
+      "current_minutes": 0,
+      "target_minutes": 8.0
+    },
+    {
+      "id": "eating_soft_coverage_gap_003",
+      "activity": "eating_soft",
+      "activity_label": "Eating soft food",
+      "expected_label_class": "positive",
+      "priority": 3,
+      "requested_minutes": 8,
+      "reason_codes": [
+        "coverage_gap"
+      ],
+      "reason": "Eating soft food is under target coverage (0.9/8.0 min).",
+      "current_minutes": 0.86,
+      "target_minutes": 8.0
+    },
+    {
+      "id": "drinking_water_coverage_gap_004",
+      "activity": "drinking_water",
+      "activity_label": "Drinking water",
+      "expected_label_class": "negative",
+      "priority": 3,
+      "requested_minutes": 6,
+      "reason_codes": [
+        "coverage_gap"
+      ],
+      "reason": "Drinking water is under target coverage (0.0/6.0 min).",
+      "current_minutes": 0,
+      "target_minutes": 6.0
+    },
+    {
+      "id": "singing_coverage_gap_005",
+      "activity": "singing",
+      "activity_label": "Singing",
+      "expected_label_class": "mixed",
+      "priority": 3,
+      "requested_minutes": 6,
+      "reason_codes": [
+        "coverage_gap"
+      ],
+      "reason": "Singing is under target coverage (0.0/6.0 min).",
+      "current_minutes": 0,
+      "target_minutes": 6.0
+    }
+  ]
+}

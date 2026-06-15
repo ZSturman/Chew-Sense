@@ -1,0 +1,184 @@
+# ChewSense default configuration. Every threshold the pipeline uses lives here.
+# All time values are in seconds, distances are normalized by face_scale unless noted.
+
+ingest:
+  target_fps: 30
+  max_long_edge: 720
+  audio_sample_rate: 16000
+
+face:
+  # MediaPipe FaceMesh landmark indices used as references.
+  upper_lip_idx: 13       # inner upper lip
+  lower_lip_idx: 14       # inner lower lip
+  mouth_left_idx: 78
+  mouth_right_idx: 308
+  left_eye_idx: 33
+  right_eye_idx: 263
+  # Phase 1 additions (mouth-state / cycle detection)
+  outer_upper_lip_idx: 0
+  outer_lower_lip_idx: 17
+  chin_idx: 152
+  nose_idx: 1
+  jaw_left_idx: 172
+  jaw_right_idx: 397
+  # Phase 1.5: tighter detection threshold so blurry/half-occluded faces no
+  # longer leak into the signal pipeline. The blendshape + matrix outputs are
+  # only meaningful on solid detections.
+  min_detection_confidence: 0.6
+  min_presence_confidence: 0.6
+  min_tracking_confidence: 0.5
+  # Phase 1.5: enable MediaPipe's built-in ARKit-style blendshapes (52 of them,
+  # including `jawOpen` and `mouthClose`) and the 4x4 facial transformation
+  # matrix. Both ship in the standard `face_landmarker.task` bundle.
+  output_blendshapes: true
+  output_transform_matrix: true
+
+# --- Phase 1: head-pose classification ---
+pose:
+  frontal_yaw_max_deg: 25.0
+  frontal_pitch_abs_max_deg: 25.0
+  profile_yaw_min_deg: 45.0
+  tilted_down_pitch_min_deg: 15.0  # positive pitch = head down toward plate
+  hysteresis_frames: 3
+
+# --- Phase 1: auto-calibration of resting mouth ---
+calibration:
+  window_s: 5.0
+  min_samples_per_pose: 15
+  # Floor on per-channel MAD so noisy-but-quiet rest can't yield exploding
+  # z-scores. Units are MediaPipe face-normalized distances; the blendshape is
+  # a [0, 1] activation so its MAD floor is in those raw units.
+  min_mad:
+    inner_lip: 0.006
+    outer_lip: 0.008
+    chin_to_nose: 0.006
+    jaw_open_bs: 0.010
+
+# --- Phase 1: per-frame mouth-state FSM ---
+mouth_state:
+  open_enter_z: 1.0           # z-score (per-pose, MAD-based) to leave 'closed'
+  open_hold_z: 1.5            # z-score to commit to 'open'
+  close_enter_z: 0.5          # z-score to return to 'closed'
+  deriv_open_per_frame: 0.05  # |dmagnitude/frame| threshold to call it rising/falling
+  deriv_quiet_per_frame: 0.04
+  min_state_frames: 2
+
+# --- Phase B: mouth-occlusion detector + FSM hold ---
+occlusion:
+  # Below this face_confidence the mouth signals are no longer trusted.
+  face_conf_min: 0.4
+  # Hand-to-mouth distance (units of face_scale) below which we declare the
+  # mouth occluded by a hand/utensil/food.
+  h2m_close: 0.06
+  # Minimum sustained run before a flag is emitted (removes single-frame spikes).
+  min_run_s: 0.15
+  # While the mouth is occluded for less than this many seconds, the FSM
+  # holds the previously committed state instead of flipping to ``unknown``.
+  hold_s: 0.5
+
+# --- Phase 1: cycle detection on top of the FSM ---
+cycle:
+  min_duration_s: 0.20
+  max_duration_s: 1.50
+  min_peak_magnitude_z: 1.0
+  visible_open_ratio_min: 0.35      # inner/outer lip ratio at peak
+  visible_outer_lip_z_min: 1.0
+  closed_lip_jaw_proxy_z_min: 1.0
+  talking_reject_overlap: 0.5
+  occluded_reject_overlap: 0.5
+  pose_other_reject_overlap: 0.5
+  ml_refinement_enabled: false      # Phase 2 turns this on once a model exists
+
+hands:
+  max_num_hands: 2
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  # hand-to-mouth distance threshold (units of face_scale)
+  proximity_enter: 0.6
+  proximity_exit: 0.9
+
+audio:
+  vad_aggressiveness: 2     # 0-3
+  vad_frame_ms: 30
+
+jaw_signal:
+  smooth_window: 5          # Savitzky-Golay window in frames (must be odd)
+  smooth_polyorder: 2
+  bandpass_low_hz: 0.8
+  bandpass_high_hz: 3.0
+  peak_min_distance_s: 0.2  # min separation between chew peaks
+  peak_prominence_mad_k: 1.5  # peak prominence >= k * rolling MAD
+  rolling_mad_window_s: 3.0
+  chew_flank_max_s: 0.7     # max look-back/forward for chew start/end minima
+
+bite:
+  approach_window_s: 3.5    # local window around the peak; real bites often linger
+  mouth_open_min_norm: 0.05 # mouth must open at least this much above resting
+  alignment_window_s: 0.6   # all signals must align within this
+  between_run_merge_s: 0.4  # bridge brief h2m blips above proximity_exit
+  candidate_merge_s: 0.8    # NMS: collapse candidates closer than this
+  episode_attach_window_s: 4.0  # attach bite to episode within ±this many s
+
+episode:
+  min_chews_per_episode: 3
+  min_chewing_duration_s: 1.5
+  episode_end_hold_s: 1.5
+  merge_gap_s: 2.0
+  amplitude_decay_window: 5  # last K chews considered for slowing trend
+
+annotate:
+  # Clean mode: drop high-frequency markers (chew start/peak/end dots, cycle
+  # flashes, bite pulses, hand-to-mouth lines, chin-nose ref, bbox, proxy
+  # strip). Keep the essentials so the open/close state and label are easy to
+  # eyeball frame-by-frame. Toggle individual flags below to override.
+  clean: true
+  show_landmarks: true
+  show_bbox: false
+  show_hand_lines: false
+  show_signal_strip: true   # bottom timeline strip
+  show_debug_panel: false   # side panel with live plots
+  show_mouth_state_hud: true
+  show_jaw_proxy_strip: false
+  show_chew_marks: false    # per-chew start/peak/end circles
+  show_cycle_flash: false   # full-height side flash on cycle end
+  show_bite_pulse: false    # expanding ring on bite frame
+  show_chin_nose_ref: false # diagonal nose->chin reference line
+  cycle_flash_seconds: 0.5
+  font_scale: 0.6
+
+export:
+  schema_version: "1.0.0"
+  write_parquet: true
+  write_plots: true
+
+quality:
+  # Healthy chew rate range (Hz). Outside = flagged.
+  chew_rate_hz_min: 1.0
+  chew_rate_hz_max: 2.5
+  # Coefficient-of-variation of inter-peak intervals; >0.4 is irregular.
+  rhythm_cv_max: 0.4
+  # Chews per bite: clinical "chew your food well" guidance is 20-40.
+  chews_per_bite_min: 15
+  chews_per_bite_max: 60
+  # Inter-episode rest in seconds.
+  inter_session_gap_s_min: 20.0
+  # Bite size: jaw_open at food-entry as fraction of user max.
+  bite_size_oversized_ratio: 0.85
+  # Per-user baseline tightens these once we have enough sessions.
+  baseline_min_sessions: 3
+  baseline_k_sigma: 1.5     # personal flag = baseline_mean ± k * baseline_sigma
+  # Below this fraction of frames with face detected, mark session low_signal_quality
+  min_face_detection_fraction: 0.6
+
+baselines:
+  enabled: true
+  # File location: $CHEWSENSE_BASELINES_DIR/<user>.json
+  # Defaults to ~/.config/chewsense/baselines
+  rolling_max_sessions: 30
+  default_user: "default"
+
+chew_head:
+  enabled: false                 # set true to gate chew detection with the learned head
+  model_path: null               # path to .pt; if null, loaded from ~/.cache/chewsense/models/chew_head.pt
+  threshold: 0.5                 # min P(chewing) to keep a chew candidate
+  feature_window_frames: 31      # context window (odd)

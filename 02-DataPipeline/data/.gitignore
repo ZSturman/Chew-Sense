@@ -25,6 +25,7 @@ derived/models/
 derived/splits/
 derived/logs/
 derived/runs/
+derived/video_labels/
 !derived/README.md
 !derived/.gitkeep
 

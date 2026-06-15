@@ -28,10 +28,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pipeline.config import load_config, merge_cli_args, PipelineConfig
 from pipeline.ingest import validate_sessions, create_manifest, save_manifest
 from pipeline.transform import transform_directory
+from pipeline.video_labels import resolve_derived_root
 from pipeline.features import extract_features_directory
 from pipeline.train import train_model
 from pipeline.evaluate import evaluate_model
 from pipeline.field_tests import import_field_test_bundles, balance_summary, session_activity_map
+from pipeline.recommendations import generate_collection_plan
 from pipeline.registry import latest_registry_entry, register_model
 from pipeline.splits import create_or_update_split_manifest, load_split_manifest
 
@@ -110,6 +112,18 @@ def load_and_merge_config(args: argparse.Namespace) -> PipelineConfig:
     }
     
     return merge_cli_args(config, args_dict)
+
+
+def enable_two_head_when_reviewed(config: PipelineConfig, sessions: list) -> None:
+    if any(
+        getattr(session, "has_video_labels", False)
+        and getattr(session, "verified", False)
+        and getattr(session, "chew_cycle_count", 0) > 0
+        for session in sessions
+    ):
+        config.features.extended_chew_phase = True
+        config.chew_phase_head.enabled = True
+        print("   Reviewed chew cycles found: enabling two-head eating + phase training.")
 
 
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
@@ -344,6 +358,7 @@ def cmd_sample(args: argparse.Namespace) -> int:
     print("\n📋 Step 1: Validating sample data...")
     sessions = validate_sessions(sample_dir)
     manifest = create_manifest(sessions)
+    enable_two_head_when_reviewed(config, sessions)
     print(f"   Found {len(sessions)} sessions")
     print(f"   Dataset hash: {manifest.dataset_hash}")
     manifest_path = dataset_manifest_path(pipeline_root, "sample")
@@ -496,6 +511,11 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
     pipeline_root = Path(__file__).parent
     
     input_dir = Path(args.input) if args.input else pipeline_root / "data" / "user" / "raw_sessions"
+    video_labels_root = resolve_derived_root(
+        input_dir,
+        Path(args.video_labels_root) if getattr(args, "video_labels_root", None) else None,
+    )
+    require_verified = not getattr(args, "allow_unverified_video_labels", False)
     
     if not input_dir.exists():
         print(f"\n❌ Input directory not found: {input_dir}")
@@ -508,12 +528,17 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
     # 1. Validate
     print(f"\n📋 Step 1: Validating data in {input_dir}...")
     try:
-        sessions = validate_sessions(input_dir)
+        sessions = validate_sessions(
+            input_dir,
+            video_labels_root=video_labels_root,
+            require_verified_video_labels=require_verified,
+        )
     except Exception as e:
         print(f"❌ Validation failed: {e}")
         return 1
     
     manifest = create_manifest(sessions)
+    enable_two_head_when_reviewed(config, sessions)
     print(f"   Found {len(sessions)} sessions:")
     print(f"   - Eating: {manifest.eating_count}")
     print(f"   - Not-eating: {manifest.not_eating_count}")
@@ -532,6 +557,8 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
         input_dir=input_dir,
         output_dir=transformed_dir,
         config=config.soft_labels,
+        video_labels_root=video_labels_root,
+        require_verified_video_labels=require_verified,
     )
     
     # 3. Extract features
@@ -656,6 +683,33 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         print(f"\n❌ Model not found: {model_path}")
         print("   Train a model first with 'python main_new.py sample' or 'python main_new.py from-raw'")
         return 1
+
+    from pipeline.promotion import (
+        assess_registry_entry,
+        registry_entry_for_model,
+        write_promotion_report,
+    )
+
+    registry_entry = registry_entry_for_model(get_repo_root(), model_path)
+    if registry_entry is None:
+        print(
+            "\nRefusing to deploy: this checkpoint is not present in the versioned "
+            "model registry."
+        )
+        return 2
+    promotion = assess_registry_entry(registry_entry)
+    if not promotion.passed:
+        if not getattr(args, "development_override", False):
+            print("\nRefusing to deploy: the model has not passed the Live promotion gate.")
+            for reason in promotion.reasons:
+                print(f"   - {reason}")
+            print("   Use --development-override only for a non-production device build.")
+            write_promotion_report(registry_entry, promotion)
+            return 2
+        promotion.development_override = True
+        print("\nDevelopment override: deploying an unpromoted model.")
+    report_path = write_promotion_report(registry_entry, promotion)
+    print(f"   Promotion report: {report_path}")
 
     # Optional pre-deploy gate: refuse to deploy a regressed model unless --force.
     if not getattr(args, "skip_compare", False):
@@ -823,6 +877,11 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
     input_dir = Path(args.input) if args.input else pipeline_root / "data" / "user" / "field_tests"
     curated_dir = Path(args.curated_dir) if args.curated_dir else pipeline_root / "data" / "curated" / "accepted_sessions"
     manifest_dir = pipeline_root / "data" / "manifests" / "datasets"
+    video_labels_root = Path(
+        getattr(args, "video_labels_root", None)
+        or pipeline_root / "data" / "derived" / "video_labels"
+    )
+    require_verified = not getattr(args, "allow_unverified_video_labels", False)
 
     if not input_dir.exists():
         print(f"\n❌ Input directory not found: {input_dir}")
@@ -881,8 +940,13 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
     print(f"   Run workspace: {run_dir}")
 
     print(f"\n📋 Validating curated sessions in {curated_dir}...")
-    sessions = validate_sessions(curated_dir)
+    sessions = validate_sessions(
+        curated_dir,
+        video_labels_root=video_labels_root,
+        require_verified_video_labels=require_verified,
+    )
     manifest = create_manifest(sessions)
+    enable_two_head_when_reviewed(config, sessions)
     manifest_path = dataset_manifest_path(pipeline_root, "from_field_test")
     save_manifest(manifest, manifest_path)
 
@@ -925,6 +989,8 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
         input_dir=curated_dir,
         output_dir=transformed_dir,
         config=config.soft_labels,
+        video_labels_root=video_labels_root,
+        require_verified_video_labels=require_verified,
     )
 
     print("\n📊 Extracting features...")
@@ -976,6 +1042,13 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
         "gold_locked": gold_metrics,
     }
     save_metrics(all_metrics, pipeline_root, "from_field_test")
+    collection_plan = generate_collection_plan(
+        metrics=all_metrics,
+        curated_dir=curated_dir,
+        config=config,
+        model_id=result.get("model_id"),
+        dataset_hash=manifest.dataset_hash,
+    )
     registry_dir = register_model(
         model_path=model_path,
         repo_root=repo_root,
@@ -983,9 +1056,16 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
         dataset_manifest=manifest_path,
         split_manifest=split_manifest,
         metrics=all_metrics,
+        collection_plan=collection_plan,
         model_id=result.get("model_id"),
     )
     print(f"   Registry entry: {registry_dir}")
+    print("   Next collection recommendations:")
+    for item in collection_plan.get("recommendations", []):
+        print(
+            f"     - P{item['priority']} {item['requested_minutes']} min "
+            f"{item['activity_label']}: {item['reason']}"
+        )
     print("\n✅ Field-test import and retraining complete!")
     return 0
 
@@ -1044,6 +1124,173 @@ def cmd_registry(args: argparse.Namespace) -> int:
 # =============================================================================
 # COMMAND: status
 # =============================================================================
+
+def cmd_bite_metrics(args: argparse.Namespace) -> int:
+    """Run the chew/bite evaluation harness over one or more bundles."""
+    from pipeline import bite_metrics as bm
+
+    bundle_dirs: list[Path] = []
+    if args.bundle:
+        bundle_dirs.extend(Path(p) for p in args.bundle)
+    if args.sweep:
+        bundle_dirs.extend(bm.discover_bundles(Path(args.sweep)))
+
+    if not bundle_dirs:
+        print("No bundles supplied. Use --bundle <dir> or --sweep <root>.")
+        return 1
+
+    # Optionally regenerate predictions from runtime predictions.csv first.
+    if args.detect:
+        from importlib import import_module
+        bd = import_module("bite_detector") if False else None  # noqa
+        # Robust import: bite_detector lives in 05-FutureStages/02-BiteSegmentation/
+        bd_path = Path(__file__).resolve().parents[1] / "05-FutureStages" / "02-BiteSegmentation"
+        if str(bd_path) not in sys.path:
+            sys.path.insert(0, str(bd_path))
+        from bite_detector import detect_bites_from_bundle  # type: ignore
+
+        for d in bundle_dirs:
+            try:
+                detect_bites_from_bundle(d)
+            except Exception as e:  # pragma: no cover
+                print(f"  [detect] {d.name}: {e}")
+
+    agg = bm.evaluate_bundles(bundle_dirs)
+    md = bm.render_report_md(agg)
+
+    repo_root = get_repo_root()
+    reports_dir = repo_root / "03-ModelEvaluation" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = Path(args.output) if args.output else reports_dir / f"{ts}_chewbite.md"
+    out_path.write_text(md)
+    print(f"Wrote {out_path}")
+    print()
+    print(md)
+    return 0
+
+
+def cmd_meal_report(args: argparse.Namespace) -> int:
+    """Assemble bites into a meal-level summary (Phase 6).
+
+    Reads `predictions.csv` from a field-test bundle (or
+    `bite_events.csv` if `--bites` is passed), runs the meal analyzer
+    and chew-quality scorer, then writes JSON + markdown summaries to
+    `03-ModelEvaluation/reports/meals/`.
+    """
+    bundle = Path(args.bundle).resolve() if args.bundle else None
+    bites_csv = Path(args.bites).resolve() if args.bites else None
+    if not bundle and not bites_csv:
+        print("Pass either --bundle <dir> or --bites <bite_events.csv>.")
+        return 1
+
+    # Importable paths
+    repo_root = get_repo_root()
+    future = repo_root / "05-FutureStages"
+    for sub in ("02-BiteSegmentation", "03-MealStructure", "04-QualityEvaluation"):
+        p = future / sub
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+
+    from bite_detector import detect_bites_from_bundle  # type: ignore
+    from meal_analyzer import MealAnalyzer  # type: ignore
+    from chew_quality import ChewQualityEvaluator  # type: ignore
+    from pipeline.events import BiteEvent, ChewStroke  # type: ignore
+
+    # --- Load bites ----------------------------------------------------
+    if bundle is not None:
+        bites = detect_bites_from_bundle(bundle)
+        session_id = bundle.name
+    else:
+        import csv
+        with open(bites_csv, newline="") as f:
+            rows = list(csv.DictReader(f))
+        bites = [
+            BiteEvent(
+                start_time=float(r["start_time"]),
+                end_time=float(r["end_time"]),
+                confidence=float(r.get("confidence", 1.0)),
+                chew_count=int(r.get("chew_count", 0) or 0),
+                chew_strokes=[],
+            )
+            for r in rows
+        ]
+        session_id = bites_csv.parent.name
+
+    if not bites:
+        print(f"No bites found for session {session_id}.")
+        return 1
+
+    analyzer = MealAnalyzer()
+    metrics = analyzer.analyze_meal(bites)
+    phases = analyzer.detect_phases(bites)
+    quality = ChewQualityEvaluator().evaluate_meal(metrics, bites)
+
+    # --- Serialize -----------------------------------------------------
+    def _enum_to_str(v):
+        return v.value if hasattr(v, "value") else v
+
+    from dataclasses import asdict
+    payload = {
+        "session_id": session_id,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "metrics": asdict(metrics),
+        "phases": [asdict(p) for p in phases],
+        "quality": {k: _enum_to_str(v) for k, v in asdict(quality).items()},
+    }
+
+    out_dir = Path(args.output_dir) if args.output_dir else (
+        repo_root / "03-ModelEvaluation" / "reports" / "meals"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / f"{session_id}.json"
+    md_path = out_dir / f"{session_id}.md"
+
+    json_path.write_text(json.dumps(payload, indent=2))
+
+    md_lines = [
+        f"# Meal report — {session_id}",
+        "",
+        f"_Generated {payload['generated_at']}_",
+        "",
+        "## Summary",
+        f"- Bites: **{metrics.bite_count}**",
+        f"- Chews: **{metrics.chew_count}**",
+        f"- Duration: **{metrics.total_duration:.1f} s** "
+        f"({metrics.eating_efficiency*100:.0f}% chewing)",
+        f"- Avg chews / bite: **{metrics.avg_chews_per_bite:.1f}**",
+        f"- Bite rate: **{metrics.bite_rate_per_minute:.1f}** / min",
+        f"- Rushed bites: **{metrics.rushed_bite_count}** "
+        f"({metrics.rushed_bite_fraction*100:.0f}%)",
+        f"- Pace trend: **{metrics.pace_trend}** "
+        f"({metrics.first_half_pace:.1f}s → {metrics.second_half_pace:.1f}s IBI)",
+        "",
+        "## Quality",
+        f"- Overall: **{quality.overall_score:.0f}** "
+        f"({_enum_to_str(quality.overall_rating)})",
+        f"- Pace: {_enum_to_str(quality.eating_pace_rating)}",
+        f"- Thoroughness: {_enum_to_str(quality.thoroughness_rating)} "
+        f"(well-chewed {quality.well_chewed_percent:.0f}%)",
+        f"- Rhythm: {_enum_to_str(quality.rhythm_rating)} "
+        f"(pauses: {quality.mindful_pauses})",
+    ]
+    if quality.recommendations:
+        md_lines += ["", "## Recommendations"]
+        md_lines += [f"- {r}" for r in quality.recommendations]
+    if phases:
+        md_lines += ["", "## Phases"]
+        for i, ph in enumerate(phases, 1):
+            label = ph.phase_label or "—"
+            md_lines.append(
+                f"{i}. {ph.start_time:.1f}–{ph.end_time:.1f}s · "
+                f"{ph.bite_count} bites · pace {ph.avg_pace:.1f}s · {label}"
+            )
+
+    md_path.write_text("\n".join(md_lines) + "\n")
+    print(f"Wrote {json_path}")
+    print(f"Wrote {md_path}")
+    return 0
+
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Print dataset balance + split sizes + last gold metrics."""
@@ -1161,6 +1408,14 @@ Examples:
         "--input", type=Path,
         help="Directory containing raw session folders or CSVs",
     )
+    p_from_raw.add_argument(
+        "--video-labels-root", type=Path,
+        help="Derived video-label root; canonical labels inside sessions take precedence",
+    )
+    p_from_raw.add_argument(
+        "--allow-unverified-video-labels", action="store_true",
+        help="Allow automatic video labels into training before final review",
+    )
     add_common_args(p_from_raw)
     p_from_raw.set_defaults(func=cmd_from_raw)
     
@@ -1188,6 +1443,14 @@ Examples:
     p_from_field_test.add_argument(
         "--curated-dir", type=Path,
         help="Directory to write imported curated sessions",
+    )
+    p_from_field_test.add_argument(
+        "--video-labels-root", type=Path,
+        help="Derived video-label root; canonical labels inside sessions take precedence",
+    )
+    p_from_field_test.add_argument(
+        "--allow-unverified-video-labels", action="store_true",
+        help="Allow automatic video labels into training before final review",
     )
     p_from_field_test.add_argument(
         "--no-archive", action="store_true",
@@ -1261,6 +1524,10 @@ Examples:
         "--skip-compare", action="store_true",
         help="Skip the regression gate from 03-ModelEvaluation/compare.py",
     )
+    p_deploy.add_argument(
+        "--development-override", action="store_true",
+        help="Allow an unpromoted model in a non-production device build",
+    )
     p_deploy.set_defaults(func=cmd_deploy)
 
     # compare command
@@ -1298,6 +1565,49 @@ Examples:
         help="Print dataset balance, split sizes, last metrics for the latest model",
     )
     p_status.set_defaults(func=cmd_status)
+
+    # bite-metrics command
+    p_bite = subparsers.add_parser(
+        "bite-metrics",
+        help="Evaluate chew-stroke / bite metrics for one or more field-test bundles",
+    )
+    p_bite.add_argument(
+        "--bundle", action="append", default=None,
+        help="Path to a single bundle directory (repeat for multiple)",
+    )
+    p_bite.add_argument(
+        "--sweep", type=Path,
+        help="Root directory containing many bundle subdirs (e.g. data/user/field_tests)",
+    )
+    p_bite.add_argument(
+        "--detect", action="store_true",
+        help="Regenerate bite_events.csv / chew_events.csv from predictions.csv before evaluating",
+    )
+    p_bite.add_argument(
+        "--output", type=Path,
+        help="Output markdown path (default: 03-ModelEvaluation/reports/<ts>_chewbite.md)",
+    )
+    p_bite.set_defaults(func=cmd_bite_metrics)
+
+    # meal-report command
+    p_meal = subparsers.add_parser(
+        "meal-report",
+        help="Assemble bites into a meal-level summary (JSON + markdown).",
+    )
+    p_meal.add_argument(
+        "--bundle", type=Path,
+        help="Path to a field-test bundle dir containing predictions.csv",
+    )
+    p_meal.add_argument(
+        "--bites", type=Path,
+        help="Path to an existing bite_events.csv (skip bite detection)",
+    )
+    p_meal.add_argument(
+        "--output-dir", type=Path,
+        help="Override output directory (default: 03-ModelEvaluation/reports/meals/)",
+    )
+    p_meal.set_defaults(func=cmd_meal_report)
+
     
     # Parse and run
     args = parser.parse_args()

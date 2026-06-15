@@ -61,13 +61,27 @@ struct HUDTop: View {
             .help("Open review queue (M)")
 
             Button {
+                state.toggleFullVideoPassCompleted()
+            } label: {
+                Label(
+                    state.overrides.fullVideoPassCompleted ? "Full Pass Done" : "Full Pass",
+                    systemImage: state.overrides.fullVideoPassCompleted
+                        ? "film.fill"
+                        : "film"
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Acknowledge the final full-video check after reviewing misses")
+
+            Button {
                 state.toggleVerified()
             } label: {
                 Label(state.overrides.verified ? "Verified" : "Mark Verified",
                       systemImage: state.overrides.verified ? "checkmark.seal.fill" : "checkmark.seal")
             }
             .buttonStyle(.plain)
-            .help("Toggle verified status")
+            .disabled(!state.overrides.verified && !state.canFinalizeReview)
+            .help(state.completionStatus)
 
             Button { state.saveOverrides() } label: {
                 Label("Save", systemImage: "square.and.arrow.down.fill")

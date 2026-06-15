@@ -259,7 +259,14 @@ struct RootView: View {
         case ("a", _), ("A", _):
             quickAddAtPlayhead(); return nil
         case ("d", _), ("D", _):
-            state.deleteSelectedOrAt(videoTime: playback.currentTime); return nil
+            if let id = state.selectedBiteID {
+                state.rejectBite(id: id)
+            } else {
+                state.deleteSelectedOrAt(videoTime: playback.currentTime)
+            }
+            return nil
+        case ("b", _), ("B", _):
+            state.addBite(at: playback.currentTime); return nil
         case ("n", _), ("N", _):
             if let c = state.selectNextChew() { playback.seek(to: c.startTS) }; return nil
         case ("p", _), ("P", _):

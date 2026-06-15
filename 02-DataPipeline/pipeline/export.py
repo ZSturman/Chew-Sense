@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 
 from .features import FEATURE_NAMES
-from .train import ChewNet
+from .train import ChewNet, TwoHeadChewNet
 
 
 # Path inside an .mlpackage where the actual CoreML model proto lives. Used
@@ -74,8 +74,12 @@ def export_coreml(
     input_dim = ckpt["input_dim"]
     hidden_dim = ckpt["hidden_dim"]
     num_outputs = ckpt.get("num_outputs", 1)
-    
-    model = ChewNet(input_dim=input_dim, hidden_dim=hidden_dim, num_outputs=num_outputs)
+    mode = ckpt.get("mode", "binary")
+
+    if mode == "two_head":
+        model = TwoHeadChewNet(input_dim=input_dim, hidden_dim=hidden_dim)
+    else:
+        model = ChewNet(input_dim=input_dim, hidden_dim=hidden_dim, num_outputs=num_outputs)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     
@@ -90,17 +94,23 @@ def export_coreml(
         inputs=[ct.TensorType(name="input", shape=example_input.shape)],
     )
     
-    # Rename output
+    # Rename output. Two-head models emit a single (B, 3) tensor we expose as
+    # `output` and let the Swift side slice columns [logit, sin, cos].
     spec = mlmodel.get_spec()
     old_name = spec.description.output[0].name
-    output_name = "mouth_shape" if num_outputs > 1 else "logit"
+    if mode == "two_head":
+        output_name = "output"
+    elif num_outputs > 1:
+        output_name = "mouth_shape"
+    else:
+        output_name = "logit"
     ct.utils.rename_feature(spec, old_name, output_name)
     
     # Rebuild with weights
     mlmodel_renamed = ct.models.MLModel(spec, weights_dir=mlmodel.weights_dir)
     mlmodel_renamed.save(str(output_path))
     
-    print(f"✅ Exported CoreML model: {output_path} (outputs={num_outputs})")
+    print(f"✅ Exported CoreML model: {output_path} (mode={mode}, outputs={num_outputs})")
     return output_path
 
 
@@ -163,6 +173,16 @@ def format_swift_array(values: list[float], indent: str = "    ") -> str:
     """Format a list of floats as a Swift array literal."""
     formatted = [f"{v:.10f}" for v in values]
     return f"[\n{indent}    " + f",\n{indent}    ".join(formatted) + f"\n{indent}]"
+
+
+def format_swift_string(value: Any) -> str:
+    """Format a Python value as a Swift string literal."""
+    return json.dumps("" if value is None else str(value))
+
+
+def format_swift_string_array(values: list[Any]) -> str:
+    """Format Python values as a Swift [String] literal."""
+    return "[" + ", ".join(format_swift_string(value) for value in values) + "]"
 
 
 def generate_swift_constants(
@@ -250,7 +270,7 @@ struct NormalizationConstants {
     # Add output metadata
     swift_code += f"    /// Number of model outputs\n"
     swift_code += f"    static let NUM_OUTPUTS: Int = {num_outputs}\n\n"
-    swift_code += f"    /// Model mode: \"binary\" or \"mouth_shape\"\n"
+    swift_code += f"    /// Model mode: \"binary\", \"mouth_shape\", or \"two_head\"\n"
     swift_code += f'    static let MODE: String = "{mode}"\n\n'
     swift_code += f"    /// Local model registry id\n"
     swift_code += f'    static let MODEL_ID: String = "{model_id}"\n\n'
@@ -269,6 +289,12 @@ struct NormalizationConstants {
     if mode == "mouth_shape" and label_names:
         swift_code += "    /// Output parameter names (order matches model output)\n"
         names_swift = ', '.join(f'"{n}"' for n in label_names)
+        swift_code += f"    static let OUTPUT_NAMES: [String] = [{names_swift}]\n\n"
+    elif mode == "two_head":
+        # Phase 5: two-head model emits [eating_logit, chew_phase_sin, chew_phase_cos].
+        output_names = ckpt.get("output_names", ["eating_logit", "chew_phase_sin", "chew_phase_cos"])
+        swift_code += "    /// Output column order in the two-head ChewNet (length 3)\n"
+        names_swift = ', '.join(f'"{n}"' for n in output_names)
         swift_code += f"    static let OUTPUT_NAMES: [String] = [{names_swift}]\n\n"
     
     swift_code += r'''    /// Normalize features using training statistics
@@ -295,7 +321,12 @@ struct RuntimeConfig {
         low = runtime_config.get("low_threshold", 0.4)
         min_start = runtime_config.get("min_start_windows", 3)
         min_end = runtime_config.get("min_end_windows", 2)
-        
+        min_chew_period = runtime_config.get("min_chew_period_sec", 0.35)
+        min_gap = runtime_config.get("min_gap_sec", 1.5)
+        min_bite_dur = runtime_config.get("min_bite_duration_sec", 1.0)
+        rushed = runtime_config.get("rushed_chews_per_bite", 5)
+        bite_rate_win = runtime_config.get("bite_rate_window_sec", 300.0)
+
         swift_code += f'''    /// EMA smoothing factor (0 = no smoothing, 1 = no memory)
     static let alpha: Double = {alpha}
     
@@ -310,6 +341,27 @@ struct RuntimeConfig {
     
     /// Consecutive windows below lowThreshold to confirm chewing end
     static let minEndWindows: Int = {min_end}
+
+    // ------------------------------------------------------------------
+    // Chew-stroke / bite segmentation (motion-only metrics layer)
+    // ------------------------------------------------------------------
+
+    /// Minimum spacing between two chew strokes (seconds).
+    /// Roughly 1 / max chew frequency, default 0.35 s ≈ 2.86 Hz upper bound.
+    static let minChewPeriodSec: Double = {min_chew_period}
+
+    /// Two chewing episodes whose gap is less than this are merged into a
+    /// single bite (seconds).
+    static let minGapSec: Double = {min_gap}
+
+    /// Episodes shorter than this are dropped as noise (seconds).
+    static let minBiteDurationSec: Double = {min_bite_dur}
+
+    /// Bites with fewer than this many chew strokes are flagged as rushed.
+    static let rushedChewsPerBite: Int = {rushed}
+
+    /// Rolling window for `bite_rate_per_minute` (seconds).
+    static let biteRateWindowSec: Double = {bite_rate_win}
 }}
 '''
     
@@ -317,4 +369,86 @@ struct RuntimeConfig {
         f.write(swift_code)
     
     print(f"✅ Generated Swift constants: {output_path}")
+    return output_path
+
+
+def generate_swift_collection_recommendations(
+    collection_plan: dict | Path | None,
+    output_path: Path,
+) -> Path:
+    """Generate the app's bundled closed-loop collection recommendations."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if collection_plan is None:
+        plan: dict[str, Any] = {}
+    elif isinstance(collection_plan, Path):
+        try:
+            with open(collection_plan, "r") as f:
+                plan = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            plan = {}
+    else:
+        plan = collection_plan
+
+    recommendations = plan.get("recommendations") if isinstance(plan, dict) else []
+    if not isinstance(recommendations, list):
+        recommendations = []
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        "//",
+        "//  CollectionRecommendations.swift",
+        "//  ChewSense",
+        "//",
+        "//  AUTO-GENERATED by pipeline/export.py",
+        "//  Do not edit manually - regenerate from pipeline after retraining.",
+        "//",
+        f"//  Generated: {timestamp}",
+        "//",
+        "",
+        "import Foundation",
+        "",
+        "enum CollectionRecommendations {",
+        "    static let current = CollectionPlan(",
+        f"        version: {int(plan.get('version', 1) or 1)},",
+        f"        modelID: {format_swift_string(plan.get('model_id', ''))},",
+        f"        datasetHash: {format_swift_string(plan.get('dataset_hash', ''))},",
+        f"        generatedAt: {format_swift_string(plan.get('generated_at', ''))},",
+        f"        sourceSplit: {format_swift_string(plan.get('source_split', 'none'))},",
+        "        recommendations: [",
+    ]
+
+    for item in recommendations:
+        if not isinstance(item, dict):
+            continue
+        reason_codes = item.get("reason_codes")
+        if not isinstance(reason_codes, list):
+            reason_codes = []
+        lines.extend([
+            "            CollectionRecommendation(",
+            f"                id: {format_swift_string(item.get('id', ''))},",
+            f"                activity: {format_swift_string(item.get('activity', 'custom'))},",
+            f"                activityLabel: {format_swift_string(item.get('activity_label', 'Custom activity'))},",
+            f"                expectedLabelClass: {format_swift_string(item.get('expected_label_class', 'unknown'))},",
+            f"                priority: {int(item.get('priority', 3) or 3)},",
+            f"                requestedMinutes: {int(item.get('requested_minutes', 0) or 0)},",
+            f"                reasonCodes: {format_swift_string_array(reason_codes)},",
+            f"                reason: {format_swift_string(item.get('reason', ''))},",
+            f"                currentMinutes: {float(item.get('current_minutes', 0.0) or 0.0):.2f},",
+            f"                targetMinutes: {float(item.get('target_minutes', 0.0) or 0.0):.2f}",
+            "            ),",
+        ])
+
+    lines.extend([
+        "        ]",
+        "    )",
+        "}",
+        "",
+    ])
+
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"✅ Generated Swift collection recommendations: {output_path}")
     return output_path

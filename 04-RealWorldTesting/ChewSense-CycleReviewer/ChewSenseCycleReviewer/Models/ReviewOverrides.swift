@@ -17,6 +17,11 @@ struct ReviewOverrides: Codable {
     var flippedEatingSpans: [TimeSpan]
     var unreliableSpans: [TimeSpan]
     var verifiedChewIDs: [String]
+    var addedBites: [BiteEdit]
+    var deletedBiteIDs: [String]
+    var editedBites: [BiteEdit]
+    var verifiedBiteIDs: [String]
+    var fullVideoPassCompleted: Bool
     var notes: String?
 
     struct ChewEdit: Codable, Identifiable, Equatable {
@@ -33,6 +38,12 @@ struct ReviewOverrides: Codable {
             case endTS = "end_ts"
             case confidence
         }
+    }
+
+    struct BiteEdit: Codable, Identifiable, Equatable {
+        var id: String
+        var ts: Double
+        var confidence: Double = 1.0
     }
 
     struct TimeSpan: Codable, Identifiable {
@@ -58,6 +69,11 @@ struct ReviewOverrides: Codable {
         case flippedEatingSpans = "flipped_eating_spans"
         case unreliableSpans = "unreliable_spans"
         case verifiedChewIDs = "verified_chew_ids"
+        case addedBites = "added_bites"
+        case deletedBiteIDs = "deleted_bite_ids"
+        case editedBites = "edited_bites"
+        case verifiedBiteIDs = "verified_bite_ids"
+        case fullVideoPassCompleted = "full_video_pass_completed"
         case notes
     }
 
@@ -73,6 +89,11 @@ struct ReviewOverrides: Codable {
         flippedEatingSpans: [TimeSpan],
         unreliableSpans: [TimeSpan],
         verifiedChewIDs: [String] = [],
+        addedBites: [BiteEdit] = [],
+        deletedBiteIDs: [String] = [],
+        editedBites: [BiteEdit] = [],
+        verifiedBiteIDs: [String] = [],
+        fullVideoPassCompleted: Bool = false,
         notes: String?
     ) {
         self.schemaVersion = schemaVersion
@@ -86,6 +107,11 @@ struct ReviewOverrides: Codable {
         self.flippedEatingSpans = flippedEatingSpans
         self.unreliableSpans = unreliableSpans
         self.verifiedChewIDs = verifiedChewIDs
+        self.addedBites = addedBites
+        self.deletedBiteIDs = deletedBiteIDs
+        self.editedBites = editedBites
+        self.verifiedBiteIDs = verifiedBiteIDs
+        self.fullVideoPassCompleted = fullVideoPassCompleted
         self.notes = notes
     }
 
@@ -102,6 +128,14 @@ struct ReviewOverrides: Codable {
         flippedEatingSpans = try c.decodeIfPresent([TimeSpan].self, forKey: .flippedEatingSpans) ?? []
         unreliableSpans = try c.decodeIfPresent([TimeSpan].self, forKey: .unreliableSpans) ?? []
         verifiedChewIDs = try c.decodeIfPresent([String].self, forKey: .verifiedChewIDs) ?? []
+        addedBites = try c.decodeIfPresent([BiteEdit].self, forKey: .addedBites) ?? []
+        deletedBiteIDs = try c.decodeIfPresent([String].self, forKey: .deletedBiteIDs) ?? []
+        editedBites = try c.decodeIfPresent([BiteEdit].self, forKey: .editedBites) ?? []
+        verifiedBiteIDs = try c.decodeIfPresent([String].self, forKey: .verifiedBiteIDs) ?? []
+        fullVideoPassCompleted = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .fullVideoPassCompleted
+        ) ?? false
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
     }
 
@@ -117,6 +151,11 @@ struct ReviewOverrides: Codable {
             flippedEatingSpans: [],
             unreliableSpans: [],
             verifiedChewIDs: [],
+            addedBites: [],
+            deletedBiteIDs: [],
+            editedBites: [],
+            verifiedBiteIDs: [],
+            fullVideoPassCompleted: false,
             notes: nil
         )
     }

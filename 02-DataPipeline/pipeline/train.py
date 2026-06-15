@@ -53,6 +53,85 @@ class ChewNet(nn.Module):
         return out
 
 
+class TwoHeadChewNet(nn.Module):
+    """Phase 5 two-head model: shared MLP trunk → eating logit + chew-phase (sin, cos).
+
+    Forward returns a tensor of shape ``(batch, 3)``:
+      - column 0: eating logit (apply sigmoid for probability)
+      - column 1: chew_phase_sin (tanh-bounded to [-1, 1])
+      - column 2: chew_phase_cos (tanh-bounded to [-1, 1])
+
+    The tanh on the phase head keeps the output in the unit circle's bounding
+    box, matching the target distribution.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 32):
+        super().__init__()
+        self.trunk = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.eating_head = nn.Linear(hidden_dim, 1)
+        self.phase_head = nn.Linear(hidden_dim, 2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.trunk(x)
+        eating_logit = self.eating_head(h)             # (B, 1)
+        phase = torch.tanh(self.phase_head(h))         # (B, 2)
+        return torch.cat([eating_logit, phase], dim=-1)  # (B, 3)
+
+
+def two_head_composite_loss(
+    output: torch.Tensor,
+    target: torch.Tensor,
+    eating_weight: float,
+    phase_weight: float,
+    eating_criterion: nn.Module,
+    mask_when_not_eating: bool,
+    eating_threshold: float = 0.5,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Composite BCE (eating) + masked MSE (chew-phase) loss.
+
+    Args:
+        output: ``(B, 3)`` tensor from ``TwoHeadChewNet.forward``.
+    target: ``(B, 3|4)`` tensor of
+        [eating_soft, sin_target, cos_target, optional_phase_valid].
+        eating_weight: α weight on BCE term.
+        phase_weight: β weight on MSE term.
+        eating_criterion: BCE-like loss applied to the eating logit and the
+            soft eating target column.
+        mask_when_not_eating: if True, the phase MSE is computed only on rows
+            where the eating target ≥ ``eating_threshold``.
+    """
+    eating_logit = output[:, 0]
+    eating_target = target[:, 0]
+    phase_pred = output[:, 1:3]
+    phase_target = target[:, 1:3]
+
+    bce = eating_criterion(eating_logit, eating_target)
+
+    if mask_when_not_eating:
+        mask = (eating_target >= eating_threshold)
+        if target.shape[1] >= 4:
+            mask = mask & (target[:, 3] >= 0.5)
+        if mask.any():
+            mse = F.mse_loss(phase_pred[mask], phase_target[mask])
+        else:
+            # No eating rows in this batch — skip the phase term.
+            mse = torch.zeros((), device=output.device, dtype=output.dtype)
+    else:
+        mse = F.mse_loss(phase_pred, phase_target)
+
+    total = eating_weight * bce + phase_weight * mse
+    return total, {
+        "loss_total": float(total.detach().item()),
+        "loss_eating_bce": float(bce.detach().item()),
+        "loss_phase_mse": float(mse.detach().item()),
+    }
+
+
 class FocalLoss(nn.Module):
     """Binary focal loss on logits. Reduces the weight of easy examples."""
 
@@ -154,12 +233,23 @@ def train_model(
     
     # Determine mode: binary classification or mouth shape regression
     ms_config = config.mouth_shape
-    use_mouth_shape = ms_config.enabled and y.ndim == 2
+    use_mouth_shape = ms_config.enabled and y.ndim == 2 and y.shape[1] == ms_config.num_outputs
+    # Two-head mode. y is [eating_soft, sin, cos, phase_valid].
+    cph_config = getattr(config, "chew_phase_head", None)
+    use_chew_phase = (
+        not use_mouth_shape
+        and cph_config is not None
+        and cph_config.enabled
+        and y.ndim == 2
+        and y.shape[1] in (3, 4)
+    )
     num_outputs = ms_config.num_outputs if use_mouth_shape else 1
-    
+
     print(f"Loaded X: {X.shape}, y: {y.shape}")
     if use_mouth_shape:
         print(f"Mode: mouth shape regression ({num_outputs} outputs)")
+    elif use_chew_phase:
+        print("Mode: two-head (eating BCE + chew-phase MSE)")
     else:
         print(f"Mode: binary chewing classification")
     
@@ -183,7 +273,11 @@ def train_model(
             "n_samples": n_samples,
             "input_dim": input_dim,
             "num_outputs": num_outputs,
-            "mode": "mouth_shape" if use_mouth_shape else "binary",
+            "mode": (
+                "mouth_shape" if use_mouth_shape
+                else "two_head" if use_chew_phase
+                else "binary"
+            ),
             "architecture": "3-layer MLP",
         }
         
@@ -224,11 +318,12 @@ def train_model(
         # (single-class val). Fall back to a session-aware random split.
         train_single_class = False
         val_single_class = False
+        eating_targets = y[:, 0] if use_chew_phase else y
         if len(train_idx) > 0:
-            yt = (y[train_idx] >= 0.5).astype(np.int32)
+            yt = (eating_targets[train_idx] >= 0.5).astype(np.int32)
             train_single_class = (yt.sum() == 0) or (yt.sum() == len(yt))
         if len(val_idx) > 0:
-            yv = (y[val_idx] >= 0.5).astype(np.int32)
+            yv = (eating_targets[val_idx] >= 0.5).astype(np.int32)
             val_single_class = (yv.sum() == 0) or (yv.sum() == len(yv))
 
         if (
@@ -245,14 +340,14 @@ def train_model(
             split_val_sessions = sorted(val_sessions)
         else:
             if train_single_class:
-                yt_sum = int((y[train_idx] >= 0.5).sum())
+                yt_sum = int((eating_targets[train_idx] >= 0.5).sum())
                 print(
                     "⚠️  Locked TRAIN split is single-class "
                     f"(train pos={yt_sum}/{len(train_idx)}); "
                     "cannot learn from it. Falling back to session-aware split."
                 )
             elif val_single_class:
-                yv_sum = int((y[val_idx] >= 0.5).sum())
+                yv_sum = int((eating_targets[val_idx] >= 0.5).sum())
                 print(
                     "⚠️  Locked validation split is single-class "
                     f"(val pos={yv_sum}/{len(val_idx)}); "
@@ -281,8 +376,9 @@ def train_model(
                 t_idx = np.flatnonzero(~np.isin(session_ids, list(val_set)))
                 if len(t_idx) == 0 or len(v_idx) == 0:
                     continue
-                yv = (y[v_idx] >= 0.5).astype(np.int32)
-                yt = (y[t_idx] >= 0.5).astype(np.int32)
+                source_targets = y[:, 0] if use_chew_phase else y
+                yv = (source_targets[v_idx] >= 0.5).astype(np.int32)
+                yt = (source_targets[t_idx] >= 0.5).astype(np.int32)
                 two_class_val = 0 < int(yv.sum()) < len(yv)
                 two_class_train = 0 < int(yt.sum()) < len(yt)
                 # Score: train-two-class is worth 2; val-two-class is worth 1.
@@ -354,15 +450,18 @@ def train_model(
         train_ds = TensorDataset(train_X_t, train_y_t)
     val_ds = TensorDataset(val_X_t, val_y_t)
 
-    # Class-balanced sampler for binary mode
+    # Class-balanced sampler for binary / two-head modes
     sampler = None
     pos_weight_value: float | None = None
     if not use_mouth_shape:
-        y_train_bin = (y_train >= config.evaluation.chew_threshold).astype(np.int64)
+        # For two-head mode the eating signal lives in y[:, 0]; for binary it's y itself.
+        y_train_eating = y_train[:, 0] if use_chew_phase else y_train
+        y_val_eating = y_val[:, 0] if use_chew_phase else y_val
+        y_train_bin = (y_train_eating >= config.evaluation.chew_threshold).astype(np.int64)
         n_pos_train = int(y_train_bin.sum())
         n_neg_train = int(len(y_train_bin) - n_pos_train)
-        n_pos_val = int((y_val >= config.evaluation.chew_threshold).sum())
-        n_neg_val = int(len(y_val) - n_pos_val)
+        n_pos_val = int((y_val_eating >= config.evaluation.chew_threshold).sum())
+        n_neg_val = int(len(y_val_eating) - n_pos_val)
         print("\nDATASET BALANCE")
         print("---------------")
         print(f"  train: pos={n_pos_train}  neg={n_neg_train}  "
@@ -395,9 +494,19 @@ def train_model(
     
     # Model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ChewNet(
-        input_dim=input_dim, hidden_dim=tc.hidden_dim, num_outputs=num_outputs
-    ).to(device)
+    if use_chew_phase:
+        phase_valid = y_train[:, 3] if y_train.shape[1] >= 4 else y_train[:, 0]
+        if int((phase_valid >= 0.5).sum()) == 0:
+            raise ValueError(
+                "two-head training is enabled but no reviewed chew-phase windows are present"
+            )
+        model: nn.Module = TwoHeadChewNet(
+            input_dim=input_dim, hidden_dim=tc.hidden_dim
+        ).to(device)
+    else:
+        model = ChewNet(
+            input_dim=input_dim, hidden_dim=tc.hidden_dim, num_outputs=num_outputs
+        ).to(device)
     
     if use_mouth_shape:
         criterion = nn.SmoothL1Loss()
@@ -415,6 +524,9 @@ def train_model(
             criterion = nn.BCEWithLogitsLoss(pos_weight=pw_tensor)
             print(f"  loss: bce_with_logits"
                   + (f"(pos_weight={pos_weight_value:.3f})" if pw_tensor is not None else ""))
+        if use_chew_phase:
+            print(f"  composite: α·BCE + β·MSE (α={cph_config.eating_weight}, β={cph_config.phase_weight}, "
+                  f"mask_when_not_eating={cph_config.mask_when_not_eating})")
     optimizer = torch.optim.Adam(model.parameters(), lr=tc.lr)
     
     best_val_loss = float("inf")
@@ -431,7 +543,17 @@ def train_model(
             
             optimizer.zero_grad()
             logits = model(xb)
-            loss = criterion(logits, yb)
+            if use_chew_phase:
+                loss, _ = two_head_composite_loss(
+                    logits, yb,
+                    eating_weight=cph_config.eating_weight,
+                    phase_weight=cph_config.phase_weight,
+                    eating_criterion=criterion,
+                    mask_when_not_eating=cph_config.mask_when_not_eating,
+                    eating_threshold=config.evaluation.chew_threshold,
+                )
+            else:
+                loss = criterion(logits, yb)
             loss.backward()
             optimizer.step()
             
@@ -446,7 +568,17 @@ def train_model(
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 logits = model(xb)
-                loss = criterion(logits, yb)
+                if use_chew_phase:
+                    loss, _ = two_head_composite_loss(
+                        logits, yb,
+                        eating_weight=cph_config.eating_weight,
+                        phase_weight=cph_config.phase_weight,
+                        eating_criterion=criterion,
+                        mask_when_not_eating=cph_config.mask_when_not_eating,
+                        eating_threshold=config.evaluation.chew_threshold,
+                    )
+                else:
+                    loss = criterion(logits, yb)
                 val_loss += loss.item() * xb.size(0)
         
         val_loss /= n_val
@@ -504,6 +636,15 @@ def train_model(
         checkpoint["label_mean"] = label_mean
         checkpoint["label_std"] = label_std
         checkpoint["mode"] = "mouth_shape"
+    elif use_chew_phase:
+        checkpoint["mode"] = "two_head"
+        checkpoint["output_names"] = ["eating_logit", "chew_phase_sin", "chew_phase_cos"]
+        checkpoint["num_outputs"] = 3
+        checkpoint["chew_phase_head"] = {
+            "eating_weight": cph_config.eating_weight,
+            "phase_weight": cph_config.phase_weight,
+            "mask_when_not_eating": cph_config.mask_when_not_eating,
+        }
     else:
         checkpoint["mode"] = "binary"
     

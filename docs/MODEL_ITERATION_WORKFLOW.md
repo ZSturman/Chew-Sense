@@ -36,18 +36,32 @@ Activate it before every command in this doc.
 
 1. Open `04-RealWorldTesting/ChewSense-RealTime/ChewSenseDebuggingModel.xcodeproj`.
 2. Build and run on iPhone or Mac with AirPods connected.
-3. Hit **New** to start a recording. The app saves a session bundle that
-   contains `motion.csv`, `predictions.csv`, optional `*.mov`, and
-   `session_metadata.json`.
-4. Open the recording in the review pane. Drag review segments to mark
+3. **Pick an activity preset** (Eating soft / Eating hard / Drinking water /
+   Baseline / Walking / Head shake / Nodding / Talking / Singing / Custom)
+   before recording. The preset is required — the record button stays
+   disabled until a Custom description is filled in. The chosen preset
+   stamps the bundle with `activity`, `activity_label`, and
+   `expected_label_class`. See
+   [REAL_WORLD_TEST_PROTOCOL.md](REAL_WORLD_TEST_PROTOCOL.md#activity-presets)
+   for the full table.
+4. Optionally toggle **"Mark as benchmark candidate"**. Two presets default
+   it ON (`head_shake`, `baseline`); the toggle only writes a flag —
+   promotion to `gold_locked` remains an explicit operator step (see
+   step 2 below).
+5. Hit **Start** to begin a recording. The app saves a session bundle that
+   contains `motion.csv`, `predictions.csv`, `<session_id>.mov`, and
+   `session_metadata.json`. **Detection params (alpha, thresholds, window
+   counts) come from the deployed model — they are not adjustable in the
+   UI during a recording.**
+6. Open the recording in the review pane. Drag review segments to mark
    missed chews, false positives, or "the prediction was correct here." On
    finalize, the app writes **`labeled_motion.csv`** — every motion sample
    in the session with a per-row `label` resolved from the model's
    predictions plus your corrections.
-5. Open the **Recording Configuration** inspector and confirm the
+7. Open the **Recording Configuration** inspector and confirm the
    **Bundled Model** section shows the `MODEL_ID` and short SHA you expect.
    That's how you'll know when a new model has actually landed in step 6.
-6. Export the bundle (Files / Finder share sheet) and drop the folder into:
+8. Export the bundle (Files / Finder share sheet) and drop the folder into:
 
    ```
    02-DataPipeline/data/user/field_tests/
@@ -58,6 +72,52 @@ Activate it before every command in this doc.
 > pipeline always prefers `labeled_motion.csv` over the legacy
 > `motion.csv + feedback.csv` pair, so a "correct" review still contributes
 > a fully-labeled session to the next training run.
+
+---
+
+## 1.5 Visual auto-labeler — lab tool only
+
+Stage 04 ships a single review surface: chew/not-chew windows **and**
+chew-stroke ticks live on the same timeline. To make stroke marking
+tractable on real meals, the pipeline auto-seeds strokes from the
+session video using a small CNN+GRU mouth-shape model
+(`02-DataPipeline/pipeline/visual_labeler.py`).
+
+**This model is a dataset tool, not a shipped feature.** It only runs in
+the lab, only reads the on-device camera capture during review, and is
+never exported to CoreML. The shipped iOS/macOS app continues to use the
+motion-only ChewNet checkpoint.
+
+Three guarantees enforce the boundary:
+
+- The model is saved as `models/visual_labeler.pth`. Both
+  [pipeline/deploy.py](../02-DataPipeline/pipeline/deploy.py) and
+  [pipeline/registry.py](../02-DataPipeline/pipeline/registry.py) raise
+  `RuntimeError` if anything with that filename is fed in.
+- A regression gate in
+  [03-ModelEvaluation/labeler_gate.py](../03-ModelEvaluation/labeler_gate.py)
+  refuses to accept a new labeler that doesn't beat the mouth-openness
+  heuristic by ≥10 pp F1 on a held-out set.
+- MediaPipe drop-outs are written to `face_presence.json`. The reviewer
+  can't mark strokes inside face-missing windows, and downstream
+  metrics + training drop those windows.
+
+Typical lab workflow:
+
+```bash
+# Train the labeler on bundles that already have human strokes.
+python -m pipeline.visual_labeler train \
+    --bundles data/curated/accepted_sessions/* \
+    --out models/visual_labeler.pth
+
+# Then on every new bundle, the pipeline auto-seeds strokes:
+python -m pipeline.stroke_seeds <bundle_dir>          # uses the model if present
+```
+
+The closed loop for stroke quality is therefore
+**04-RealWorldTesting → 02-DataPipeline (visual_labeler train) → 03-ModelEvaluation (labeler_gate) → 04-RealWorldTesting**,
+which is intentionally orthogonal to the ChewNet train/deploy loop
+described below.
 
 ---
 
@@ -92,6 +152,54 @@ Useful flags:
 - `--strip-archive-mov` — delete the bulky `.mov`/`.mp4` files inside the
   archived bundle. Labels live in CSV/JSON, so this is lossless for
   training but reclaims most of the disk.
+- `--gold-locked <session_id>` (repeatable) — promote a session into the
+  permanent locked validation set.
+
+### Two-head training (chew-phase mode)
+
+When sessions have been auto-labeled by Stage 02b and reviewed in
+`ChewSense-CycleReviewer`, the pipeline can also learn a chew-phase
+regression head alongside the eating head. Two config knobs in
+`02-DataPipeline/config/defaults.yaml` (or your project config) enable it:
+
+```yaml
+features:
+  extended_chew_phase: true     # emit 3-col targets [eating, sin, cos]
+
+chew_phase_head:
+  enabled: true                 # dispatch TwoHeadChewNet in train.py
+  eating_weight: 1.0            # α — BCE term on eating logit
+  phase_weight: 0.5             # β — MSE term on (sin, cos)
+  mask_when_not_eating: true    # skip phase loss on idle rows
+```
+
+With both flags on, `train.py` builds `TwoHeadChewNet` (shared trunk →
+1-D eating head + 2-D tanh phase head). Checkpoint records
+`mode="two_head"` and `output_names=["eating_logit","chew_phase_sin",
+"chew_phase_cos"]`; `export.py` emits a CoreML model with a single
+`output` tensor of shape `(1, 3)`. The real-time app's
+`ChewPhaseCounter` consumes the sin column to count chew cycles by
+zero-crossing.
+
+### Promoting benchmark candidates
+
+If any imported session has `gold_lock_candidate: true` (set via the
+"Mark as benchmark candidate" toggle in the recording app), the import
+prints a block like:
+
+```text
+🔒 Gold-lock candidates flagged in app:
+     - Eating-field-reviewed-FieldTest-20260502-064508
+     - Not-eating-field-reviewed-FieldTest-20260502-065535
+
+   To promote them into the locked validation set, rerun with:
+     python main_new.py from-field-test --gold-locked Eating-field-reviewed-FieldTest-20260502-064508 \
+       --gold-locked Not-eating-field-reviewed-FieldTest-20260502-065535
+```
+
+The flag is **never auto-applied**. `pipeline/splits.py` documents this as
+the `gold_locked_assignment: explicit_only` invariant — you have to
+choose to lock these sessions.
 
 ---
 

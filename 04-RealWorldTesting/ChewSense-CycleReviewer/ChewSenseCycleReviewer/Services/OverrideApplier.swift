@@ -54,6 +54,30 @@ enum OverrideApplier {
             }
         }
 
+        let deletedBites = Set(overrides.deletedBiteIDs)
+        for i in rows.indices where deletedBites.contains(rows[i].biteID) {
+            rows[i].biteEvent = 0
+            rows[i].biteID = ""
+        }
+        for bite in overrides.editedBites + overrides.addedBites {
+            for i in rows.indices where rows[i].biteID == bite.id {
+                rows[i].biteEvent = 0
+                rows[i].biteID = ""
+            }
+            if let nearest = rows.indices.min(by: {
+                abs(rows[$0].videoTS - bite.ts) < abs(rows[$1].videoTS - bite.ts)
+            }) {
+                rows[nearest].biteEvent = 1
+                rows[nearest].biteID = bite.id
+                rows[nearest].videoConfidence = bite.confidence
+            }
+        }
+        if overrides.verified {
+            for i in rows.indices {
+                rows[i].labelSource = "human_reviewed"
+            }
+        }
+
         return rows
     }
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,12 @@ import pandas as pd
 
 REQUIRED_MOTION_COLUMNS = ["timestamp", "ax", "ay", "az", "gx", "gy", "gz"]
 LABELED_MOTION_FILE = "labeled_motion.csv"
+PORTABLE_REVIEW_ARTIFACTS = (
+    "review_overrides.json",
+    "bite_review.json",
+    "review_feedback.csv",
+    "face_presence.json",
+)
 
 
 @dataclass
@@ -56,6 +63,48 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
     with open(path, "r") as f:
         return json.load(f)
+
+
+def _copy_review_artifacts(
+    bundle: Path,
+    session_dir: Path,
+    session_id: str,
+    csv_name: str,
+    *,
+    include_canonical: bool = True,
+) -> list[str]:
+    copied: list[str] = []
+    for name in PORTABLE_REVIEW_ARTIFACTS:
+        source = bundle / name
+        if source.exists():
+            shutil.copy2(source, session_dir / name)
+            copied.append(name)
+
+    annotations = bundle / "annotations"
+    if include_canonical and annotations.exists():
+        destination = session_dir / "annotations"
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(annotations, destination)
+        copied.append("annotations/")
+
+    session_manifest = _read_json(bundle / "session.json") if include_canonical else {}
+    if session_manifest:
+        session_manifest["session_id"] = session_id
+        session_manifest["source_app"] = "legacy_import"
+        session_manifest["status"] = (
+            "materialized"
+            if (session_dir / "annotations" / "canonical_events.json").exists()
+            else session_manifest.get("status", "coarse_labeled")
+        )
+        motion = session_manifest.setdefault("motion", {})
+        motion["path"] = csv_name
+        video = session_manifest.get("video")
+        if isinstance(video, dict) and not (session_dir / str(video.get("path", ""))).exists():
+            session_manifest["video"] = None
+        (session_dir / "session.json").write_text(json.dumps(session_manifest, indent=2) + "\n")
+        copied.append("session.json")
+    return copied
 
 
 def _truth_from_feedback(row: pd.Series) -> bool | None:
@@ -152,7 +201,7 @@ def import_field_test_bundles(
                 })
                 continue
 
-            reviewed = labeled_motion[required].copy()
+            reviewed = labeled_motion.copy()
             reviewed["timestamp"] = reviewed["timestamp"].astype(float)
             try:
                 reviewed["label"] = _label_series_to_bool(reviewed["label"])
@@ -171,6 +220,12 @@ def import_field_test_bundles(
 
             csv_path = session_dir / f"{session_id}.csv"
             reviewed.to_csv(csv_path, index=False)
+            copied_artifacts = _copy_review_artifacts(
+                bundle,
+                session_dir,
+                session_id,
+                csv_path.name,
+            )
 
             event_metadata = {
                 "session_id": session_id,
@@ -182,6 +237,7 @@ def import_field_test_bundles(
                 "imported_at": datetime.now(timezone.utc).isoformat(),
                 "activity": activity or metadata.get("activity"),
                 "gold_lock_candidate": bool(metadata.get("gold_lock_candidate", False)),
+                "copied_review_artifacts": copied_artifacts,
             }
             with open(session_dir / "_metadata.txt", "w") as f:
                 f.write(json.dumps(event_metadata, indent=2))
@@ -249,6 +305,13 @@ def import_field_test_bundles(
             window["label"] = bool(truth)
             csv_path = session_dir / f"{session_id}.csv"
             window.to_csv(csv_path, index=False)
+            copied_artifacts = _copy_review_artifacts(
+                bundle,
+                session_dir,
+                session_id,
+                csv_path.name,
+                include_canonical=False,
+            )
 
             event_metadata = {
                 "session_id": session_id,
@@ -261,6 +324,7 @@ def import_field_test_bundles(
                 "imported_at": datetime.now(timezone.utc).isoformat(),
                 "activity": activity or metadata.get("activity"),
                 "gold_lock_candidate": bool(metadata.get("gold_lock_candidate", False)),
+                "copied_review_artifacts": copied_artifacts,
             }
             with open(session_dir / "_metadata.txt", "w") as f:
                 f.write(json.dumps(event_metadata, indent=2))

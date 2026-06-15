@@ -4,9 +4,18 @@
 
 This stage transforms raw eating metrics into **interpretable quality scores** backed by nutritional science and behavioral research, providing actionable feedback for healthier eating habits.
 
-## Status: 📋 TODO - Not Yet Implemented
+## Status: ✅ Phase 6 shipped (2026-05-13)
 
-This stage requires bite segmentation (Stage 02) and meal structure analysis (Stage 03) to be completed first.
+`chew_quality.py` implements `ChewQualityEvaluator.evaluate_meal(meal_metrics, bites) → ChewQualityMetrics`
+with `QualityRating` (EXCELLENT / GOOD / FAIR / NEEDS_IMPROVEMENT) and recommendation text.
+Invoked together with the meal analyzer through the dataset CLI:
+
+```bash
+python 02-DataPipeline/main_new.py meal-report --bundle <field-test session>
+```
+
+Outputs the quality block (pace / thoroughness / rhythm / overall) inside
+`03-ModelEvaluation/reports/meals/<session>.{json,md}`.
 
 ## Motivation
 
