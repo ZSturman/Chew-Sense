@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2610"
+   LastUpgradeVersion = "2650"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "EF7BFA252EEBCA9D00E0611E"
+               BlueprintIdentifier = "EF6F1D0F2EED9A0E0076E1CC"
                BuildableName = "ChewSenseDebuggingModel.app"
                BlueprintName = "ChewSenseDebuggingModel"
                ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
@@ -29,26 +29,24 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "EF6F1D0F2EED9A0E0076E1CC"
+            BuildableName = "ChewSenseDebuggingModel.app"
+            BlueprintName = "ChewSenseDebuggingModel"
+            ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO"
             parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "EF7BFA322EEBCA9F00E0611E"
+               BlueprintIdentifier = "EF6F1CFC2EED0D9C0076E1CC"
                BuildableName = "ChewSenseDebuggingModelTests.xctest"
                BlueprintName = "ChewSenseDebuggingModelTests"
-               ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "EF7BFA3C2EEBCA9F00E0611E"
-               BuildableName = "ChewSenseDebuggingModelUITests.xctest"
-               BlueprintName = "ChewSenseDebuggingModelUITests"
                ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -68,7 +66,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "EF7BFA252EEBCA9D00E0611E"
+            BlueprintIdentifier = "EF6F1D0F2EED9A0E0076E1CC"
             BuildableName = "ChewSenseDebuggingModel.app"
             BlueprintName = "ChewSenseDebuggingModel"
             ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
@@ -85,21 +83,12 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "EF7BFA252EEBCA9D00E0611E"
+            BlueprintIdentifier = "EF6F1D0F2EED9A0E0076E1CC"
             BuildableName = "ChewSenseDebuggingModel.app"
             BlueprintName = "ChewSenseDebuggingModel"
             ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "EF7BFA252EEBCA9D00E0611E"
-            BuildableName = "ChewSenseDebuggingModel.app"
-            BlueprintName = "ChewSenseDebuggingModel"
-            ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

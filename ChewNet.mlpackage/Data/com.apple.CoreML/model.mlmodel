@@ -4,12 +4,12 @@
 *
  €R
 logit	*
- €¢Þ¢:
-+com.github.apple.coremltools.source_dialectTorchScript¢3
+ €¢Þ¢+
+$com.github.apple.coremltools.version9.0¢3
 #com.github.apple.coremltools.sourcetorch==2.9.1¢:
++com.github.apple.coremltools.source_dialectTorchScript¢:
 ,com.github.apple.coremltools.conversion_date
-2025-12-12¢+
-$com.github.apple.coremltools.version9.0²Ýð
+2026-05-03²Ýð
 mainç
 
 input
@@ -61,13 +61,13 @@ $com.github.apple.coremltools.version9.0²Ýð
 
  *#
 @model_path/weights/weight.bin€}
-cast"
-dtype
-
-input_to_fp16_dtype_0
+cast
 x	
 
-input#
+input"
+dtype
+
+input_to_fp16_dtype_0#
 input_to_fp16
 
 
@@ -78,16 +78,16 @@ $com.github.apple.coremltools.version9.0²Ýð
 
 "
 cast_1¸
-linear"
+linear
+x
+
+input_to_fp16"
 weight
 
 net_0_weight_to_fp16
 bias
 
-net_0_bias_to_fp16
-x
-
-input_to_fp16(
+net_0_bias_to_fp16(
 linear_0_cast_fp16
 
 
@@ -142,16 +142,16 @@ $com.github.apple.coremltools.version9.0²Ýð
 
  *#
 @model_path/weights/weight.binÀ¼
-linear"
+linear
+x
+
+input_3_cast_fp16"
 weight
 
 net_2_weight_to_fp16
 bias
 
-net_2_bias_to_fp16
-x
-
-input_3_cast_fp16(
+net_2_bias_to_fp16(
 linear_1_cast_fp16
 
 
@@ -206,17 +206,17 @@ $com.github.apple.coremltools.version9.0²Ýð
 
 
 :
-êº
-linear"
+7º
+linear
+x
+
+input_cast_fp16"
 weight
 
 net_4_weight_to_fp16
 bias
 
-net_4_bias_to_fp16
-x
-
-input_cast_fp16(
+net_4_bias_to_fp16(
 linear_2_cast_fp16
 
 
@@ -270,13 +270,13 @@ $com.github.apple.coremltools.version9.0²Ýð
 
 "
 fp32…
-cast-
-dtype$
-"
- var_18_cast_fp16_to_fp32_dtype_0
+cast
 x
 
-var_18_cast_fp16
+var_18_cast_fp16-
+dtype$
+"
+ var_18_cast_fp16_to_fp32_dtype_0
 logit
 
 

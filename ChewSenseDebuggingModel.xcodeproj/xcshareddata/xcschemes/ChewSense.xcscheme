@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2610"
+   LastUpgradeVersion = "2650"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -20,8 +20,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "EF6F1CFC2EED0D9C0076E1CC"
-               BuildableName = "ChewSense.xctest"
-               BlueprintName = "ChewSense"
+               BuildableName = "ChewSenseDebuggingModelTests.xctest"
+               BlueprintName = "ChewSenseDebuggingModelTests"
                ReferencedContainer = "container:ChewSenseDebuggingModel.xcodeproj">
             </BuildableReference>
          </TestableReference>
