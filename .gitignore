@@ -1,85 +1,57 @@
-# Video files (data collection generates these but only CSVs are needed)
+# Local ChewSense workspace
+workspace/**
+workspace/**/*
+!workspace/**/
+!workspace/**/.gitkeep
+!workspace/README.md
+
+# Recoverable local cold storage. Keep its checksum manifest under workspace/.
+archive/
+
+# Participant media outside the workspace
 *.mov
 *.mp4
 *.avi
 *.m4v
+!fixtures/**/*.mov
+!fixtures/**/*.mp4
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
 .Python
+.venv/
+.venv-export/
+venv/
+env/
+ENV/
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
-*.cover
 .hypothesis/
 .env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-.venv-export/
-
-# Folio
-*.folio
-AppStoreScreenShots/
-AssetFolder/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
 .python-version
+.ipynb_checkpoints/
 
-# Weights & Biases
+# Generated ML and reports
 wandb/
+logs/
+*.log
+*.folio
 
-# macOS
+# Apple and IDE
 .DS_Store
-.AppleDouble
-.LSOverride
-Icon
 ._*
-.DocumentRevisions-V100
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
-
-# Xcode
 xcuserdata/
+*.xcuserstate
+DerivedData/
 *.xcscmblueprint
 *.xccheckout
-DerivedData/
 *.moved-aside
 *.pbxuser
 !default.pbxuser
@@ -91,26 +63,16 @@ DerivedData/
 !default.perspectivev3
 *.hmap
 *.ipa
-*.dSYM.zip
 *.dSYM
-
-# CocoaPods
-Pods/
-
-# Carthage
-Carthage/Build/
-
-# Swift Package Manager
+*.dSYM.zip
 .swiftpm/
 .build/
-
-# Logs
-logs/
-*.log
-IMPLEMENTATION_STATUS.md
-
-# ChewSense generated model registry
-02-DataPipeline/model_registry/runs/
+Pods/
+Carthage/Build/
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
 
 # Temporary files
 *.tmp
@@ -118,9 +80,3 @@ IMPLEMENTATION_STATUS.md
 *.swp
 *.swo
 *~
-
-# IDE
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace

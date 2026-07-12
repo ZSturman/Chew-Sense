@@ -1,3 +1,0 @@
-# HowsMyEating
-
-Brief overview.

@@ -1,0 +1,51 @@
+{
+  "fill" : {
+    "solid" : "display-p3:0.19577,0.25529,0.32434,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "SoundWaves.svg",
+          "name" : "SoundWaves"
+        },
+        {
+          "fill" : "automatic",
+          "glass-specializations" : [
+            {
+              "value" : true
+            },
+            {
+              "appearance" : "dark",
+              "value" : true
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "AirPod.svg",
+          "name" : "AirPod",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              210.50000004499873,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

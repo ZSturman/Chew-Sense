@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chewsense-motion"
+version = "0.1.0"
+description = "ChewSense motion import, training, evaluation, registry, and promotion CLI."
+requires-python = ">=3.10"
+
+[project.scripts]
+chewsense-motion = "chewsense_motion:main"
+
+[tool.setuptools]
+py-modules = ["chewsense_motion"]
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
