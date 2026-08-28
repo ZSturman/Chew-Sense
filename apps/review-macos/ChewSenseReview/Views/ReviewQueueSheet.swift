@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Review Queue: a focused side panel for watching each chew end-to-end and
-/// confirming Start / Peak / End. The current chew loops in the main video
+/// confirming Closed start / Maximum open / Closed end. The current chew loops in the main video
 /// stage (clip-cinema mode) while this panel surfaces marker-level controls.
 struct ReviewQueuePanel: View {
     @EnvironmentObject var state: ReviewerState
@@ -62,7 +62,7 @@ struct ReviewQueuePanel: View {
                     .help("Close (M)")
             }
             HStack {
-                Toggle("Unverified only", isOn: $unverifiedOnly)
+                Toggle("Pending only", isOn: $unverifiedOnly)
                     .toggleStyle(.switch)
                     .controlSize(.small)
                 Spacer()
@@ -73,7 +73,7 @@ struct ReviewQueuePanel: View {
                 }
                 .buttonStyle(.plain)
                 .help("Show full queue")
-                Text("\(state.verifiedCount) / \(state.chews.count)")
+                Text("\(state.verifiedCount) / \(state.candidateChewCount)")
                     .font(.system(.caption, design: .monospaced).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -96,8 +96,8 @@ struct ReviewQueuePanel: View {
             ForEach(Array(queue.enumerated()), id: \.element) { (idx, chewID) in
                 if let c = state.chews.first(where: { $0.id == chewID }) {
                     HStack {
-                        Image(systemName: state.isVerified(id: chewID) ? "checkmark.seal.fill" : "circle")
-                            .foregroundStyle(state.isVerified(id: chewID) ? .green : .secondary)
+                        Image(systemName: decisionIcon(for: chewID))
+                            .foregroundStyle(decisionColor(for: chewID))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(c.id).font(.system(.caption, design: .monospaced))
                             Text(String(format: "%.2fs · %.0fms", c.startTS, c.duration * 1000))
@@ -156,7 +156,7 @@ struct ReviewQueuePanel: View {
             VStack(spacing: 8) {
                 Image(systemName: "checkmark.seal.fill").font(.largeTitle).foregroundStyle(.green)
                 Text("Queue complete").font(.headline)
-                Text("Toggle 'Unverified only' off to revisit verified chews.")
+                Text("Toggle 'Pending only' off to revisit decided chews.")
                     .font(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -215,16 +215,33 @@ struct ReviewQueuePanel: View {
             .help("Play / pause (Space)")
 
             Button {
-                if let id = currentChewID {
-                    state.toggleChewVerified(id: id)
+                if let id = currentChewID, currentChew?.source != .added,
+                   state.disposition(for: id) != .accepted {
+                    state.acceptChew(id: id)
                 }
                 next()
             } label: {
-                Label(currentVerified ? "Unaccept ›" : "Accept ›", systemImage: "checkmark.seal.fill")
+                Label(currentAccepted ? "Next ›" : "Accept ›", systemImage: "checkmark.seal.fill")
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
             .help("Verify and advance (V)")
+
+            Menu {
+                Button("Unobservable") {
+                    guard let id = currentChewID else { return }
+                    state.markChewUnobservable(id: id)
+                    next()
+                }
+                Button("Uncertain") {
+                    guard let id = currentChewID else { return }
+                    state.markChewUncertain(id: id)
+                    next()
+                }
+            } label: {
+                Label("Exclude", systemImage: "eye.slash")
+            }
+            .help("Record why this cycle cannot provide phase supervision")
 
             Button(role: .destructive) {
                 guard currentChew != nil else { return }
@@ -245,9 +262,9 @@ struct ReviewQueuePanel: View {
                 shortcut("M", "close")
             }
             HStack(spacing: 10) {
-                shortcut("S+←/→", "nudge start")
-                shortcut("P+←/→", "nudge peak")
-                shortcut("E+←/→", "nudge end")
+                shortcut("S+←/→", "nudge closed start")
+                shortcut("P+←/→", "nudge maximum open")
+                shortcut("E+←/→", "nudge closed end")
             }
         }
         .font(.caption2)
@@ -271,9 +288,33 @@ struct ReviewQueuePanel: View {
         guard let id = currentChewID else { return nil }
         return state.chews.first { $0.id == id }
     }
-    private var currentVerified: Bool {
+    private var currentAccepted: Bool {
         guard let id = currentChewID else { return false }
-        return state.isVerified(id: id)
+        switch state.disposition(for: id) {
+        case .accepted, .edited, .added: return true
+        default: return false
+        }
+    }
+
+    private func decisionIcon(for id: String) -> String {
+        switch state.disposition(for: id) {
+        case .accepted: "checkmark.seal.fill"
+        case .edited: "slider.horizontal.3"
+        case .unobservable: "eye.slash.fill"
+        case .uncertain: "questionmark.diamond.fill"
+        case .added: "plus.circle.fill"
+        case .rejected: "xmark.circle.fill"
+        case .none: "circle"
+        }
+    }
+
+    private func decisionColor(for id: String) -> Color {
+        switch state.disposition(for: id) {
+        case .accepted, .edited, .added: .green
+        case .unobservable, .uncertain: .purple
+        case .rejected: .red
+        case .none: .secondary
+        }
     }
 
     private func rebuildQueue(reset: Bool) {
@@ -375,18 +416,30 @@ struct ReviewQueuePanel: View {
                         nextBite()
                     } label: {
                         Label(
-                            state.isBiteVerified(id: bite.id) ? "Accepted" : "Accept",
+                            state.foodEntryDisposition(for: bite.id) == .accepted ? "Accepted" : "Accept",
                             systemImage: "checkmark.circle.fill"
                         )
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
+                    Menu {
+                        Button("Unobservable") {
+                            state.markFoodEntryUnobservable(id: bite.id)
+                            nextBite()
+                        }
+                        Button("Uncertain") {
+                            state.markFoodEntryUncertain(id: bite.id)
+                            nextBite()
+                        }
+                    } label: {
+                        Label("Exclude", systemImage: "eye.slash")
+                    }
                 }
                 Button {
                     state.addBite(at: playback.currentTime)
                     biteIndex = max(0, state.bites.count - 1)
                 } label: {
-                    Label("Add missed bite at playhead", systemImage: "plus.circle")
+                    Label("Add missed food entry at playhead", systemImage: "plus.circle")
                 }
                 .buttonStyle(.link)
             }
@@ -395,13 +448,13 @@ struct ReviewQueuePanel: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Food-entry events").font(.headline)
-                Text("No predicted bites. Use the full-video pass to add any missed events.")
+                Text("No food-entry candidates. Use the full-video pass to add any missed events.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button {
                     state.addBite(at: playback.currentTime)
                     biteIndex = max(0, state.bites.count - 1)
                 } label: {
-                    Label("Add bite at playhead", systemImage: "plus.circle")
+                    Label("Add food entry at playhead", systemImage: "plus.circle")
                 }
             }
         }
@@ -433,7 +486,7 @@ struct ReviewQueuePanel: View {
         }
     }
 
-    private var currentBite: ReviewBite? {
+    private var currentBite: ReviewFoodEntry? {
         state.bites.indices.contains(biteIndex) ? state.bites[biteIndex] : nil
     }
 

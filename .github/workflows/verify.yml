@@ -1,0 +1,29 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: ./tools/verify fast
+      - run: ./tools/verify fixture
+
+  apple-apps:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: ./tools/verify apps

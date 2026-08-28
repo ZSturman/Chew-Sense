@@ -83,14 +83,17 @@ struct MainContentView: View {
                 .navigationDestination(item: $selectedSessionURL) { url in
                     LiveSessionDetailView(
                         sessionURL: url,
-                        summary: sessionLibrary.summary(for: url)
+                        summary: sessionLibrary.summary(for: url),
+                        motionManager: motionManager
                     )
                 }
         }
         .inspector(isPresented: $showConfigurationInspector) {
             DetectionConfigurationInspector(
                 config: config,
-                isEditable: !motionManager.isRunning && !motionManager.isFinalizingSession
+                isEditable: !motionManager.isRunning
+                    && !motionManager.isStartingSession
+                    && !motionManager.isFinalizingSession
             )
         }
         .onAppear {
@@ -202,7 +205,9 @@ struct MainContentView: View {
         .inspector(isPresented: $showConfigurationInspector) {
             DetectionConfigurationInspector(
                 config: config,
-                isEditable: !motionManager.isRunning && !motionManager.isFinalizingSession
+                isEditable: !motionManager.isRunning
+                    && !motionManager.isStartingSession
+                    && !motionManager.isFinalizingSession
             )
         }
         .onAppear {
@@ -313,7 +318,14 @@ struct MainContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
-            .disabled(motionManager.isRunning || motionManager.isFinalizingSession)
+            .disabled(
+                motionManager.isRunning
+                    || motionManager.isStartingSession
+                    || motionManager.isFinalizingSession
+            )
+            .accessibilityIdentifier("newFieldTestButton")
+
+            LiveGuidanceView(stage: .prepare)
 
             if CollectionRecommendations.current.hasRecommendations {
                 Divider()
@@ -340,14 +352,19 @@ struct MainContentView: View {
                     NextRecommendationRow(recommendation: recommendation)
                 }
                 .buttonStyle(.plain)
-                .disabled(motionManager.isRunning || motionManager.isFinalizingSession)
+                .disabled(
+                    motionManager.isRunning
+                        || motionManager.isStartingSession
+                        || motionManager.isFinalizingSession
+                )
             }
         }
     }
 
     @ViewBuilder
     private var detail: some View {
-        if isComposingNew || motionManager.isRunning || motionManager.isFinalizingSession {
+        if isComposingNew || motionManager.isRunning
+            || motionManager.isStartingSession || motionManager.isFinalizingSession {
             RecordingComposerView(
                 motionManager: motionManager,
                 config: config,
@@ -361,7 +378,8 @@ struct MainContentView: View {
         } else if let selectedSessionURL {
             LiveSessionDetailView(
                 sessionURL: selectedSessionURL,
-                summary: sessionLibrary.summary(for: selectedSessionURL)
+                summary: sessionLibrary.summary(for: selectedSessionURL),
+                motionManager: motionManager
             )
             .id(selectedSessionURL)
         } else {
@@ -472,6 +490,8 @@ private struct LiveRecordingDetailView: View {
                         .foregroundStyle(motionManager.isChewing ? .orange : .blue)
                 }
 
+                LiveGuidanceView(stage: .record)
+
                 #if os(iOS)
                 if let captureSession = motionManager.captureSession {
                     CameraPreviewView(session: captureSession)
@@ -537,7 +557,7 @@ private struct LivePredictionTimelineView: View {
             let labelWidth: CGFloat = min(104, max(86, geo.size.width * 0.20))
             let laneWidth = max(geo.size.width - labelWidth - 12, 1)
             let timelineDuration = max(duration, spans.map(\.endTime).max() ?? 0)
-            let coverage = ReviewLabelResolver.coverageSpans(from: spans, duration: timelineDuration)
+            let coverage = PredictionSpanResolver.coverageSpans(from: spans, duration: timelineDuration)
 
             ZStack(alignment: .topLeading) {
                 Text("Predicted")
@@ -644,44 +664,214 @@ private struct SessionSidebarRow: View {
 private struct LiveSessionDetailView: View {
     let sessionURL: URL
     let summary: ReviewSessionSummary?
+    @ObservedObject var motionManager: MotionManager
+
+    @State private var mealSummary: StoredMealSummary?
+    @State private var calibrationProgress: CalibrationProgress?
+    @State private var calibrationMessage: String?
+    @State private var isVerifiedCalibration = false
+    @State private var showCalibrationConfirmation = false
+    @State private var cadenceGoalDraft = 0.6
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(summary?.title ?? sessionURL.lastPathComponent)
-                .font(.title2.weight(.semibold))
-            Text("This app records motion-only field tests and preserves the active model ID. It does not create or edit ground truth.")
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(summary?.title ?? sessionURL.lastPathComponent)
+                    .font(.title2.weight(.semibold))
+                Text("This app captures synchronized video, AirPods motion, and model telemetry. It does not create or edit ground truth.")
+                    .foregroundStyle(.secondary)
 
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                GridRow {
-                    Text("Duration").foregroundStyle(.secondary)
-                    Text(summary?.formattedDuration ?? "--:--")
-                }
-                GridRow {
-                    Text("Predictions").foregroundStyle(.secondary)
-                    Text("\(summary?.predictionCount ?? 0)")
-                }
-                if let activity = summary?.activityLabel ?? summary?.activitySlug {
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
-                        Text("Activity").foregroundStyle(.secondary)
-                        Text(activity)
+                        Text("Duration").foregroundStyle(.secondary)
+                        Text(summary?.formattedDuration ?? "--:--")
+                    }
+                    GridRow {
+                        Text("Predictions").foregroundStyle(.secondary)
+                        Text("\(summary?.predictionCount ?? 0)")
+                    }
+                    if let activity = summary?.activityLabel ?? summary?.activitySlug {
+                        GridRow {
+                            Text("Activity").foregroundStyle(.secondary)
+                            Text(activity)
+                        }
                     }
                 }
+
+                if let mealSummary {
+                    postMealSummary(mealSummary)
+                }
+
+                Text("Export this bundle to the computer pipeline. Legacy annotations are preserved only for migration; new chew-cycle and food-entry labels belong to CycleReviewer.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                LiveGuidanceView(stage: .export)
+
+                ShareLink(item: sessionURL) {
+                    Label("Export Session Bundle", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("exportLiveSessionButton")
             }
-
-            Text("Export this bundle to the computer pipeline. Any legacy review files are preserved for migration, but new chew and bite labels belong to CycleReviewer.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            ShareLink(item: sessionURL) {
-                Label("Export Session Bundle", systemImage: "square.and.arrow.up")
-            }
-            .buttonStyle(.borderedProminent)
-
-            Spacer()
+            .padding(24)
         }
-        .padding(24)
         .navigationTitle("Field Test")
+        .task(id: sessionURL) { loadMealSummary() }
+        .confirmationDialog(
+            "Use this as a calibration meal?",
+            isPresented: $showCalibrationConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Verify Calibration Meal") { verifyCalibrationMeal() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This saves the session's median confident chew interval to your personal \(mealSummary?.texture.title ?? "meal") baseline. Three verified meals activate cadence coaching for that texture.")
+        }
+    }
+
+    @ViewBuilder
+    private func postMealSummary(_ meal: StoredMealSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Post-meal cadence")
+                .font(.headline)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                GridRow {
+                    Text("Detected chews").foregroundStyle(.secondary)
+                    Text("\(meal.detectedChews)")
+                }
+                GridRow {
+                    Text("Median interval").foregroundStyle(.secondary)
+                    Text(meal.medianInterval.map { String(format: "%.2f s", $0) } ?? "—")
+                }
+                if let p10 = meal.intervalP10, let p90 = meal.intervalP90 {
+                    GridRow {
+                        Text("Cadence distribution").foregroundStyle(.secondary)
+                        Text(String(format: "P10 %.2f s · P90 %.2f s", p10, p90))
+                    }
+                }
+                GridRow {
+                    Text("Confidence coverage").foregroundStyle(.secondary)
+                    Text(String(format: "%.0f%%", meal.confidenceCoverage * 100))
+                }
+                GridRow {
+                    Text("Excluded uncertain").foregroundStyle(.secondary)
+                    Text(String(format: "%.1f s", meal.uncertainTimeSec))
+                }
+            }
+
+            if meal.chewEventModelPromoted, meal.medianInterval != nil {
+                if isVerifiedCalibration {
+                    Label(calibrationProgressText, systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    if calibrationProgress?.cadenceGoalActivated == true {
+                        Stepper(
+                            "Minimum rolling median: \(cadenceGoalDraft, format: .number.precision(.fractionLength(2))) s",
+                            value: $cadenceGoalDraft,
+                            in: 0.20...2.00,
+                            step: 0.05
+                        )
+                        Button("Save Personal Cadence Goal") {
+                            motionManager.updatePersonalizedCadenceGoal(
+                                texture: meal.texture,
+                                minimumMedianIntervalSec: cadenceGoalDraft
+                            )
+                            calibrationMessage = "Personal cadence goal saved."
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    Button {
+                        showCalibrationConfirmation = true
+                    } label: {
+                        Label("Verify as Calibration Meal", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            } else {
+                Text("Calibration is unavailable because this session was not produced by a promoted individual-chew model.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let calibrationMessage {
+                Text(calibrationMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Cadence guidance is a personal wellness aid, not medical advice.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var calibrationProgressText: String {
+        guard let progress = calibrationProgress else { return "Calibration meal saved" }
+        if progress.cadenceGoalActivated {
+            return "Cadence baseline active (\(progress.verifiedMealCount) verified meals)"
+        }
+        return "Calibration saved (\(progress.verifiedMealCount) of 3 meals)"
+    }
+
+    private func loadMealSummary() {
+        mealSummary = StoredMealSummary.load(from: sessionURL)
+        isVerifiedCalibration = CompletedMealCalibration.isVerified(at: sessionURL)
+        if let mealSummary {
+            calibrationProgress = motionManager.calibrationProgress(for: mealSummary.texture)
+            cadenceGoalDraft = motionManager.personalizedGoals(for: mealSummary.texture)?
+                .minimumMedianInterChewIntervalSec ?? mealSummary.medianInterval ?? 0.6
+        }
+    }
+
+    private func verifyCalibrationMeal() {
+        do {
+            let receipt = try motionManager.verifyCompletedCalibrationMeal(at: sessionURL)
+            calibrationProgress = CalibrationProgress(
+                texture: receipt.texture,
+                verifiedMealCount: receipt.verifiedMealCount,
+                cadenceGoalActivated: receipt.cadenceGoalActivated
+            )
+            isVerifiedCalibration = true
+            cadenceGoalDraft = motionManager.personalizedGoals(for: receipt.texture)?
+                .minimumMedianInterChewIntervalSec ?? cadenceGoalDraft
+            calibrationMessage = receipt.cadenceGoalActivated
+                ? "Your editable cadence goal now starts from your personal median."
+                : "Verify \(max(0, 3 - receipt.verifiedMealCount)) more meal(s) of this texture to activate coaching."
+        } catch {
+            calibrationMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct StoredMealSummary {
+    let texture: MealTexture
+    let detectedChews: Int
+    let medianInterval: Double?
+    let intervalP10: Double?
+    let intervalP90: Double?
+    let confidenceCoverage: Double
+    let uncertainTimeSec: Double
+    let chewEventModelPromoted: Bool
+
+    static func load(from sessionURL: URL) -> StoredMealSummary? {
+        let url = sessionURL.appendingPathComponent("meal_metrics.json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let textureRaw = payload["texture"] as? String,
+              let texture = MealTexture(rawValue: textureRaw) else { return nil }
+        let distribution = payload["cadence_distribution_sec"] as? [String: Any]
+        return StoredMealSummary(
+            texture: texture,
+            detectedChews: (payload["detected_chews"] as? NSNumber)?.intValue ?? 0,
+            medianInterval: payload["median_inter_chew_interval_sec"] as? Double,
+            intervalP10: distribution?["p10"] as? Double,
+            intervalP90: distribution?["p90"] as? Double,
+            confidenceCoverage: payload["confidence_coverage"] as? Double ?? 0,
+            uncertainTimeSec: payload["time_excluded_uncertain_sec"] as? Double ?? 0,
+            chewEventModelPromoted: payload["chew_event_model_promoted"] as? Bool ?? false
+        )
     }
 }
 

@@ -1,13 +1,11 @@
 """
-Canonical event schemas shared by bite segmentation, meal analysis, and
-the chew/bite metrics evaluation harness.
+Canonical event schemas shared by chewing-bout segmentation and evaluation.
 
 All timestamps are in seconds, relative to the session start, matching the
 convention used by `motion.csv` and `predictions.csv` in field-test bundles.
 
-Mirror types live in Swift under
-`apps/live-ios/ChewSenseLive/Models/`
-(`ChewStroke.swift`, `BiteEvent.swift`). Keep field names in sync.
+Mirror types live in Swift under `apps/live-ios/ChewSenseLive/Models/`
+(`ChewStroke.swift`, `ChewingBout.swift`). Keep field names in sync.
 """
 
 from __future__ import annotations
@@ -46,8 +44,12 @@ class ChewStroke:
 
 
 @dataclass
-class BiteEvent:
-    """A discrete bite: a contiguous chewing episode, with its strokes."""
+class ChewingBout:
+    """A contiguous chewing episode, with its strokes.
+
+    A bout is not a bite.  Only a separately verified food-entry event can
+    start a bite grouping; continuous chewing may contain multiple entries.
+    """
     start_time: float
     end_time: float
     confidence: float = 0.0
@@ -68,5 +70,4 @@ class BiteEvent:
             "chew_strokes": [s.to_dict() for s in self.chew_strokes],
         }
 
-
-__all__ = ["ChewStroke", "BiteEvent", "CHEW_STROKE_SOURCES"]
+__all__ = ["ChewStroke", "ChewingBout", "CHEW_STROKE_SOURCES"]

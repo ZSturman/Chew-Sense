@@ -1,6 +1,4 @@
-"""Annotated-video renderer. Reads frames + per-frame records + episodes/chews/
-bites and writes an MP4 with overlays.
-"""
+"""Render fused mouth-cycle and food-entry proposal telemetry on video."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,7 +74,7 @@ def render_annotated_video(
     show_hand_lines = _flag("show_hand_lines", True, False)
     show_chew_marks = _flag("show_chew_marks", True, False)
     show_cycle_flash = _flag("show_cycle_flash", True, False)
-    show_bite_pulse = _flag("show_bite_pulse", True, False)
+    show_food_entry_pulse = _flag("show_food_entry_pulse", True, False)
     show_chin_nose_ref = _flag("show_chin_nose_ref", True, False)
     strip_h = 78 if show_strip else 0
     proxy_strip_h = 36 if (show_strip and show_proxy_strip) else 0
@@ -89,20 +87,23 @@ def render_annotated_video(
 
     rec_by_idx = {r.frame_idx: r for r in frame_records}
     chew_marks: dict[int, str] = {}
-    bite_origin_frames: set[int] = set()
+    food_entry_origin_frames: set[int] = set()
     pulse_frames = max(1, int(0.5 * fps))
-    ep_intervals = [(ep.start_ts, ep.end_ts, ep.id, ep.confidence) for ep in events.episodes]
 
-    for ep in events.episodes:
-        for ch in ep.chews:
-            for k, key in (("start", "start_frame"), ("peak", "peak_frame"), ("end", "end_frame")):
-                f = ch.evidence.get(key, -1)
-                if f >= 0:
-                    chew_marks[f] = k
-        for b in ep.bites:
-            f = b.evidence.get("approach_end_frame")
-            if f is not None:
-                bite_origin_frames.add(int(f))
+    for cycle in events.mouth_cycles:
+        for kind, key in (
+            ("start", "start_frame"),
+            ("peak", "peak_frame"),
+            ("end", "end_frame"),
+        ):
+            frame = int(cycle.evidence.get(key, -1))
+            if frame >= 0:
+                chew_marks[frame] = kind
+    if frame_records:
+        frame_times = np.asarray([record.ts for record in frame_records])
+        for proposal in events.food_entry_proposals:
+            frame = int(np.argmin(np.abs(frame_times - proposal.food_entry_ts)))
+            food_entry_origin_frames.add(frame_records[frame].frame_idx)
 
     # Phase 1: per-frame counters + cycle-completion flashes
     show_hud = cfg["annotate"].get("show_mouth_state_hud", True)
@@ -171,7 +172,7 @@ def render_annotated_video(
             _draw_face_overlay(canvas, rec, meta, show_bbox=show_bbox,
                                show_chin_nose=show_chin_nose_ref)
             _draw_hands(canvas, meta, show_lines=show_hand_lines)
-            _draw_status(canvas, rec, ts, ep_intervals, clean=clean)
+            _draw_status(canvas, rec, ts, clean=clean)
 
         if show_chew_marks and idx in chew_marks and meta.get("mouth_xy"):
             kind = chew_marks[idx]
@@ -196,7 +197,7 @@ def render_annotated_video(
             v, cl, am = _counters_at(idx)
             _draw_mouth_state_hud(canvas, rec, v, cl, am)
 
-        if show_bite_pulse and idx in bite_origin_frames:
+        if show_food_entry_pulse and idx in food_entry_origin_frames:
             pulse_state.append((pulse_frames, idx))
         new_pulse: list[tuple[int, int]] = []
         for remain, origin in pulse_state:
@@ -304,7 +305,7 @@ def _draw_hands(canvas, meta, *, show_lines: bool = True):
                      (int(mxy[0]), int(mxy[1])), C_BLUE, 1, cv2.LINE_AA)
 
 
-def _draw_status(canvas, rec, ts, ep_intervals, *, clean: bool = False):
+def _draw_status(canvas, rec, ts, *, clean: bool = False):
     label = rec.label
     color = _label_color(label)
     cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 32), (0, 0, 0), -1)
@@ -319,29 +320,27 @@ def _draw_status(canvas, rec, ts, ep_intervals, *, clean: bool = False):
         txt = (f"t={ts:6.2f}s  label={label}  conf={rec.label_confidence:.2f}  "
                f"jaw={rec.jaw_open_smooth:.3f}  h2m={h2m_str}")
     cv2.putText(canvas, txt, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
-    for s, e, eid, conf in ep_intervals:
-        if s <= ts <= e:
-            cv2.putText(canvas, f"[{eid} c={conf:.2f}]",
-                        (canvas.shape[1] - 200, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, C_GREEN, 1, cv2.LINE_AA)
-            break
 
 
 def _draw_strip(canvas, ts, events, height, strip_h, width):
     duration = max(events.duration_s, 1e-3)
     y0 = height
     cv2.rectangle(canvas, (0, y0), (width, y0 + strip_h), (20, 20, 20), -1)
-    for ep in events.episodes:
-        x0 = int(ep.start_ts / duration * width)
-        x1 = int(ep.end_ts / duration * width)
-        cv2.rectangle(canvas, (x0, y0 + 10), (x1, y0 + 30), (40, 180, 40), -1)
-    for ep in events.episodes:
-        for ch in ep.chews:
-            x = int(ch.peak_ts / duration * width)
-            cv2.line(canvas, (x, y0 + 30), (x, y0 + 50), C_YELLOW, 1)
-        for b in ep.bites:
-            x = int(b.ts / duration * width)
-            cv2.circle(canvas, (x, y0 + 40), 4, C_PINK, -1)
+    for cycle in events.mouth_cycles:
+        x0 = int(cycle.start_ts / duration * width)
+        x1 = max(x0 + 1, int(cycle.end_ts / duration * width))
+        cv2.rectangle(
+            canvas,
+            (x0, y0 + 10),
+            (x1, y0 + 30),
+            _cycle_color(cycle.kind),
+            -1,
+        )
+        peak_x = int(cycle.peak_ts / duration * width)
+        cv2.line(canvas, (peak_x, y0 + 30), (peak_x, y0 + 50), C_YELLOW, 1)
+    for proposal in events.food_entry_proposals:
+        x = int(proposal.food_entry_ts / duration * width)
+        cv2.circle(canvas, (x, y0 + 40), 4, C_PINK, -1)
     for sp in events.non_eating_mouth_spans:
         x0 = int(sp.start_ts / duration * width)
         x1 = int(sp.end_ts / duration * width)

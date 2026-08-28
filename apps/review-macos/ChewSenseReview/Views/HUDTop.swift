@@ -26,7 +26,7 @@ struct HUDTop: View {
                         Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
                     }
                 }
-                Text(state.statusMessage.isEmpty ? "Drag on the strip below to add a chew. 1/2/3 nudges Start/Peak/End." : state.statusMessage)
+                Text(state.statusMessage.isEmpty ? "Drag to add a chew. 1/2/3 sets Closed start / Maximum open / Closed end." : state.statusMessage)
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
@@ -110,7 +110,7 @@ struct HUDTop: View {
     }
 
     private var counterPill: some View {
-        let total = state.chews.count
+        let total = state.candidateChewCount
         let idx = (state.selectedChewIndex ?? -1) + 1
         return Text(idx > 0 ? "\(idx) / \(total)" : "0 / \(total)")
             .font(.system(.callout, design: .monospaced).monospacedDigit())
@@ -122,13 +122,13 @@ struct HUDTop: View {
     private var verifiedPill: some View {
         HStack(spacing: 4) {
             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-            Text("\(state.verifiedCount) / \(state.chews.count)")
+            Text("\(state.verifiedCount) / \(state.candidateChewCount)")
                 .font(.system(.callout, design: .monospaced).monospacedDigit())
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10).padding(.vertical, 4)
         .background(Color.green.opacity(0.18), in: Capsule())
-        .help("Chews verified")
+        .help("Chew candidates with a review decision")
     }
 
     private var statsBadge: some View {
@@ -137,7 +137,8 @@ struct HUDTop: View {
             statBadge("V", s.visible, .gray)
             statBadge("A", s.added, .blue)
             statBadge("E", s.edited, .orange)
-            statBadge("D", s.deleted, .red)
+            statBadge("R", s.rejected, .red)
+            statBadge("X", s.excluded, .purple)
         }
         .font(.system(.caption2, design: .monospaced).monospacedDigit())
     }

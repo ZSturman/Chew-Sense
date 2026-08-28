@@ -1,43 +1,59 @@
 # Roadmap
 
-## Milestone 1: Repository Integration
+## Implemented Foundation
 
-- Complete imported-history merge commits.
-- Pass renamed app builds and both Python suites.
-- Add one anonymized end-to-end fixture.
-- Eliminate active numbered-path references.
+- Role-based monorepo with imported Collect and Live histories retained.
+- Schema-v2 closed–open–closed anchors and immutable hash lineage.
+- Exact candidate-bound native review with uncertainty dispositions.
+- Read-only audit and explicit finalization workflow.
+- Locked Python 3.12 environment and one verification entrypoint.
+- Causal temporal chew model contract, event decoder, replay metrics, and
+  capability-gated Live path.
+- Local checksum/deduplication inventory without participant media in Git.
 
-## Milestone 2: Reliable Personalized Dataset
+## Dataset Recovery And Collection
 
-- Verify physical-device synchronization and interrupted capture handling.
-- Collect at least 20 verified eating sessions.
-- Collect at least 20 varied verified hard-negative sessions.
-- Lock chronological session-level validation and test sets.
+- Re-homed two exact legacy video/motion pairs as unverified migration inputs;
+  26 of 27 raw bundles now pass structural audit, with one zero-row bundle
+  quarantined.
+- Re-run vision and review usable video from scratch.
+- Capture at least 20 verified eating and 20 varied hard-negative sessions for
+  the first wearer, with texture and confound metadata.
+- Lock chronological session-level train/validation/test splits containing
+  positives and negatives in every partition.
+- Blindly re-review at least 10% and track anchor disagreement; revise the
+  instructions if median disagreement exceeds two video frames.
 
-## Milestone 3: Model Promotion
+## Initial Chew Promotion Gate
 
-Initial targets:
+- eating recall ≥ `0.90`;
+- hard-negative window FPR ≤ `0.15`;
+- chew F1 at ±250 ms ≥ `0.80`;
+- chew-count error ≤ `10%`;
+- median inter-chew-interval MAE ≤ `100 ms`;
+- Python/CoreML/Swift probability error ≤ `1e-3`;
+- decoded timestamps within one 100 ms inference step;
+- recorded physical-AirPods promotion smoke check.
 
-- mouth-state macro F1 at least `0.85`;
-- chew F1 at 250 ms at least `0.80`;
-- chew-count error at most `10%`;
-- eating recall at least `0.90`;
-- hard-negative false-positive rate at most `0.15`.
+No model currently has sufficient verified v2 data to pass this gate.
 
-Retrain CV in reviewed batches. Train motion with a shared encoder and primary
-outputs for eating probability and chew phase. Derive motion chew events from
-phase cycles.
+## Food-Entry Promotion Gate
 
-## Milestone 4: Live Validation
+Food-entry coaching remains hidden until an independently locked report shows:
 
-- Promote only versioned models that pass locked evaluation.
-- Record active model IDs in every Live session.
-- Compare Live field performance against finalized Review labels.
-- Keep motion-only food-entry detection experimental until it passes a
-  separate validation gate.
+- a longer-context `food_entry_logit` head is implemented in Python, CoreML,
+  and Swift with exact replay parity;
+
+- event F1 at ±500 ms ≥ `0.80`;
+- count error ≤ `15%`;
+- false food entries ≤ `0.2/min` on negative sessions;
+- per-bite chew-count MAE ≤ `2`.
+
+Only then may Live close a prior bite on a new verified food entry and expose
+optional chew-count-goal feedback.
 
 ## Later
 
-- Subject-aware generalization beyond the first wearer.
-- Multi-wearer calibration and privacy-preserving dataset tooling.
-- Validated meal-level feedback built on reviewed chew and bite events.
+- Multi-wearer validation and subject-aware generalization.
+- Privacy-preserving dataset exchange.
+- Broader wellness studies; no medical claims without appropriate validation.

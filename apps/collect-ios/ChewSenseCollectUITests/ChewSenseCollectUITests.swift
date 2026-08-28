@@ -23,6 +23,14 @@ final class ChewSenseCollectUITests: XCTestCase {
         app = nil
     }
 
+    @MainActor
+    private func attachScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     // MARK: - Top-level navigation
 
     @MainActor
@@ -112,6 +120,33 @@ final class ChewSenseCollectUITests: XCTestCase {
 
         XCTAssertFalse(eatingButton.isEnabled, "Eating button should be disabled when motion is unavailable.")
         XCTAssertFalse(notEatingButton.isEnabled, "Not Eating button should be disabled when motion is unavailable.")
+        XCTAssertTrue(app.staticTexts["Check capture readiness"].exists)
+        XCTAssertTrue(app.staticTexts["Connect AirPods and wait for motion data before starting. Recording is intentionally disabled until it is available."].exists)
+        attachScreenshot("Collect - Motion Required")
+    }
+
+    @MainActor
+    func testSimulatedMotionCaptureShowsClearSaveState() throws {
+        app.launchArguments.append("--ui-motion-available")
+        app.launch()
+
+        let newButton = app.navigationBars["Recordings"].buttons["New"]
+        XCTAssertTrue(newButton.waitForExistence(timeout: 5.0))
+        newButton.tap()
+
+        XCTAssertTrue(app.staticTexts["AirPods motion is ready. Choose Eating or Not Eating to start; Stop saves the session."].waitForExistence(timeout: 5.0))
+        let eating = app.buttons["eatingButton"]
+        XCTAssertTrue(eating.isEnabled)
+        eating.tap()
+
+        let stop = app.buttons["stopRecordingButton"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 3.0))
+        attachScreenshot("Collect - Recording")
+        stop.tap()
+
+        XCTAssertTrue(app.staticTexts["Saved"].waitForExistence(timeout: 3.0))
+        XCTAssertTrue(app.staticTexts["Done when the session is saved with video and motion CSV."].exists)
+        attachScreenshot("Collect - Saved")
     }
 
     // MARK: - Launch performance

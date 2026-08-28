@@ -1,162 +1,238 @@
 import Foundation
 
-/// On-disk schema for `review_overrides.json`.
-///
-/// `flippedEatingSpans` and `unreliableSpans` are preserved on round-trip for
-/// back-compatibility with the Python pipeline, but the reviewer UI no longer
-/// edits them.
-struct ReviewOverrides: Codable {
-    var schemaVersion: String = "1.0.0"
+enum ReviewDisposition: String, Codable, CaseIterable {
+    case accepted
+    case edited
+    case rejected
+    case unobservable
+    case uncertain
+    case added
+
+    var isReviewed: Bool { true }
+    var contributesPhaseSupervision: Bool { self == .accepted || self == .edited || self == .added }
+}
+
+/// Mutable v2 review draft. It contains reviewer decisions only and is bound
+/// to one immutable candidate revision/hash.
+struct ReviewDraft: Codable, Equatable {
+    static let schemaVersion = "2.0.0"
+    static let artifactType = "review_draft"
+
+    var decodedSchemaVersion: String = Self.schemaVersion
+    var decodedArtifactType: String = Self.artifactType
     var sessionID: String
-    var verified: Bool
+    var candidateRevision: Int
+    var candidateSHA256: String
     var reviewer: String?
-    var reviewedAt: String          // ISO-8601
-    var addedChews: [ChewEdit]
-    var deletedChewIDs: [String]
-    var editedChews: [ChewEdit]
-    var flippedEatingSpans: [TimeSpan]
-    var unreliableSpans: [TimeSpan]
-    var verifiedChewIDs: [String]
-    var addedBites: [BiteEdit]
-    var deletedBiteIDs: [String]
-    var editedBites: [BiteEdit]
-    var verifiedBiteIDs: [String]
+    var updatedAt: String
+    var verified: Bool
     var fullVideoPassCompleted: Bool
+    var chewDecisions: [ChewDecision]
+    var foodEntryDecisions: [FoodEntryDecision]
+    var addedChews: [AddedChew]
+    var addedFoodEntries: [AddedFoodEntry]
     var notes: String?
 
-    struct ChewEdit: Codable, Identifiable, Equatable {
-        var id: String
-        var startTS: Double
-        var peakTS: Double
-        var endTS: Double
-        var confidence: Double = 1.0
+    struct ChewDecision: Codable, Equatable, Identifiable {
+        var candidateID: String
+        var disposition: ReviewDisposition
+        var startClosedTS: Double?
+        var openPeakTS: Double?
+        var endClosedTS: Double?
+        var note: String?
+
+        var id: String { candidateID }
 
         enum CodingKeys: String, CodingKey {
-            case id
-            case startTS = "start_ts"
-            case peakTS = "peak_ts"
-            case endTS = "end_ts"
-            case confidence
+            case candidateID = "candidate_id"
+            case disposition
+            case startClosedTS = "start_closed_ts"
+            case openPeakTS = "open_peak_ts"
+            case endClosedTS = "end_closed_ts"
+            case note
         }
     }
 
-    struct BiteEdit: Codable, Identifiable, Equatable {
-        var id: String
-        var ts: Double
-        var confidence: Double = 1.0
-    }
+    struct FoodEntryDecision: Codable, Equatable, Identifiable {
+        var candidateID: String
+        var disposition: ReviewDisposition
+        var foodEntryTS: Double?
+        var note: String?
 
-    struct TimeSpan: Codable, Identifiable {
-        var id = UUID()
-        var startTS: Double
-        var endTS: Double
+        var id: String { candidateID }
 
         enum CodingKeys: String, CodingKey {
-            case startTS = "start_ts"
-            case endTS = "end_ts"
+            case candidateID = "candidate_id"
+            case disposition
+            case foodEntryTS = "food_entry_ts"
+            case note
+        }
+    }
+
+    struct AddedChew: Codable, Equatable, Identifiable {
+        var id: String
+        var startClosedTS: Double
+        var openPeakTS: Double
+        var endClosedTS: Double
+        var disposition: ReviewDisposition = .added
+        var confidence: Double = 1.0
+        var note: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case startClosedTS = "start_closed_ts"
+            case openPeakTS = "open_peak_ts"
+            case endClosedTS = "end_closed_ts"
+            case disposition
+            case confidence
+            case note
+        }
+    }
+
+    struct AddedFoodEntry: Codable, Equatable, Identifiable {
+        var id: String
+        var foodEntryTS: Double
+        var disposition: ReviewDisposition = .added
+        var confidence: Double = 1.0
+        var note: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case foodEntryTS = "food_entry_ts"
+            case disposition
+            case confidence
+            case note
         }
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
+        case decodedSchemaVersion = "schema_version"
+        case decodedArtifactType = "artifact_type"
         case sessionID = "session_id"
-        case verified
+        case candidateRevision = "candidate_revision"
+        case candidateSHA256 = "candidate_sha256"
         case reviewer
-        case reviewedAt = "reviewed_at"
-        case addedChews = "added_chews"
-        case deletedChewIDs = "deleted_chew_ids"
-        case editedChews = "edited_chews"
-        case flippedEatingSpans = "flipped_eating_spans"
-        case unreliableSpans = "unreliable_spans"
-        case verifiedChewIDs = "verified_chew_ids"
-        case addedBites = "added_bites"
-        case deletedBiteIDs = "deleted_bite_ids"
-        case editedBites = "edited_bites"
-        case verifiedBiteIDs = "verified_bite_ids"
+        case updatedAt = "updated_at"
+        case verified
         case fullVideoPassCompleted = "full_video_pass_completed"
+        case chewDecisions = "chew_decisions"
+        case foodEntryDecisions = "food_entry_decisions"
+        case addedChews = "added_chews"
+        case addedFoodEntries = "added_food_entries"
         case notes
     }
 
     init(
-        schemaVersion: String = "1.0.0",
         sessionID: String,
-        verified: Bool,
-        reviewer: String?,
-        reviewedAt: String,
-        addedChews: [ChewEdit],
-        deletedChewIDs: [String],
-        editedChews: [ChewEdit],
-        flippedEatingSpans: [TimeSpan],
-        unreliableSpans: [TimeSpan],
-        verifiedChewIDs: [String] = [],
-        addedBites: [BiteEdit] = [],
-        deletedBiteIDs: [String] = [],
-        editedBites: [BiteEdit] = [],
-        verifiedBiteIDs: [String] = [],
+        candidateRevision: Int,
+        candidateSHA256: String,
+        reviewer: String? = nil,
+        updatedAt: String = ISO8601DateFormatter().string(from: Date()),
+        verified: Bool = false,
         fullVideoPassCompleted: Bool = false,
-        notes: String?
+        chewDecisions: [ChewDecision] = [],
+        foodEntryDecisions: [FoodEntryDecision] = [],
+        addedChews: [AddedChew] = [],
+        addedFoodEntries: [AddedFoodEntry] = [],
+        notes: String? = nil
     ) {
-        self.schemaVersion = schemaVersion
         self.sessionID = sessionID
-        self.verified = verified
+        self.candidateRevision = candidateRevision
+        self.candidateSHA256 = candidateSHA256
         self.reviewer = reviewer
-        self.reviewedAt = reviewedAt
-        self.addedChews = addedChews
-        self.deletedChewIDs = deletedChewIDs
-        self.editedChews = editedChews
-        self.flippedEatingSpans = flippedEatingSpans
-        self.unreliableSpans = unreliableSpans
-        self.verifiedChewIDs = verifiedChewIDs
-        self.addedBites = addedBites
-        self.deletedBiteIDs = deletedBiteIDs
-        self.editedBites = editedBites
-        self.verifiedBiteIDs = verifiedBiteIDs
+        self.updatedAt = updatedAt
+        self.verified = verified
         self.fullVideoPassCompleted = fullVideoPassCompleted
+        self.chewDecisions = chewDecisions
+        self.foodEntryDecisions = foodEntryDecisions
+        self.addedChews = addedChews
+        self.addedFoodEntries = addedFoodEntries
         self.notes = notes
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? "1.0.0"
+        decodedSchemaVersion = try c.decode(String.self, forKey: .decodedSchemaVersion)
+        decodedArtifactType = try c.decode(String.self, forKey: .decodedArtifactType)
         sessionID = try c.decode(String.self, forKey: .sessionID)
-        verified = try c.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        candidateRevision = try c.decode(Int.self, forKey: .candidateRevision)
+        candidateSHA256 = try c.decode(String.self, forKey: .candidateSHA256)
         reviewer = try c.decodeIfPresent(String.self, forKey: .reviewer)
-        reviewedAt = try c.decodeIfPresent(String.self, forKey: .reviewedAt) ?? ""
-        addedChews = try c.decodeIfPresent([ChewEdit].self, forKey: .addedChews) ?? []
-        deletedChewIDs = try c.decodeIfPresent([String].self, forKey: .deletedChewIDs) ?? []
-        editedChews = try c.decodeIfPresent([ChewEdit].self, forKey: .editedChews) ?? []
-        flippedEatingSpans = try c.decodeIfPresent([TimeSpan].self, forKey: .flippedEatingSpans) ?? []
-        unreliableSpans = try c.decodeIfPresent([TimeSpan].self, forKey: .unreliableSpans) ?? []
-        verifiedChewIDs = try c.decodeIfPresent([String].self, forKey: .verifiedChewIDs) ?? []
-        addedBites = try c.decodeIfPresent([BiteEdit].self, forKey: .addedBites) ?? []
-        deletedBiteIDs = try c.decodeIfPresent([String].self, forKey: .deletedBiteIDs) ?? []
-        editedBites = try c.decodeIfPresent([BiteEdit].self, forKey: .editedBites) ?? []
-        verifiedBiteIDs = try c.decodeIfPresent([String].self, forKey: .verifiedBiteIDs) ?? []
-        fullVideoPassCompleted = try c.decodeIfPresent(
-            Bool.self,
-            forKey: .fullVideoPassCompleted
-        ) ?? false
+        updatedAt = try c.decode(String.self, forKey: .updatedAt)
+        verified = try c.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        fullVideoPassCompleted = try c.decodeIfPresent(Bool.self, forKey: .fullVideoPassCompleted) ?? false
+        chewDecisions = try c.decodeIfPresent([ChewDecision].self, forKey: .chewDecisions) ?? []
+        foodEntryDecisions = try c.decodeIfPresent([FoodEntryDecision].self, forKey: .foodEntryDecisions) ?? []
+        addedChews = try c.decodeIfPresent([AddedChew].self, forKey: .addedChews) ?? []
+        addedFoodEntries = try c.decodeIfPresent([AddedFoodEntry].self, forKey: .addedFoodEntries) ?? []
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
     }
 
-    static func empty(sessionID: String) -> ReviewOverrides {
-        ReviewOverrides(
+    func validateLineage(bundle: CandidateBundle, computedHash: String) throws {
+        guard decodedSchemaVersion == Self.schemaVersion else {
+            throw ReviewDraftError.unsupportedSchema(decodedSchemaVersion)
+        }
+        guard decodedArtifactType == Self.artifactType else {
+            throw ReviewDraftError.invalidArtifactType(decodedArtifactType)
+        }
+        guard sessionID == bundle.sessionID else {
+            throw ReviewDraftError.sessionMismatch
+        }
+        guard candidateRevision == bundle.candidateRevision else {
+            throw ReviewDraftError.staleRevision(expected: bundle.candidateRevision, actual: candidateRevision)
+        }
+        guard candidateSHA256.lowercased() == computedHash.lowercased() else {
+            throw ReviewDraftError.staleHash(expected: computedHash, actual: candidateSHA256)
+        }
+    }
+
+    static func empty(sessionID: String, candidateRevision: Int, candidateSHA256: String) -> ReviewDraft {
+        ReviewDraft(
             sessionID: sessionID,
-            verified: false,
-            reviewer: nil,
-            reviewedAt: ISO8601DateFormatter().string(from: Date()),
-            addedChews: [],
-            deletedChewIDs: [],
-            editedChews: [],
-            flippedEatingSpans: [],
-            unreliableSpans: [],
-            verifiedChewIDs: [],
-            addedBites: [],
-            deletedBiteIDs: [],
-            editedBites: [],
-            verifiedBiteIDs: [],
-            fullVideoPassCompleted: false,
-            notes: nil
+            candidateRevision: candidateRevision,
+            candidateSHA256: candidateSHA256
         )
     }
 }
+
+enum ReviewDraftError: LocalizedError, Equatable {
+    case unsupportedSchema(String)
+    case invalidArtifactType(String)
+    case sessionMismatch
+    case staleRevision(expected: Int, actual: Int)
+    case staleHash(expected: String, actual: String)
+    case missingCandidate(String)
+    case duplicateDecision(String)
+    case invalidDisposition(String)
+    case invalidAnchors(String)
+    case overlap(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedSchema(let value):
+            "Review schema \(value) cannot be opened as v2. Migrate explicitly and re-review."
+        case .invalidArtifactType(let value):
+            "Expected a review_draft artifact, found \(value)."
+        case .sessionMismatch:
+            "The review draft belongs to a different session."
+        case .staleRevision(let expected, let actual):
+            "Review is linked to candidate revision \(actual), but revision \(expected) is open. Reopen the linked artifact or begin a fresh review."
+        case .staleHash(let expected, let actual):
+            "Review candidate hash is stale (review \(actual), artifact \(expected)). Saving and finalization are blocked."
+        case .missingCandidate(let id):
+            "Decision references missing candidate \(id)."
+        case .duplicateDecision(let id):
+            "Candidate \(id) has more than one decision."
+        case .invalidDisposition(let id):
+            "Candidate \(id) has a disposition that is not valid for a proposal."
+        case .invalidAnchors(let id):
+            "\(id) must satisfy Closed start < Maximum open < Closed end."
+        case .overlap(let id):
+            "\(id) overlaps the preceding chew. Review will not repair it silently."
+        }
+    }
+}
+
+// Retain the old type name inside the app while the UI is migrated. The JSON
+// representation is exclusively the v2 ReviewDraft contract above.
+typealias ReviewOverrides = ReviewDraft

@@ -107,6 +107,23 @@ def register_model(
         shutil.copytree(coreml_path, dest)
         export_status["coreml"] = "copied"
 
+    checkpoint_metadata: dict[str, Any] = {}
+    try:
+        import torch
+
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        checkpoint_metadata = {
+            "model_mode": checkpoint.get("mode", "binary"),
+            "temporal_contract_version": checkpoint.get("temporal_contract_version"),
+            "output_names": checkpoint.get("output_names", []),
+            "food_entry_head": "food_entry_logit" in checkpoint.get("output_names", []),
+        }
+    except Exception as exc:  # Keep historical checkpoints registrable, never promotable.
+        checkpoint_metadata = {
+            "model_mode": "unknown",
+            "checkpoint_metadata_error": str(exc),
+        }
+
     metadata = {
         "model_id": model_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -115,6 +132,7 @@ def register_model(
         "registry_dir": str(run_dir),
         "collection_plan_status": "available" if collection_plan_data is not None else "not_available",
         "export_status": export_status,
+        **checkpoint_metadata,
     }
     _write_json(run_dir / "metadata.json", metadata)
     return run_dir

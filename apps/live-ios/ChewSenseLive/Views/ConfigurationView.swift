@@ -47,6 +47,10 @@ final class DetectionConfiguration: ObservableObject {
         didSet { UserDefaults.standard.set(goldLockCandidate, forKey: "config.goldLockCandidate") }
     }
 
+    @Published var mealTexture: MealTexture {
+        didSet { UserDefaults.standard.set(mealTexture.rawValue, forKey: "config.mealTexture") }
+    }
+
     // MARK: - Init
 
     init() {
@@ -57,6 +61,8 @@ final class DetectionConfiguration: ObservableObject {
         self.activityPreset = storedPreset ?? .custom
         self.customActivity = defaults.string(forKey: "config.customActivity") ?? ""
         self.goldLockCandidate = defaults.bool(forKey: "config.goldLockCandidate")
+        self.mealTexture = defaults.string(forKey: "config.mealTexture")
+            .flatMap(MealTexture.init(rawValue:)) ?? .unknown
     }
 
     // MARK: - Derived values
@@ -126,6 +132,7 @@ final class DetectionConfiguration: ObservableObject {
             "activity_label": activityLabel,
             "expected_label_class": activityPreset.expectedLabelClass.rawValue,
             "gold_lock_candidate": goldLockCandidate,
+            "meal_texture": mealTexture.rawValue,
             "params_source": "bundled_model"
         ]
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
@@ -253,6 +260,17 @@ private struct ActivityPresetSection: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(!isEditable)
             }
+
+            Picker("Meal texture", selection: $config.mealTexture) {
+                ForEach(MealTexture.allCases) { texture in
+                    Text(texture.title).tag(texture)
+                }
+            }
+            .disabled(!isEditable)
+
+            Text("Unknown keeps cadence metrics available but disables any future chew-count goal.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
                 expectedLabelBadge(for: config.activityPreset.expectedLabelClass)
@@ -410,101 +428,6 @@ struct BundledModelSection: View {
                 description: "Weights & Biases run id, when training logged to W&B."
             )
         }
-    }
-}
-
-struct RecordingConfigurationInspector: View {
-    let configuration: ReviewRecordingConfiguration?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Recording Configuration")
-                    .font(.headline)
-
-                if let configuration {
-                    if let activityLabel = configuration.activityLabel, !activityLabel.isEmpty {
-                        InspectorValueRow(
-                            title: "Activity",
-                            value: activityLabel,
-                            description: "Activity preset selected when this session was recorded."
-                        )
-                    }
-                    if let activitySlug = configuration.activitySlug, !activitySlug.isEmpty {
-                        InspectorValueRow(
-                            title: "Activity Slug",
-                            value: activitySlug,
-                            description: "Slug written into the dataset manifest for grouping/filtering."
-                        )
-                    }
-                    if let expected = configuration.expectedLabelClass, !expected.isEmpty {
-                        InspectorValueRow(
-                            title: "Expected Class",
-                            value: expected,
-                            description: "Whether this session was expected to produce positives, negatives, or mixed labels."
-                        )
-                    }
-                    if let goldLockCandidate = configuration.goldLockCandidate {
-                        InspectorValueRow(
-                            title: "Benchmark Candidate",
-                            value: goldLockCandidate ? "Yes" : "No",
-                            description: "Flagged for promotion to the locked validation set during pipeline import."
-                        )
-                    }
-
-                    InspectorValueRow(
-                        title: ConfigurationDescriptions.alpha.title,
-                        value: format(configuration.alpha),
-                        description: ConfigurationDescriptions.alpha.description
-                    )
-                    InspectorValueRow(
-                        title: ConfigurationDescriptions.highThreshold.title,
-                        value: format(configuration.highThreshold),
-                        description: ConfigurationDescriptions.highThreshold.description
-                    )
-                    InspectorValueRow(
-                        title: ConfigurationDescriptions.lowThreshold.title,
-                        value: format(configuration.lowThreshold),
-                        description: ConfigurationDescriptions.lowThreshold.description
-                    )
-                    InspectorValueRow(
-                        title: ConfigurationDescriptions.startWindows.title,
-                        value: configuration.minStartWindows.map(String.init) ?? "unknown",
-                        description: ConfigurationDescriptions.startWindows.description
-                    )
-                    InspectorValueRow(
-                        title: ConfigurationDescriptions.endWindows.title,
-                        value: configuration.minEndWindows.map(String.init) ?? "unknown",
-                        description: ConfigurationDescriptions.endWindows.description
-                    )
-                    InspectorValueRow(
-                        title: "Scenario",
-                        value: configuration.testScenario?.isEmpty == false ? configuration.testScenario! : "unspecified",
-                        description: ConfigurationDescriptions.scenario.description
-                    )
-                    InspectorValueRow(title: "Platform", value: configuration.platform ?? "unknown", description: "Platform that recorded the session.")
-                    InspectorValueRow(title: "Model", value: configuration.modelID ?? "unknown", description: "Bundled model identity used for prediction.")
-                    InspectorValueRow(title: "Dataset", value: configuration.datasetHash ?? "unknown", description: "Dataset identity available for the bundled model.")
-                    if let datasetStatus = configuration.datasetStatus, !datasetStatus.isEmpty {
-                        InspectorValueRow(title: "Dataset Status", value: datasetStatus, description: "How much dataset lineage is available for this model.")
-                    }
-                    if let modelPackageHash = configuration.modelPackageHash, !modelPackageHash.isEmpty {
-                        InspectorValueRow(title: "Model Package SHA-256", value: modelPackageHash, description: "Hash of the bundled CoreML model file for comparison.")
-                    }
-                } else {
-                    Text("No recording configuration found in this bundle.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding()
-        }
-        .frame(minWidth: 280, idealWidth: 320)
-    }
-
-    private func format(_ value: Double?) -> String {
-        guard let value else { return "unknown" }
-        return String(format: "%.2f", value)
     }
 }
 

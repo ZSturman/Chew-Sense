@@ -9,6 +9,10 @@ import SwiftUI
 
 @main
 struct ChewSenseCollectApp: App {
+    init() {
+        CollectionTestMode.resetAppStateIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

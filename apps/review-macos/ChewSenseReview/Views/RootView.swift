@@ -79,11 +79,15 @@ struct RootView: View {
         if state.workspaceRoot == nil {
             workspacePrompt
         } else if state.selectedSession == nil {
-            ContentUnavailableView(
-                "Pick a session",
-                systemImage: "video.circle",
-                description: Text("Choose a session in the sidebar to start labeling chews.")
-            )
+            VStack(spacing: 16) {
+                ContentUnavailableView(
+                    "Pick a session",
+                    systemImage: "video.circle",
+                    description: Text("Choose a session in the sidebar to start labeling chews.")
+                )
+                ReviewGuidanceView(stage: .workspace)
+                    .frame(maxWidth: 560)
+            }
         } else if state.selectedSession?.videoURL == nil {
             ContentUnavailableView(
                 "No video for this session",
@@ -104,6 +108,8 @@ struct RootView: View {
                 .frame(maxWidth: 520)
             Button("Choose workspace…") { pickWorkspaceRoot() }
                 .buttonStyle(.borderedProminent)
+            ReviewGuidanceView(stage: .workspace)
+                .frame(maxWidth: 560)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,6 +131,13 @@ struct RootView: View {
                         .padding(.top, 10)
                         .transition(.opacity)
                 }
+                ReviewGuidanceView(
+                    stage: state.canFinalizeReview
+                        ? .finalize
+                        : .decisions(remainingStatus: state.completionStatus.lowercased())
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
                 Spacer()
                 if state.selectedChew != nil {
                     CycleShapeChart()
@@ -373,6 +386,59 @@ struct RootView: View {
         if let c = state.selectedChew {
             playback.seek(to: c.timestamp(for: state.lastTouchedMarker))
         }
+    }
+}
+
+enum ReviewGuidanceStage: Equatable {
+    case workspace
+    case decisions(remainingStatus: String)
+    case finalize
+
+    var title: String {
+        switch self {
+        case .workspace: "Open a review workspace"
+        case .decisions: "Review every proposed event"
+        case .finalize: "Freeze this completed review"
+        }
+    }
+
+    var nextStep: String {
+        switch self {
+        case .workspace:
+            "Choose the workspace containing sessions/raw and derived/vision. Then select a session with an immutable candidate revision."
+        case .decisions:
+            "Use Review Queue to accept, edit, reject, or mark each chew and food-entry candidate uncertain or unobservable; then complete the full-video pass."
+        case .finalize:
+            "Save Overrides, run audit-session, then run finalize-session for this exact candidate revision. Do not edit candidate files."
+        }
+    }
+
+    var doneWhen: String {
+        switch self {
+        case .workspace: "Done when the session loads without a lineage error."
+        case .decisions(let status): "Done when \(status)."
+        case .finalize: "Done when audit-session passes after finalization."
+        }
+    }
+}
+
+private struct ReviewGuidanceView: View {
+    let stage: ReviewGuidanceStage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(stage.title, systemImage: "list.number")
+                .font(.subheadline.weight(.semibold))
+            Text(stage.nextStep)
+            Text(stage.doneWhen)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier("reviewGuidanceCard")
     }
 }
 

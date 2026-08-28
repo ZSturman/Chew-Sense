@@ -16,6 +16,7 @@ Each command supports --help for detailed options.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from datetime import datetime
@@ -27,11 +28,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pipeline.config import load_config, merge_cli_args, PipelineConfig
 from pipeline.ingest import validate_sessions, create_manifest, save_manifest
 from pipeline.transform import transform_directory
-from pipeline.video_labels import resolve_derived_root
 from pipeline.features import extract_features_directory
 from pipeline.train import train_model
 from pipeline.evaluate import evaluate_model
-from pipeline.field_tests import import_field_test_bundles, balance_summary, session_activity_map
+from pipeline.field_tests import import_field_test_bundles, balance_summary
 from pipeline.recommendations import generate_collection_plan
 from pipeline.registry import latest_registry_entry, register_model
 from pipeline.splits import create_or_update_split_manifest, load_split_manifest
@@ -67,7 +67,11 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pos-weight", help='pos_weight: "auto", "none", or a float')
     parser.add_argument("--no-weighted-sampler", action="store_true",
                         help="Disable WeightedRandomSampler (default: on)")
-    parser.add_argument("--arch", choices=["mlp", "cnn"], help="Model architecture")
+    parser.add_argument(
+        "--arch",
+        choices=["causal_tcn", "mlp"],
+        help="Model architecture (mlp is legacy eating-only compatibility)",
+    )
     parser.add_argument("--allow-unsplit", action="store_true",
                         help="Allow training without a locked split manifest")
     parser.add_argument("--feature-noise-std", type=float,
@@ -117,18 +121,6 @@ def load_and_merge_config(args: argparse.Namespace) -> PipelineConfig:
     return merge_cli_args(config, args_dict)
 
 
-def enable_two_head_when_reviewed(config: PipelineConfig, sessions: list) -> None:
-    if any(
-        getattr(session, "has_video_labels", False)
-        and getattr(session, "verified", False)
-        and getattr(session, "chew_cycle_count", 0) > 0
-        for session in sessions
-    ):
-        config.features.extended_chew_phase = True
-        config.chew_phase_head.enabled = True
-        print("   Reviewed chew cycles found: enabling two-head eating + phase training.")
-
-
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
     """Prompt user for yes/no confirmation."""
     if not sys.stdin.isatty():
@@ -147,6 +139,10 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
 
 def default_split_manifest_path(pipeline_root: Path) -> Path:
     return pipeline_root / "manifests" / "splits" / "locked_splits.json"
+
+
+def default_temporal_split_manifest_path(pipeline_root: Path) -> Path:
+    return pipeline_root / "manifests" / "splits" / "temporal_v2_locked_splits.json"
 
 
 def dataset_manifest_path(pipeline_root: Path, label: str) -> Path:
@@ -186,6 +182,106 @@ def save_metrics(metrics: dict, pipeline_root: Path, label: str) -> Path:
     with open(out, "w") as f:
         json.dump(metrics, f, indent=2)
     return out
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_json_object(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read valid JSON from {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"expected a JSON object in {path}")
+    return value
+
+
+def verify_registry_evaluation_inputs(
+    registry_entry: Path,
+    features_dir: Path,
+    split_manifest_path: Path,
+) -> None:
+    """Prove an evaluation uses the exact registered temporal dataset lineage."""
+
+    registry_entry = Path(registry_entry)
+    features_dir = Path(features_dir)
+    registered_dataset = _load_json_object(registry_entry / "dataset_manifest.json")
+    feature_dataset = _load_json_object(features_dir / "dataset_manifest.json")
+    registered_split = _load_json_object(registry_entry / "split_manifest.json")
+    selected_split = _load_json_object(split_manifest_path)
+    metadata = _load_json_object(registry_entry / "metadata.json")
+    if registered_dataset != feature_dataset:
+        raise ValueError("feature dataset manifest differs from the registered manifest")
+    hashes = {
+        registered_dataset.get("dataset_hash"),
+        feature_dataset.get("dataset_hash"),
+        registered_split.get("dataset_hash"),
+        selected_split.get("dataset_hash"),
+    }
+    if None in hashes or len(hashes) != 1:
+        raise ValueError("registry, feature, and split dataset hashes do not match exactly")
+    if registered_split.get("version") != 2 or selected_split.get("version") != 2:
+        raise ValueError("registry evaluation requires a version-2 locked split manifest")
+    if registered_split.get("splits") != selected_split.get("splits"):
+        raise ValueError("selected split assignments differ from the registered locked splits")
+
+    import torch
+
+    checkpoint_path = registry_entry / "chewnet.pth"
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        raise ValueError(f"cannot read registered checkpoint {checkpoint_path}: {exc}") from exc
+    dataset_hash = registered_dataset.get("dataset_hash")
+    if (
+        checkpoint.get("mode") != "temporal_tcn"
+        or checkpoint.get("temporal_contract_version") != "2.0.0"
+        or checkpoint.get("dataset_hash") != dataset_hash
+        or metadata.get("dataset_hash") != dataset_hash
+    ):
+        raise ValueError("checkpoint/metadata do not match the registered temporal dataset")
+
+    arrays = feature_dataset.get("arrays")
+    if not isinstance(arrays, dict) or not arrays:
+        raise ValueError("temporal dataset manifest does not record array hashes")
+    for name, record in arrays.items():
+        path = features_dir / str(name)
+        expected = record.get("sha256") if isinstance(record, dict) else None
+        if not path.is_file() or not expected or _file_sha256(path) != expected:
+            raise ValueError(f"temporal dataset array hash mismatch: {path}")
+
+
+def record_registry_evaluation(
+    registry_entry: Path,
+    split_name: str,
+    metrics: dict,
+) -> Path:
+    """Atomically attach one evaluated split to an exact registry entry."""
+
+    output = Path(registry_entry) / "metrics.json"
+    current = _load_json_object(output) if output.exists() else {}
+    current[split_name] = metrics
+    temporary = output.with_name(f".{output.name}.tmp")
+    temporary.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
+    temporary.replace(output)
+    return output
+
+
+def _require_legacy_mlp(config: PipelineConfig, command: str) -> bool:
+    if config.training.arch == "mlp":
+        return True
+    print(
+        f"\n❌ '{command}' is a legacy aggregate-feature eating-only workflow.\n"
+        "   Use 'from-raw --arch causal_tcn' with canonical schema-v2 sessions,\n"
+        "   or pass '--arch mlp' explicitly only to reproduce a historical binary model."
+    )
+    return False
 
 
 def lazy_deploy_to_app(*args, **kwargs):
@@ -342,6 +438,8 @@ def cmd_sample(args: argparse.Namespace) -> int:
     print("=" * 50)
     
     config = load_and_merge_config(args)
+    if not _require_legacy_mlp(config, "sample"):
+        return 2
     repo_root = get_repo_root()
     pipeline_root = get_workspace_root()
     
@@ -361,7 +459,6 @@ def cmd_sample(args: argparse.Namespace) -> int:
     print("\n📋 Step 1: Validating sample data...")
     sessions = validate_sessions(sample_dir)
     manifest = create_manifest(sessions)
-    enable_two_head_when_reviewed(config, sessions)
     print(f"   Found {len(sessions)} sessions")
     print(f"   Dataset hash: {manifest.dataset_hash}")
     manifest_path = dataset_manifest_path(pipeline_root, "sample")
@@ -482,7 +579,7 @@ Copy exported session folders to:
     user_data_dir = pipeline_root / "sessions" / "raw"
     print(f"  {user_data_dir}")
     
-    print(f"""
+    print("""
 STEP 6: Run Pipeline
 --------------------
 Once data is in place, run:
@@ -514,19 +611,13 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
     pipeline_root = get_workspace_root()
     
     input_dir = Path(args.input) if args.input else pipeline_root / "sessions" / "raw"
-    video_labels_root = resolve_derived_root(
-        input_dir,
-        (
-            Path(args.video_labels_root)
-            if getattr(args, "video_labels_root", None)
-            else pipeline_root / "derived" / "vision"
-        ),
-    )
-    require_verified = not getattr(args, "allow_unverified_video_labels", False)
     
     if not input_dir.exists():
         print(f"\n❌ Input directory not found: {input_dir}")
         return 1
+
+    if config.training.arch == "causal_tcn":
+        return _cmd_from_raw_temporal(args, config, input_dir)
     
     run_dir, transformed_dir, features_dir = make_run_workspace(pipeline_root, "from_raw")
     model_path = pipeline_root / "models" / "exports" / "checkpoints" / "chewnet.pth"
@@ -535,17 +626,12 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
     # 1. Validate
     print(f"\n📋 Step 1: Validating data in {input_dir}...")
     try:
-        sessions = validate_sessions(
-            input_dir,
-            video_labels_root=video_labels_root,
-            require_verified_video_labels=require_verified,
-        )
+        sessions = validate_sessions(input_dir)
     except Exception as e:
         print(f"❌ Validation failed: {e}")
         return 1
     
     manifest = create_manifest(sessions)
-    enable_two_head_when_reviewed(config, sessions)
     print(f"   Found {len(sessions)} sessions:")
     print(f"   - Eating: {manifest.eating_count}")
     print(f"   - Not-eating: {manifest.not_eating_count}")
@@ -564,8 +650,6 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
         input_dir=input_dir,
         output_dir=transformed_dir,
         config=config.soft_labels,
-        video_labels_root=video_labels_root,
-        require_verified_video_labels=require_verified,
     )
     
     # 3. Extract features
@@ -613,6 +697,124 @@ def cmd_from_raw(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_from_raw_temporal(
+    args: argparse.Namespace,
+    config: PipelineConfig,
+    input_dir: Path,
+) -> int:
+    """Materialize and optionally train the schema-v2 causal TCN path."""
+
+    from pipeline.temporal_dataset import (
+        TemporalDatasetError,
+        create_locked_temporal_splits,
+        discover_v2_sessions,
+        materialize_temporal_dataset,
+    )
+
+    pipeline_root = get_workspace_root()
+    run_dir, _, features_dir = make_run_workspace(pipeline_root, "from_raw_temporal")
+    model_path = pipeline_root / "models" / "exports" / "checkpoints" / "chewnet.pth"
+    print(f"   Temporal run workspace: {run_dir}")
+    try:
+        session_dirs = discover_v2_sessions(input_dir)
+        result = materialize_temporal_dataset(session_dirs, features_dir)
+    except (OSError, TemporalDatasetError) as exc:
+        print(f"❌ Temporal materialization failed: {exc}")
+        return 1
+
+    reviewed = sum(item.event_supervision for item in result.sessions)
+    coarse_only = len(result.sessions) - reviewed
+    print(f"   Sessions: {len(result.sessions)} ({reviewed} reviewed, {coarse_only} eating-only)")
+    print(f"   Windows: {result.rows}")
+    print(f"   Dataset hash: {result.dataset_hash}")
+    print(f"   Dataset manifest: {result.manifest_path}")
+    if getattr(args, "materialize_only", False):
+        return 0
+
+    split_path = default_temporal_split_manifest_path(pipeline_root)
+    try:
+        split_manifest = create_locked_temporal_splits(result.manifest_path, split_path)
+    except TemporalDatasetError as exc:
+        if not config.training.allow_unsplit:
+            print(f"❌ Locked split creation failed: {exc}")
+            print("   Collect class-covered sessions or use --allow-unsplit for development only.")
+            return 2
+        split_manifest = None
+        split_path = None
+        print(f"   Development split override: {exc}")
+
+    if not prompt_yes_no("\n🎯 Train temporal chew model?"):
+        return 0
+    train_result = train_model(
+        features_dir=features_dir,
+        output_path=model_path,
+        config=config,
+        dataset_hash=result.dataset_hash,
+        data_source="canonical_v2",
+        split_manifest_path=split_path,
+    )
+    metrics = None
+    if prompt_yes_no("\n📈 Evaluate model?"):
+        metrics = evaluate_model(
+            features_dir,
+            model_path,
+            config,
+            split_manifest_path=split_path,
+            split_name="validation_locked" if split_path else "all",
+        )
+        save_metrics(metrics, pipeline_root, "from_raw_temporal")
+    registry_dir = register_model(
+        model_path=model_path,
+        repo_root=get_repo_root(),
+        config=config,
+        dataset_manifest=result.manifest_path,
+        split_manifest=split_manifest,
+        metrics={"validation_locked": metrics} if metrics else None,
+        model_id=train_result.get("model_id"),
+    )
+    print(f"   Registry entry: {registry_dir}")
+    return 0
+
+
+def cmd_materialize_temporal(args: argparse.Namespace) -> int:
+    """Materialize exact TCN windows without training or mutating sessions."""
+
+    from pipeline.temporal_dataset import (
+        TemporalDatasetError,
+        create_locked_temporal_splits,
+        discover_v2_sessions,
+        materialize_temporal_dataset,
+    )
+
+    input_root = Path(args.input) if args.input else get_workspace_root() / "sessions" / "raw"
+    output_dir = (
+        Path(args.output)
+        if args.output
+        else make_run_workspace(get_workspace_root(), "materialize_temporal")[2]
+    )
+    try:
+        sessions = discover_v2_sessions(input_root)
+        result = materialize_temporal_dataset(
+            sessions,
+            output_dir,
+            inference_step_seconds=args.inference_step_sec,
+            max_gap_seconds=args.max_gap_sec,
+        )
+        split_path = None
+        if args.split_manifest:
+            split_path = Path(args.split_manifest)
+            create_locked_temporal_splits(result.manifest_path, split_path)
+    except (OSError, TemporalDatasetError) as exc:
+        print(f"❌ Temporal materialization failed: {exc}")
+        return 1
+    print(f"Materialized {result.rows} windows from {len(result.sessions)} sessions")
+    print(f"Dataset: {result.output_dir}")
+    print(f"Dataset SHA-256: {result.dataset_hash}")
+    if split_path is not None:
+        print(f"Locked splits: {split_path}")
+    return 0
+
+
 # =============================================================================
 # COMMAND: from-features
 # =============================================================================
@@ -623,6 +825,8 @@ def cmd_from_features(args: argparse.Namespace) -> int:
     print("=" * 50)
     
     config = load_and_merge_config(args)
+    if not _require_legacy_mlp(config, "from-features"):
+        return 2
     pipeline_root = get_workspace_root()
     
     features_dir = Path(args.input) if args.input else latest_features_dir(pipeline_root)
@@ -878,17 +1082,14 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
     print("=" * 50)
 
     config = load_and_merge_config(args)
+    if not _require_legacy_mlp(config, "from-field-test"):
+        return 2
     pipeline_root = get_workspace_root()
     repo_root = get_repo_root()
 
     input_dir = Path(args.input) if args.input else pipeline_root / "sessions" / "field-tests"
     curated_dir = Path(args.curated_dir) if args.curated_dir else pipeline_root / "sessions" / "curated"
     manifest_dir = pipeline_root / "manifests" / "datasets"
-    video_labels_root = Path(
-        getattr(args, "video_labels_root", None)
-        or pipeline_root / "derived" / "vision"
-    )
-    require_verified = not getattr(args, "allow_unverified_video_labels", False)
 
     if not input_dir.exists():
         print(f"\n❌ Input directory not found: {input_dir}")
@@ -947,13 +1148,8 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
     print(f"   Run workspace: {run_dir}")
 
     print(f"\n📋 Validating curated sessions in {curated_dir}...")
-    sessions = validate_sessions(
-        curated_dir,
-        video_labels_root=video_labels_root,
-        require_verified_video_labels=require_verified,
-    )
+    sessions = validate_sessions(curated_dir)
     manifest = create_manifest(sessions)
-    enable_two_head_when_reviewed(config, sessions)
     manifest_path = dataset_manifest_path(pipeline_root, "from_field_test")
     save_manifest(manifest, manifest_path)
 
@@ -996,8 +1192,6 @@ def cmd_from_field_test(args: argparse.Namespace) -> int:
         input_dir=curated_dir,
         output_dir=transformed_dir,
         config=config.soft_labels,
-        video_labels_root=video_labels_root,
-        require_verified_video_labels=require_verified,
     )
 
     print("\n📊 Extracting features...")
@@ -1085,9 +1279,33 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     """Evaluate a trained model from the modular CLI."""
     config = load_and_merge_config(args)
     pipeline_root = get_workspace_root()
-    model_path = Path(args.model) if args.model else pipeline_root / "models" / "exports" / "checkpoints" / "chewnet.pth"
-    features_dir = Path(args.features) if args.features else latest_features_dir(pipeline_root)
-    split_path = Path(args.split_manifest) if args.split_manifest else default_split_manifest_path(pipeline_root)
+    registry_entry = Path(args.registry_entry) if args.registry_entry else None
+    if registry_entry is not None:
+        if not registry_entry.is_dir():
+            print(f"❌ Registry entry not found: {registry_entry}")
+            return 2
+        if args.model is not None:
+            print("❌ --model cannot be combined with --registry-entry; the registered checkpoint is exact")
+            return 2
+        if args.features is None:
+            print("❌ --features is required with --registry-entry")
+            return 2
+        model_path = registry_entry / "chewnet.pth"
+        features_dir = Path(args.features)
+        split_path = (
+            Path(args.split_manifest)
+            if args.split_manifest
+            else registry_entry / "split_manifest.json"
+        )
+        try:
+            verify_registry_evaluation_inputs(registry_entry, features_dir, split_path)
+        except ValueError as exc:
+            print(f"❌ Registry evaluation lineage failed: {exc}")
+            return 2
+    else:
+        model_path = Path(args.model) if args.model else pipeline_root / "models" / "exports" / "checkpoints" / "chewnet.pth"
+        features_dir = Path(args.features) if args.features else latest_features_dir(pipeline_root)
+        split_path = Path(args.split_manifest) if args.split_manifest else default_split_manifest_path(pipeline_root)
 
     metrics = evaluate_model(
         features_dir=features_dir,
@@ -1097,7 +1315,18 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         split_name=args.split,
     )
 
+    if registry_entry is not None:
+        from pipeline.promotion import assess_registry_entry, write_promotion_report
+
+        metrics_path = record_registry_evaluation(registry_entry, args.split, metrics)
+        promotion = assess_registry_entry(registry_entry)
+        promotion_path = write_promotion_report(registry_entry, promotion)
+        print(f"\nRecorded exact registry metrics: {metrics_path}")
+        print(f"Promotion passed: {promotion.passed} ({promotion_path})")
+        for reason in promotion.reasons:
+            print(f"   - {reason}")
     if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         with open(args.output, "w") as f:
             json.dump(metrics, f, indent=2)
         print(f"\nSaved metrics: {args.output}")
@@ -1125,162 +1354,6 @@ def cmd_registry(args: argparse.Namespace) -> int:
         return 0
 
     print("Use --latest to show the newest registry entry.")
-    return 0
-
-
-# =============================================================================
-# COMMAND: status
-# =============================================================================
-
-def cmd_bite_metrics(args: argparse.Namespace) -> int:
-    """Run the chew/bite evaluation harness over one or more bundles."""
-    from pipeline import bite_metrics as bm
-
-    bundle_dirs: list[Path] = []
-    if args.bundle:
-        bundle_dirs.extend(Path(p) for p in args.bundle)
-    if args.sweep:
-        bundle_dirs.extend(bm.discover_bundles(Path(args.sweep)))
-
-    if not bundle_dirs:
-        print("No bundles supplied. Use --bundle <dir> or --sweep <root>.")
-        return 1
-
-    # Optionally regenerate predictions from runtime predictions.csv first.
-    if args.detect:
-        from pipeline.bite_detector import detect_bites_from_bundle
-
-        for d in bundle_dirs:
-            try:
-                detect_bites_from_bundle(d)
-            except Exception as e:  # pragma: no cover
-                print(f"  [detect] {d.name}: {e}")
-
-    agg = bm.evaluate_bundles(bundle_dirs)
-    md = bm.render_report_md(agg)
-
-    reports_dir = get_workspace_root() / "reports" / "evaluation"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = Path(args.output) if args.output else reports_dir / f"{ts}_chewbite.md"
-    out_path.write_text(md)
-    print(f"Wrote {out_path}")
-    print()
-    print(md)
-    return 0
-
-
-def cmd_meal_report(args: argparse.Namespace) -> int:
-    """Assemble bites into a meal-level summary (Phase 6).
-
-    Reads `predictions.csv` from a field-test bundle (or
-    `bite_events.csv` if `--bites` is passed), runs the meal analyzer
-    and chew-quality scorer, then writes JSON + markdown summaries to the
-    workspace reports directory.
-    """
-    bundle = Path(args.bundle).resolve() if args.bundle else None
-    bites_csv = Path(args.bites).resolve() if args.bites else None
-    if not bundle and not bites_csv:
-        print("Pass either --bundle <dir> or --bites <bite_events.csv>.")
-        return 1
-
-    from pipeline.bite_detector import detect_bites_from_bundle
-    from pipeline.meal_analyzer import MealAnalyzer
-    from pipeline.chew_quality import ChewQualityEvaluator
-    from pipeline.events import BiteEvent, ChewStroke  # type: ignore
-
-    # --- Load bites ----------------------------------------------------
-    if bundle is not None:
-        bites = detect_bites_from_bundle(bundle)
-        session_id = bundle.name
-    else:
-        import csv
-        with open(bites_csv, newline="") as f:
-            rows = list(csv.DictReader(f))
-        bites = [
-            BiteEvent(
-                start_time=float(r["start_time"]),
-                end_time=float(r["end_time"]),
-                confidence=float(r.get("confidence", 1.0)),
-                chew_count=int(r.get("chew_count", 0) or 0),
-                chew_strokes=[],
-            )
-            for r in rows
-        ]
-        session_id = bites_csv.parent.name
-
-    if not bites:
-        print(f"No bites found for session {session_id}.")
-        return 1
-
-    analyzer = MealAnalyzer()
-    metrics = analyzer.analyze_meal(bites)
-    phases = analyzer.detect_phases(bites)
-    quality = ChewQualityEvaluator().evaluate_meal(metrics, bites)
-
-    # --- Serialize -----------------------------------------------------
-    def _enum_to_str(v):
-        return v.value if hasattr(v, "value") else v
-
-    from dataclasses import asdict
-    payload = {
-        "session_id": session_id,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "metrics": asdict(metrics),
-        "phases": [asdict(p) for p in phases],
-        "quality": {k: _enum_to_str(v) for k, v in asdict(quality).items()},
-    }
-
-    out_dir = Path(args.output_dir) if args.output_dir else (
-        get_workspace_root() / "reports" / "meals"
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / f"{session_id}.json"
-    md_path = out_dir / f"{session_id}.md"
-
-    json_path.write_text(json.dumps(payload, indent=2))
-
-    md_lines = [
-        f"# Meal report — {session_id}",
-        "",
-        f"_Generated {payload['generated_at']}_",
-        "",
-        "## Summary",
-        f"- Bites: **{metrics.bite_count}**",
-        f"- Chews: **{metrics.chew_count}**",
-        f"- Duration: **{metrics.total_duration:.1f} s** "
-        f"({metrics.eating_efficiency*100:.0f}% chewing)",
-        f"- Avg chews / bite: **{metrics.avg_chews_per_bite:.1f}**",
-        f"- Bite rate: **{metrics.bite_rate_per_minute:.1f}** / min",
-        f"- Rushed bites: **{metrics.rushed_bite_count}** "
-        f"({metrics.rushed_bite_fraction*100:.0f}%)",
-        f"- Pace trend: **{metrics.pace_trend}** "
-        f"({metrics.first_half_pace:.1f}s → {metrics.second_half_pace:.1f}s IBI)",
-        "",
-        "## Quality",
-        f"- Overall: **{quality.overall_score:.0f}** "
-        f"({_enum_to_str(quality.overall_rating)})",
-        f"- Pace: {_enum_to_str(quality.eating_pace_rating)}",
-        f"- Thoroughness: {_enum_to_str(quality.thoroughness_rating)} "
-        f"(well-chewed {quality.well_chewed_percent:.0f}%)",
-        f"- Rhythm: {_enum_to_str(quality.rhythm_rating)} "
-        f"(pauses: {quality.mindful_pauses})",
-    ]
-    if quality.recommendations:
-        md_lines += ["", "## Recommendations"]
-        md_lines += [f"- {r}" for r in quality.recommendations]
-    if phases:
-        md_lines += ["", "## Phases"]
-        for i, ph in enumerate(phases, 1):
-            label = ph.phase_label or "—"
-            md_lines.append(
-                f"{i}. {ph.start_time:.1f}–{ph.end_time:.1f}s · "
-                f"{ph.bite_count} bites · pace {ph.avg_pace:.1f}s · {label}"
-            )
-
-    md_path.write_text("\n".join(md_lines) + "\n")
-    print(f"Wrote {json_path}")
-    print(f"Wrote {md_path}")
     return 0
 
 
@@ -1366,6 +1439,7 @@ Examples:
   chewsense-motion sample
   chewsense-motion from-app
   chewsense-motion from-raw
+  chewsense-motion materialize-temporal --input workspace/sessions/raw
   chewsense-motion from-field-test
   chewsense-motion evaluate
   chewsense-motion registry --latest
@@ -1378,7 +1452,7 @@ Examples:
     # sample command
     p_sample = subparsers.add_parser(
         "sample",
-        help="Run pipeline with sample data (for demo/testing)",
+        help="Reproduce the legacy aggregate eating-only sample (requires --arch mlp)",
     )
     add_common_args(p_sample)
     p_sample.set_defaults(func=cmd_sample)
@@ -1401,20 +1475,43 @@ Examples:
         help="Directory containing raw session folders or CSVs",
     )
     p_from_raw.add_argument(
-        "--video-labels-root", type=Path,
-        help="Derived video-label root; canonical labels inside sessions take precedence",
-    )
-    p_from_raw.add_argument(
-        "--allow-unverified-video-labels", action="store_true",
-        help="Allow automatic video labels into training before final review",
+        "--materialize-only", action="store_true",
+        help="For causal_tcn, write v2 temporal arrays and stop before split/training",
     )
     add_common_args(p_from_raw)
     p_from_raw.set_defaults(func=cmd_from_raw)
+
+    # materialize-temporal command
+    p_temporal = subparsers.add_parser(
+        "materialize-temporal",
+        help="Build causal-TCN arrays from canonical schema-v2 sessions",
+    )
+    p_temporal.add_argument(
+        "--input", type=Path,
+        help="One schema-v2 session or a directory containing session folders",
+    )
+    p_temporal.add_argument(
+        "--output", type=Path,
+        help="Output directory for X/y/timestamps/session_ids arrays",
+    )
+    p_temporal.add_argument(
+        "--split-manifest", type=Path,
+        help="Also create class-covered chronological locked splits at this path",
+    )
+    p_temporal.add_argument(
+        "--inference-step-sec", type=float, default=0.10,
+        help="Inference timestamp spacing (fixed runtime default: 0.10)",
+    )
+    p_temporal.add_argument(
+        "--max-gap-sec", type=float, default=0.08,
+        help="Largest interpolated IMU gap considered valid (default: 0.08)",
+    )
+    p_temporal.set_defaults(func=cmd_materialize_temporal)
     
     # from-features command
     p_from_features = subparsers.add_parser(
         "from-features",
-        help="Train from pre-extracted features (skip transform/extraction)",
+        help="Train a legacy aggregate eating-only model (requires --arch mlp)",
     )
     p_from_features.add_argument(
         "--input", type=Path,
@@ -1426,7 +1523,7 @@ Examples:
     # from-field-test command
     p_from_field_test = subparsers.add_parser(
         "from-field-test",
-        help="Import real-world app feedback bundles and retrain from curated sessions",
+        help="Legacy aggregate field-test import/retrain (requires --arch mlp)",
     )
     p_from_field_test.add_argument(
         "--input", type=Path,
@@ -1435,14 +1532,6 @@ Examples:
     p_from_field_test.add_argument(
         "--curated-dir", type=Path,
         help="Directory to write imported curated sessions",
-    )
-    p_from_field_test.add_argument(
-        "--video-labels-root", type=Path,
-        help="Derived video-label root; canonical labels inside sessions take precedence",
-    )
-    p_from_field_test.add_argument(
-        "--allow-unverified-video-labels", action="store_true",
-        help="Allow automatic video labels into training before final review",
     )
     p_from_field_test.add_argument(
         "--no-archive", action="store_true",
@@ -1476,6 +1565,11 @@ Examples:
     )
     p_evaluate.add_argument("--model", type=Path, help="Path to model checkpoint")
     p_evaluate.add_argument("--features", type=Path, help="Directory containing X.npy/y.npy")
+    p_evaluate.add_argument(
+        "--registry-entry",
+        type=Path,
+        help="Evaluate and atomically attach metrics to this exact registry entry",
+    )
     p_evaluate.add_argument(
         "--split",
         default="all",
@@ -1558,49 +1652,6 @@ Examples:
     )
     p_status.set_defaults(func=cmd_status)
 
-    # bite-metrics command
-    p_bite = subparsers.add_parser(
-        "bite-metrics",
-        help="Evaluate chew-stroke / bite metrics for one or more field-test bundles",
-    )
-    p_bite.add_argument(
-        "--bundle", action="append", default=None,
-        help="Path to a single bundle directory (repeat for multiple)",
-    )
-    p_bite.add_argument(
-        "--sweep", type=Path,
-        help="Root directory containing field-test bundle subdirectories",
-    )
-    p_bite.add_argument(
-        "--detect", action="store_true",
-        help="Regenerate bite_events.csv / chew_events.csv from predictions.csv before evaluating",
-    )
-    p_bite.add_argument(
-        "--output", type=Path,
-        help="Output markdown path (default: workspace/reports/evaluation/...)",
-    )
-    p_bite.set_defaults(func=cmd_bite_metrics)
-
-    # meal-report command
-    p_meal = subparsers.add_parser(
-        "meal-report",
-        help="Assemble bites into a meal-level summary (JSON + markdown).",
-    )
-    p_meal.add_argument(
-        "--bundle", type=Path,
-        help="Path to a field-test bundle dir containing predictions.csv",
-    )
-    p_meal.add_argument(
-        "--bites", type=Path,
-        help="Path to an existing bite_events.csv (skip bite detection)",
-    )
-    p_meal.add_argument(
-        "--output-dir", type=Path,
-        help="Override output directory (default: workspace/reports/meals/)",
-    )
-    p_meal.set_defaults(func=cmd_meal_report)
-
-    
     # Parse and run
     args = parser.parse_args()
     

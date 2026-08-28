@@ -45,7 +45,9 @@ struct RecordingComposerView: View {
         }
         .navigationTitle("New Recording")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(motionManager.isRunning || motionManager.isFinalizingSession)
+        .navigationBarBackButtonHidden(
+            motionManager.isRunning || motionManager.isStartingSession || motionManager.isFinalizingSession
+        )
         .onAppear {
             #if os(iOS)
             motionManager.prepareCameraPreview()
@@ -159,8 +161,8 @@ struct RecordingComposerView: View {
                     .background(Color.black.opacity(0.55))
                     .clipShape(Circle())
             }
-            .disabled(motionManager.isFinalizingSession)
-            .opacity(motionManager.isRunning ? 0 : 1)
+            .disabled(motionManager.isStartingSession || motionManager.isFinalizingSession)
+            .opacity(motionManager.isRunning || motionManager.isStartingSession ? 0 : 1)
             .accessibilityLabel("Close")
         }
     }
@@ -222,6 +224,13 @@ struct RecordingComposerView: View {
                     low: RuntimeConfig.lowThreshold
                 )
                 .frame(height: 14)
+
+                if motionManager.mealMetrics.latestCue == .slowDown {
+                    Label("Try a slightly slower, steadier pace", systemImage: "tortoise")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .transition(.opacity)
+                }
             }
             .padding(12)
             .background(Color.black.opacity(0.55))
@@ -232,7 +241,9 @@ struct RecordingComposerView: View {
 
     private var controlBar: some View {
         VStack(spacing: 12) {
-            if !motionManager.isRunning && !motionManager.isFinalizingSession {
+            if !motionManager.isRunning && !motionManager.isStartingSession && !motionManager.isFinalizingSession {
+                LiveGuidanceView(stage: .record)
+                    .padding(.horizontal, 8)
                 presetCompactPicker
             }
             HStack {
@@ -277,6 +288,14 @@ struct RecordingComposerView: View {
                     .padding(.horizontal, 24)
             }
 
+            Picker("Texture", selection: $config.mealTexture) {
+                ForEach(MealTexture.allCases) { texture in
+                    Text(texture.title).tag(texture)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 24)
+
             Toggle(isOn: $config.goldLockCandidate) {
                 Text("Mark as benchmark candidate")
                     .font(.caption.weight(.semibold))
@@ -300,7 +319,7 @@ struct RecordingComposerView: View {
                     .stroke(Color.white, lineWidth: 4)
                     .frame(width: 78, height: 78)
 
-                if motionManager.isFinalizingSession {
+                if motionManager.isStartingSession || motionManager.isFinalizingSession {
                     ProgressView()
                         .tint(.white)
                 } else if motionManager.isRunning {
@@ -315,7 +334,11 @@ struct RecordingComposerView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(motionManager.isFinalizingSession || (!motionManager.isRunning && !config.isPresetReadyToRecord))
+        .disabled(
+            motionManager.isStartingSession
+                || motionManager.isFinalizingSession
+                || (!motionManager.isRunning && !config.isPresetReadyToRecord)
+        )
         .accessibilityLabel(motionManager.isRunning ? "Stop Recording" : "Start Recording")
     }
 
@@ -336,6 +359,7 @@ struct RecordingComposerView: View {
             metadata.activityLabel = config.activityLabel
             metadata.expectedLabelClass = config.activityPreset.expectedLabelClass.rawValue
             metadata.goldLockCandidate = config.goldLockCandidate
+            metadata.mealTexture = config.mealTexture
             motionManager.start(metadata: metadata)
         }
     }

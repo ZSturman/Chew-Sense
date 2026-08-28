@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import welch
 
-from .config import FeaturesConfig, MouthShapeConfig
+from .config import FeaturesConfig
 from .splits import session_id_from_path
 
 
@@ -207,7 +207,6 @@ def extract_features_from_csv(
     config: FeaturesConfig,
     label_col: str = "chewing_soft",
     timestamp_col: Optional[str] = None,
-    mouth_shape_config: Optional[MouthShapeConfig] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Extract features from a transformed CSV.
@@ -215,15 +214,11 @@ def extract_features_from_csv(
     Args:
         csv_path: Path to transformed CSV (with chewing_soft column)
         config: Feature extraction configuration
-        label_col: Label column name (used in binary mode)
+        label_col: Eating label column name
         timestamp_col: Timestamp column (auto-detect if None)
-        mouth_shape_config: If provided and enabled, extract multi-dim mouth
-                            shape labels instead of scalar chewing_soft.
     
     Returns:
-        Tuple of (X, y) arrays.
-        Binary mode: y shape (n_windows,)
-        Mouth shape mode: y shape (n_windows, num_outputs)
+        Tuple of aggregate feature ``X`` and scalar eating target ``y`` arrays.
     """
     df = pd.read_csv(csv_path)
     
@@ -247,20 +242,6 @@ def extract_features_from_csv(
     window_samples = int(config.window_sec * fs)
     step_samples = int(config.step_sec * fs)
     
-    # Determine label mode
-    use_mouth_shape = (
-        mouth_shape_config is not None
-        and mouth_shape_config.enabled
-        and all(col in df.columns for col in mouth_shape_config.parameters)
-    )
-    # Two-head targets are always shape-compatible across sessions. Sessions
-    # without reviewed phase labels contribute to the eating head only via a
-    # zero phase-valid mask.
-    use_chew_phase = bool(getattr(config, "extended_chew_phase", False))
-    has_phase_targets = (
-        "chew_phase_sin" in df.columns and "chew_phase_cos" in df.columns
-    )
-
     X_list = []
     y_list = []
     
@@ -271,33 +252,7 @@ def extract_features_from_csv(
         features = extract_features(window, fs)
         X_list.append(features)
         
-        if use_mouth_shape:
-            # Multi-output: average each mouth shape param over window
-            label_vec = [window[col].mean() for col in mouth_shape_config.parameters]
-            y_list.append(label_vec)
-        elif use_chew_phase:
-            phase_valid = (
-                window["phase_label_valid"].astype(float)
-                if "phase_label_valid" in window.columns
-                else (
-                    window["label_valid"].astype(float)
-                    if has_phase_targets and "label_valid" in window.columns
-                    else pd.Series(
-                        np.ones(len(window)) if has_phase_targets else np.zeros(len(window)),
-                        index=window.index,
-                    )
-                )
-            )
-            # The fourth target is a training-only mask; model output remains
-            # [eating_logit, phase_sin, phase_cos].
-            y_list.append([
-                float(window[label_col].mean()),
-                float(window["chew_phase_sin"].mean()) if has_phase_targets else 0.0,
-                float(window["chew_phase_cos"].mean()) if has_phase_targets else 0.0,
-                float(phase_valid.mean()),
-            ])
-        else:
-            y_list.append(window[label_col].mean())
+        y_list.append(window[label_col].mean())
     
     X = np.array(X_list, dtype=np.float32)
     y = np.array(y_list, dtype=np.float32)
@@ -310,7 +265,6 @@ def extract_features_directory(
     config: FeaturesConfig,
     label_col: str = "chewing_soft",
     timestamp_col: Optional[str] = None,
-    mouth_shape_config: Optional[MouthShapeConfig] = None,
 ) -> tuple[Path, Path, Path]:
     """
     Extract features from all transformed CSVs in a directory.
@@ -319,9 +273,8 @@ def extract_features_directory(
         input_dir: Directory containing transformed CSVs
         output_dir: Directory for feature outputs
         config: Feature extraction configuration
-        label_col: Label column name (binary mode)
+        label_col: Eating label column name
         timestamp_col: Timestamp column (auto-detect if None)
-        mouth_shape_config: If provided and enabled, extract multi-dim labels.
     
     Returns:
         Tuple of (X.npy path, y.npy path, feature_names.txt path)
@@ -348,7 +301,6 @@ def extract_features_directory(
                 config=config,
                 label_col=label_col,
                 timestamp_col=timestamp_col,
-                mouth_shape_config=mouth_shape_config,
             )
             X_all.append(X)
             y_all.append(y)
@@ -377,22 +329,10 @@ def extract_features_directory(
         for name in FEATURE_NAMES:
             f.write(name + "\n")
     
-    print(f"✅ Feature extraction complete")
+    print("✅ Feature extraction complete")
     print(f"   X shape: {X.shape}")
     print(f"   y shape: {y.shape}")
     print(f"   Sessions: {len(set(session_ids_all))}")
     print(f"   Output: {output_dir}")
-    
-    # Save label names for multi-output mode
-    use_mouth_shape = (
-        mouth_shape_config is not None
-        and mouth_shape_config.enabled
-    )
-    if use_mouth_shape:
-        label_names_path = output_dir / "label_names.txt"
-        with open(label_names_path, "w") as f:
-            for name in mouth_shape_config.parameters:
-                f.write(name + "\n")
-        print(f"   Label names: {label_names_path}")
     
     return x_path, y_path, names_path

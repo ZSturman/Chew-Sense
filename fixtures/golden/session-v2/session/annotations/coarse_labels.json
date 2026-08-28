@@ -1,0 +1,13 @@
+{
+  "artifact_type": "coarse_labels",
+  "intervals": [
+    {
+      "end_ts": 3.2,
+      "label": "chewing",
+      "source": "human",
+      "start_ts": 0.0
+    }
+  ],
+  "schema_version": "2.0.0",
+  "session_id": "golden-session-v2"
+}

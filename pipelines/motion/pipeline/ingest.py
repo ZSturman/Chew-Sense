@@ -30,13 +30,9 @@ class SessionInfo:
     duration_sec: float
     sampling_rate_hz: float
     hash: str
-    # Phase 4 additive metadata — populated when video labels are available.
-    has_video_labels: bool = False
+    # Eligibility metadata for locked legacy eating-only splits. Canonical v2
+    # event supervision is materialized by temporal_dataset.py instead.
     verified: bool = False
-    chew_cycle_count: int = 0
-    eating_span_count: int = 0
-    annotation_revision: int = 0
-    model_ids: dict[str, str] | None = None
 
 
 @dataclass
@@ -65,15 +61,6 @@ def compute_file_hash(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             hasher.update(chunk)
     return hasher.hexdigest()[:16]  # Truncated for readability
-
-
-def compute_session_hash(csv_path: Path, annotation_paths: list[Path] | None = None) -> str:
-    hasher = hashlib.sha256()
-    for path in [csv_path, *(annotation_paths or [])]:
-        if path.exists():
-            hasher.update(path.name.encode())
-            hasher.update(compute_file_hash(path).encode())
-    return hasher.hexdigest()[:16]
 
 
 def validate_csv(
@@ -151,7 +138,6 @@ def get_session_info(
     session_dir: Path,
     label_col: str = "label",
     timestamp_col: Optional[str] = None,
-    video_labels_root: Optional[Path] = None,
 ) -> SessionInfo:
     """
     Get information about a session directory.
@@ -198,7 +184,7 @@ def get_session_info(
     sampling_rate = 1.0 / dt.median() if len(dt) > 0 else 100.0
     duration = (t.max() - t.min()) if hasattr(t, 'max') else (t[-1] - t[0])
     
-    info = SessionInfo(
+    return SessionInfo(
         path=session_dir,
         csv_path=csv_path,
         label=label,
@@ -208,35 +194,11 @@ def get_session_info(
         hash=compute_file_hash(csv_path),
     )
 
-    # Phase 4: enrich with video-label metadata when available.
-    if video_labels_root is not None:
-        from .video_labels import find_artifacts
-        art = find_artifacts(session_dir.name, Path(video_labels_root), raw_bundle_dir=session_dir)
-        info.has_video_labels = art.has_video_labels
-        info.verified = art.verified
-        info.chew_cycle_count = art.chew_cycle_count
-        info.eating_span_count = art.eating_span_count
-        info.annotation_revision = art.annotation_revision
-        info.model_ids = art.model_ids
-        annotation_paths = [
-            path for path in (
-                art.aligned_csv,
-                art.canonical_events_json,
-                art.overrides_json,
-            )
-            if path is not None
-        ]
-        info.hash = compute_session_hash(csv_path, annotation_paths)
-
-    return info
-
 
 def validate_sessions(
     input_dir: Path,
     label_col: str = "label",
     timestamp_col: Optional[str] = None,
-    video_labels_root: Optional[Path] = None,
-    require_verified_video_labels: bool = True,
 ) -> list[SessionInfo]:
     """
     Validate all sessions in a directory.
@@ -262,14 +224,7 @@ def validate_sessions(
             csvs = list(item.glob("*.csv"))
             if csvs:
                 try:
-                    info = get_session_info(item, label_col, timestamp_col, video_labels_root=video_labels_root)
-                    if (
-                        require_verified_video_labels
-                        and info.has_video_labels
-                        and not info.verified
-                    ):
-                        raise ValueError("video labels exist but review is not verified")
-                    sessions.append(info)
+                    sessions.append(get_session_info(item, label_col, timestamp_col))
                 except ValueError as e:
                     print(f"Warning: Skipping {item.name}: {e}")
     
@@ -360,12 +315,7 @@ def save_manifest(manifest: DatasetManifest, output_path: Path) -> None:
                 "duration_sec": s.duration_sec,
                 "sampling_rate_hz": s.sampling_rate_hz,
                 "hash": s.hash,
-                "has_video_labels": s.has_video_labels,
                 "verified": s.verified,
-                "chew_cycle_count": s.chew_cycle_count,
-                "eating_span_count": s.eating_span_count,
-                "annotation_revision": s.annotation_revision,
-                "model_ids": s.model_ids or {},
             }
             for s in manifest.sessions
         ],

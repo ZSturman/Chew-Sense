@@ -6,6 +6,8 @@ import ssl
 import urllib.request
 from pathlib import Path
 
+from ..paths import workspace_root
+
 try:
     import certifi
     _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -26,7 +28,7 @@ def _cache_dir() -> Path:
     env = os.environ.get("CHEWSENSE_MODELS_DIR")
     if env:
         return Path(env)
-    return Path.home() / ".cache" / "chewsense" / "models"
+    return workspace_root() / "models" / "mediapipe"
 
 
 def get_model(name: str) -> Path:

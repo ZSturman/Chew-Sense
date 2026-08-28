@@ -23,6 +23,7 @@ __pycache__/
 .Python
 .venv/
 .venv-export/
+.uv-python/
 venv/
 env/
 ENV/
@@ -35,7 +36,6 @@ dist/
 htmlcov/
 .hypothesis/
 .env
-.python-version
 .ipynb_checkpoints/
 
 # Generated ML and reports

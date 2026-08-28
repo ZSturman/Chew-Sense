@@ -71,6 +71,14 @@ private struct LastPredictionWindow {
     let smoothed: Double
     let state: String
     let featuresJSON: String
+    let eatingLogit: Double
+    let chewEventLogit: Double?
+    let chewEventProbability: Double?
+    let phaseSin: Double?
+    let phaseCos: Double?
+    let phaseConfidence: Double?
+    let gapCoverage: Double
+    let decodedChewEventTimestamp: Double?
 }
 
 /// Manages motion data collection and chewing detection
@@ -78,7 +86,7 @@ final class MotionManager: ObservableObject {
 
     // MARK: - Configuration
 
-    private let windowDuration: TimeInterval = 0.75
+    private var windowDuration: TimeInterval { model.isTemporalMode ? 3.0 : 0.75 }
     private let stepDuration: TimeInterval = 0.10
 
     // MARK: - Dependencies
@@ -86,11 +94,11 @@ final class MotionManager: ObservableObject {
     private let headphoneManager = CMHeadphoneMotionManager()
     private let detector: ChewDetector
     private let strokeCounter = ChewStrokeCounter()
-    private let phaseCounter = ChewPhaseCounter()
-    private var phaseStrokes: [ChewStroke] = []
-    private let biteSegmenter = BiteSegmenter()
+    private let eventDecoder = ChewEventDecoder()
+    private let boutSegmenter = ChewingBoutSegmenter()
     let mealMetrics = MealMetricsTracker()
     private let model = ChewModel.shared
+    private let baselineStore = PersonalBaselineStore.shared
     private let motionQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.name = "com.chewsense.debugging-model.motion"
@@ -106,6 +114,15 @@ final class MotionManager: ObservableObject {
     private var lastWindow: LastPredictionWindow?
     private var sessionBaseTimestamp: TimeInterval?
     private var recordedPredictions: [LastPredictionWindow] = []
+    private var activeSessionMetadata: SessionMetadataInput?
+    private var sessionCreatedAt: String?
+    private var requestedVideoOriginHostTime: TimeInterval?
+    private var firstMotionHostTime: TimeInterval?
+    private var lastMotionHostTime: TimeInterval?
+    private var motionSampleCount = 0
+    private var motionSampleGapCount = 0
+    private var largestMotionSampleGapSec = 0.0
+    private var motionInterruptionCount = 0
     /// Counter used to throttle waveform/attitude UI updates to ~20 Hz (every 5th
     /// sample at ~100 Hz).
     private var vizSampleCounter: Int = 0
@@ -113,12 +130,12 @@ final class MotionManager: ObservableObject {
     // MARK: - Published Properties
 
     @Published var isRunning: Bool = false
+    @Published var isStartingSession: Bool = false
     @Published var statusText: String = "Idle"
     @Published var latestProb: Double = 0.0
     @Published var latestSmoothed: Double = 0.0
     @Published var isChewing: Bool = false
     @Published var logPreview: [String] = []
-    @Published var mouthShape: MouthShapeState = .neutral
     @Published var currentSessionURL: URL?
     @Published var latestCompletedSessionURL: URL?
     @Published var isFinalizingSession: Bool = false
@@ -230,10 +247,13 @@ final class MotionManager: ObservableObject {
         /// True if the user wants this session promoted to the locked
         /// validation set on import.
         var goldLockCandidate: Bool = false
+        /// Required pre-meal texture choice. Unknown still permits cadence
+        /// metrics but can never enable a chew-count goal.
+        var mealTexture: MealTexture = .unknown
     }
 
     func start(metadata: SessionMetadataInput) {
-        guard !isRunning, !isFinalizingSession else { return }
+        guard !isRunning, !isStartingSession, !isFinalizingSession else { return }
 
         #if os(iOS)
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -262,7 +282,8 @@ final class MotionManager: ObservableObject {
     }
 
     private func startSession(metadata: SessionMetadataInput) {
-        guard !isRunning, !isFinalizingSession else { return }
+        guard !isRunning, !isStartingSession, !isFinalizingSession else { return }
+        isStartingSession = true
 
         #if os(iOS)
         activateAudioSession()
@@ -270,6 +291,7 @@ final class MotionManager: ObservableObject {
 
         guard headphoneManager.isDeviceMotionAvailable else {
             DispatchQueue.main.async {
+                self.isStartingSession = false
                 self.statusText = "Headphone motion not available. Ensure AirPods Pro/Max/4 are connected."
             }
             return
@@ -282,6 +304,16 @@ final class MotionManager: ObservableObject {
         detector.updateConfig(activeDetectorConfig)
         detector.reset()
         resetRuntimeState()
+        let coachingGoals = baselineStore.goals(
+            for: metadata.mealTexture,
+            capabilities: model.capabilities
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.mealMetrics.configure(
+                texture: metadata.mealTexture,
+                goals: coachingGoals
+            )
+        }
 
         do {
             try createSessionBundle(
@@ -298,19 +330,41 @@ final class MotionManager: ObservableObject {
             #endif
             currentSessionURL = nil
             DispatchQueue.main.async {
+                self.isStartingSession = false
                 self.statusText = "Could not start session: \(error.localizedDescription)"
             }
             return
         }
 
+        #if !os(iOS)
+        beginMotionUpdates()
+        #else
+        statusText = "Starting synchronized recording..."
+        #endif
+    }
+
+    /// Starts AirPods capture only after the video delegate has frozen the
+    /// host-clock origin. This prevents negative or first-motion-shifted video
+    /// timestamps in evaluation bundles.
+    private func beginMotionUpdates() {
         headphoneManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
-            guard let self = self, let motion = motion, error == nil else { return }
+            guard let self else { return }
+            if let error {
+                self.motionInterruptionCount += 1
+                DispatchQueue.main.async {
+                    self.statusText = "Motion interruption: \(error.localizedDescription)"
+                }
+                return
+            }
+            guard let motion else { return }
             self.handleMotion(motion)
         }
 
         DispatchQueue.main.async {
+            self.isStartingSession = false
             self.isRunning = true
             self.statusText = "Running"
+            self.recordingStartedAt = Date()
         }
     }
 
@@ -326,6 +380,7 @@ final class MotionManager: ObservableObject {
         let finish: () -> Void = { [weak self] in
             guard let self else { return }
             self.isRunning = false
+            self.isStartingSession = false
             self.isFinalizingSession = false
             self.recordingStartedAt = nil
             self.statusText = "Stopped"
@@ -338,22 +393,31 @@ final class MotionManager: ObservableObject {
             #endif
         }
 
-        // Finalize labels (write `label` column into motion.csv and rewrite
-        // predictions.csv from the in-memory record). Runs on motionQueue so
+        // Finalize model telemetry (write `predicted_eating`, never a truth
+        // label, and rewrite predictions.csv from the in-memory record). Runs on motionQueue so
         // it doesn't block the main thread; we only expose the completed
-        // session URL once the artifacts are ready for review playback.
+        // session URL once every export and post-meal artifact is present.
         let finalizeAndFinish: () -> Void = { [weak self] in
             guard let self else { return }
-            self.motionQueue.addOperation { [weak self] in
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if let url = finishedSessionURL {
-                    DispatchQueue.main.async {
-                        self.statusText = "Finalizing labels..."
+                let mealMetricsPayload = self.mealMetrics.snapshotJSON(
+                    capabilities: self.model.capabilities
+                )
+                self.motionQueue.addOperation { [weak self] in
+                    guard let self else { return }
+                    if let url = finishedSessionURL {
+                        DispatchQueue.main.async {
+                            self.statusText = "Finalizing session..."
+                        }
+                        self.finalizeSessionArtifacts(
+                            at: url,
+                            mealMetricsPayload: mealMetricsPayload
+                        )
                     }
-                    self.finalizeSessionArtifacts(at: url)
-                }
-                DispatchQueue.main.async {
-                    finish()
+                    DispatchQueue.main.async {
+                        finish()
+                    }
                 }
             }
         }
@@ -385,80 +449,101 @@ final class MotionManager: ObservableObject {
 
     // MARK: - Session Artifact Finalization
 
-    /// Re-writes `predictions.csv` from the in-memory record (defends
-    /// against partial flushes) and adds a per-row `label` column to
-    /// `motion.csv` so that playback/review can align labels with motion
-    /// timestamps without a manual labeling pass.
-    private func finalizeSessionArtifacts(at sessionURL: URL) {
+    /// Re-writes `predictions.csv` and materializes per-row model telemetry.
+    /// Automatic predictions are never written as human-reviewed truth.
+    private func finalizeSessionArtifacts(
+        at sessionURL: URL,
+        mealMetricsPayload: [String: Any]
+    ) {
         // Snapshot to avoid races with any in-flight motion handling.
         let predictions = self.recordedPredictions
         rewritePredictionsCSV(at: sessionURL, predictions: predictions)
-        labelMotionCSV(at: sessionURL, predictions: predictions)
-        writeBiteAndChewArtifacts(at: sessionURL)
+        materializePredictionTelemetry(at: sessionURL, predictions: predictions)
+        writeBoutAndChewArtifacts(
+            at: sessionURL,
+            mealMetricsPayload: mealMetricsPayload
+        )
+        writeCanonicalSessionManifest(at: sessionURL, finalized: true)
     }
 
-    /// Persist `bite_events.csv`, `chew_events.csv`, and `meal_metrics.json`
-    /// alongside the rest of the field-test bundle. Schemas match the
-    /// canonical Python writers in
-    /// `pipelines/motion/pipeline/bite_detector.py`.
-    private func writeBiteAndChewArtifacts(at sessionURL: URL) {
-        let bites = self.biteSegmenter.bites
-        let strokes = self.strokeCounter.strokes
+    /// Persist learned chew events plus honestly named diagnostic bouts.
+    private func writeBoutAndChewArtifacts(
+        at sessionURL: URL,
+        mealMetricsPayload: [String: Any]
+    ) {
+        let bouts = self.boutSegmenter.bouts
+        let strokes = self.activeChewStrokes
 
-        // bite_events.csv
-        var biteCSV = "start_time,end_time,duration,confidence,chew_count\n"
-        for b in bites {
-            biteCSV += String(
-                format: "%.6f,%.6f,%.6f,%.6f,%d\n",
-                b.startTime, b.endTime, b.duration, b.confidence, b.chewCount
+        let videoOrigin = canonicalVideoOriginHostTime
+        var boutCSV = "start_host_ts,end_host_ts,start_video_ts,end_video_ts,duration,confidence,chew_count,provenance\n"
+        for bout in bouts {
+            boutCSV += String(
+                format: "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,model_diagnostic\n",
+                bout.startTime,
+                bout.endTime,
+                bout.startTime - videoOrigin,
+                bout.endTime - videoOrigin,
+                bout.duration,
+                bout.confidence,
+                bout.chewCount
             )
         }
-        try? biteCSV.data(using: .utf8)?.write(
-            to: sessionURL.appendingPathComponent("bite_events.csv"),
+        try? boutCSV.data(using: .utf8)?.write(
+            to: sessionURL.appendingPathComponent("chewing_bouts.csv"),
             options: .atomic
         )
 
-        // chew_events.csv (with bite_index attribution where possible)
-        var chewCSV = "timestamp,bite_index,confidence,source\n"
+        var chewCSV = "host_timestamp,video_ts,chewing_bout_index,confidence,source,provenance\n"
         for s in strokes {
-            let biteIdx = bites.firstIndex(where: { s.timestamp >= $0.startTime && s.timestamp < $0.endTime }) ?? -1
+            let boutIndex = bouts.firstIndex(where: {
+                s.timestamp >= $0.startTime && s.timestamp < $0.endTime
+            }) ?? -1
             chewCSV += String(
-                format: "%.6f,%d,%.6f,%@\n",
-                s.timestamp, biteIdx, s.confidence, s.source.rawValue as CVarArg
+                format: "%.6f,%.6f,%d,%.6f,%@,model_telemetry\n",
+                s.timestamp,
+                s.timestamp - videoOrigin,
+                boutIndex,
+                s.confidence,
+                s.source.rawValue as CVarArg
             )
         }
         try? chewCSV.data(using: .utf8)?.write(
-            to: sessionURL.appendingPathComponent("chew_events.csv"),
+            to: sessionURL.appendingPathComponent("chew_event_telemetry.csv"),
             options: .atomic
         )
 
-        // meal_metrics.json — snapshot via main-actor tracker. We're on the
-        // motionQueue here; bounce to the main actor synchronously via
-        // DispatchQueue if needed, but the tracker's snapshot is just a
-        // read of plain values, so a property capture is safe.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let payload = self.mealMetrics.snapshotJSON()
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(
-                    to: sessionURL.appendingPathComponent("meal_metrics.json"),
-                    options: .atomic
-                )
-            }
-        }
+        // The main-actor snapshot is captured before this motion-queue
+        // finalizer starts, then written synchronously. The completed bundle
+        // is never published before its post-meal summary exists.
+        try? LiveCanonicalSessionWriter.writeMealMetrics(
+            mealMetricsPayload,
+            to: sessionURL
+        )
     }
 
     private func rewritePredictionsCSV(at sessionURL: URL, predictions: [LastPredictionWindow]) {
         let url = sessionURL.appendingPathComponent("predictions.csv")
-        var csv = "timestamp,window_start,window_end,probability,smoothed,state,features_json\n"
+        let videoOrigin = canonicalVideoOriginHostTime
+        var csv = "timestamp,window_start,window_end,window_start_video_ts,window_end_video_ts,eating_logit,probability,smoothed,state,chew_event_logit,chew_event_probability,phase_sin,phase_cos,phase_confidence,gap_coverage,decoded_chew_event_ts,decoded_chew_event_video_ts,features_json\n"
         for window in predictions {
             let fields = [
                 window.timestamp,
                 String(format: "%.6f", window.windowStart),
                 String(format: "%.6f", window.windowEnd),
+                String(format: "%.6f", window.windowStart - videoOrigin),
+                String(format: "%.6f", window.windowEnd - videoOrigin),
+                String(format: "%.8f", window.eatingLogit),
                 String(format: "%.4f", window.probability),
                 String(format: "%.4f", window.smoothed),
                 window.state,
+                csvOptional(window.chewEventLogit),
+                csvOptional(window.chewEventProbability),
+                csvOptional(window.phaseSin),
+                csvOptional(window.phaseCos),
+                csvOptional(window.phaseConfidence),
+                String(format: "%.6f", window.gapCoverage),
+                csvOptional(window.decodedChewEventTimestamp),
+                csvOptional(window.decodedChewEventTimestamp.map { $0 - videoOrigin }),
                 window.featuresJSON
             ].map(csvEscape)
             csv += fields.joined(separator: ",") + "\n"
@@ -479,7 +564,10 @@ final class MotionManager: ObservableObject {
         }
     }
 
-    private func labelMotionCSV(at sessionURL: URL, predictions: [LastPredictionWindow]) {
+    private func materializePredictionTelemetry(
+        at sessionURL: URL,
+        predictions: [LastPredictionWindow]
+    ) {
         let url = sessionURL.appendingPathComponent("motion.csv")
         guard let data = try? Data(contentsOf: url),
               let text = String(data: data, encoding: .utf8) else {
@@ -493,7 +581,7 @@ final class MotionManager: ObservableObject {
             .map(String.init)
         guard !lines.isEmpty else { return }
 
-        // Header: ensure a `label` column exists.
+        // Header: a derived prediction column, intentionally not `label`.
         var header = lines[0]
             .split(separator: ",", omittingEmptySubsequences: false)
             .map(String.init)
@@ -501,12 +589,15 @@ final class MotionManager: ObservableObject {
             return
         }
 
-        let labelIndex: Int
-        if let existing = header.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "label" }) {
-            labelIndex = existing
+        let predictionIndex: Int
+        if let existing = header.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "predicted_eating"
+        }) {
+            predictionIndex = existing
         } else {
-            header.append("label")
-            labelIndex = header.count - 1
+            header.append("predicted_eating")
+            predictionIndex = header.count - 1
         }
         lines[0] = header.joined(separator: ",")
 
@@ -520,7 +611,7 @@ final class MotionManager: ObservableObject {
             if trimmed.isEmpty { continue }
 
             var columns = raw.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            while columns.count <= labelIndex {
+            while columns.count <= predictionIndex {
                 columns.append("")
             }
 
@@ -531,7 +622,7 @@ final class MotionManager: ObservableObject {
             }
 
             let isChewing = predictedChewing(at: timestamp, sortedPredictions: sorted, cursor: &cursor)
-            columns[labelIndex] = isChewing ? "true" : "false"
+            columns[predictionIndex] = isChewing ? "true" : "false"
             lines[rowIndex] = columns.joined(separator: ",")
         }
 
@@ -637,87 +728,92 @@ final class MotionManager: ObservableObject {
         let tsStr = ISO8601DateFormatter().string(from: Date())
         let featuresJSON = jsonString(features)
 
-        if model.isMouthShapeMode {
-            let shape = model.predictMouthShape(features: normalizedFeatures)
-            let stateStr = shape.mouthOpenness > 0.3 ? "chewing" : "idle"
-            let probability = shape.mouthOpenness
+        let temporalWindow = model.isTemporalMode
+            ? TemporalWindowBuilder.build(samples: windowSamples, endTimestamp: last.timestamp)
+            : nil
+        guard !model.isTemporalMode || temporalWindow != nil else { return }
+        let prediction = temporalWindow.map { model.predictTemporal(window: $0) }
+            ?? model.predict(features: normalizedFeatures)
+        let probability = prediction.eatingProbability
+        let detResult = detector.update(probability: probability)
+        let stateStr = detResult.state == .chewing ? "chewing" : "idle"
 
-            writePrediction(
-                timestamp: tsStr,
-                windowStart: first.timestamp,
-                windowEnd: last.timestamp,
-                probability: probability,
-                smoothed: probability,
-                state: stateStr,
-                featuresJSON: featuresJSON
-            )
-
-            DispatchQueue.main.async {
-                self.mouthShape = shape
-                self.latestProb = probability
-                self.latestSmoothed = probability
-                self.isChewing = (stateStr == "chewing")
-                self.statusText = "Running (mouth shape)"
-            }
-        } else {
-            let prediction = model.predict(features: normalizedFeatures)
-            let probability = prediction.eatingProbability
-            let detResult = detector.update(probability: probability)
-            let stateStr = detResult.state == .chewing ? "chewing" : "idle"
-
-            let windowEnd = last.timestamp
-            if model.isTwoHeadMode, let phaseSin = prediction.phaseSin {
-                if detResult.state == .chewing {
-                    if phaseCounter.push(timestamp: windowEnd, sin: phaseSin),
-                       let timestamp = phaseCounter.lastEmittedTimestamp {
-                        phaseStrokes.append(
-                            ChewStroke(timestamp: timestamp, confidence: 1.0, source: .model)
-                        )
-                    }
-                } else {
-                    phaseCounter.pause()
-                }
-            } else {
-                // Compatibility fallback for legacy one-head checkpoints.
-                let chewBand = features.indices.contains(7) ? features[7] : 0.0
-                strokeCounter.push(timestamp: windowEnd, bandpower: chewBand)
-            }
-            if detResult.startedEpisode {
-                biteSegmenter.episodeStarted(at: first.timestamp)
-            }
-            var emittedBite: BiteEvent? = nil
-            if detResult.endedEpisode {
-                emittedBite = biteSegmenter.episodeEnded(
-                    at: windowEnd,
-                    smoothedProb: detResult.smoothedProb,
-                    chewStrokes: activeChewStrokes
+        let windowEnd = last.timestamp
+        var emittedChew: ChewStroke?
+        if model.isTemporalMode,
+           let eventLogit = prediction.chewEventLogit,
+           let phaseSin = prediction.phaseSin,
+           let phaseCos = prediction.phaseCos,
+           let phaseConfidence = prediction.phaseConfidence {
+            emittedChew = eventDecoder.push(
+                TemporalInferenceOutput(
+                    timestamp: windowEnd,
+                    eatingLogit: prediction.eatingLogit,
+                    chewEventLogit: eventLogit,
+                    phaseSin: phaseSin,
+                    phaseCos: phaseCos,
+                    phaseConfidence: phaseConfidence,
+                    gapCoverage: prediction.gapCoverage
                 )
-            }
-
-            writePrediction(
-                timestamp: tsStr,
-                windowStart: first.timestamp,
-                windowEnd: last.timestamp,
-                probability: probability,
-                smoothed: detResult.smoothedProb,
-                state: stateStr,
-                featuresJSON: featuresJSON
             )
+        } else {
+            // Explicit legacy diagnostic fallback. These heuristic peaks
+            // never drive personalized coaching or promotion evidence.
+            let chewBand = features.indices.contains(7) ? features[7] : 0.0
+            strokeCounter.push(timestamp: windowEnd, bandpower: chewBand)
+        }
+        if detResult.startedEpisode {
+            boutSegmenter.episodeStarted(at: windowEnd)
+        }
+        var emittedBout: ChewingBout?
+        if detResult.endedEpisode {
+            emittedBout = boutSegmenter.episodeEnded(
+                at: windowEnd,
+                smoothedProb: detResult.smoothedProb,
+                chewStrokes: activeChewStrokes
+            )
+        }
 
-            DispatchQueue.main.async {
-                self.latestProb = probability
-                self.latestSmoothed = detResult.smoothedProb
-                self.isChewing = (detResult.state == .chewing)
-                self.statusText = "Running (\(stateStr))"
-                if let bite = emittedBite {
-                    self.mealMetrics.record(bite, now: windowEnd)
+        writePrediction(
+            timestamp: tsStr,
+            windowStart: first.timestamp,
+            windowEnd: last.timestamp,
+            probability: probability,
+            smoothed: detResult.smoothedProb,
+            state: stateStr,
+            featuresJSON: featuresJSON,
+            modelPrediction: prediction,
+            decodedChewEventTimestamp: emittedChew?.timestamp
+        )
+
+        DispatchQueue.main.async {
+            self.latestProb = probability
+            self.latestSmoothed = detResult.smoothedProb
+            self.isChewing = (detResult.state == .chewing)
+            self.statusText = "Running (\(stateStr))"
+            if self.model.isTemporalMode {
+                let confident = prediction.gapCoverage >= RuntimeConfig.minGapCoverage
+                    && (prediction.phaseConfidence ?? 0) >= 0.5
+                self.mealMetrics.recordInference(
+                    stepDurationSec: self.stepDuration,
+                    confident: confident
+                )
+                if self.model.capabilities.temporalChewEventHead, let emittedChew {
+                    if self.mealMetrics.recordChew(emittedChew) != nil {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                            self?.mealMetrics.clearCue()
+                        }
+                    }
                 }
+            }
+            if let emittedBout {
+                self.mealMetrics.recordDiagnosticBout(emittedBout)
             }
         }
     }
 
     private var activeChewStrokes: [ChewStroke] {
-        model.isTwoHeadMode ? phaseStrokes : strokeCounter.strokes
+        model.isTemporalMode ? eventDecoder.decodedEvents : strokeCounter.strokes
     }
 
     // MARK: - Feedback
@@ -780,6 +876,54 @@ final class MotionManager: ObservableObject {
         detector.updateConfig(config)
     }
 
+    /// Called only after the wearer verifies a completed calibration meal.
+    /// Three verified meals for a texture are required before goals exist.
+    func registerVerifiedCalibrationMeal(
+        texture: MealTexture,
+        medianInterChewIntervalSec: Double,
+        medianChewsPerVerifiedFoodEntry: Double? = nil
+    ) {
+        baselineStore.addVerifiedMeal(
+            texture: texture,
+            medianInterChewIntervalSec: medianInterChewIntervalSec,
+            medianChewsPerVerifiedFoodEntry: medianChewsPerVerifiedFoodEntry
+        )
+    }
+
+    /// Explicit user confirmation path for a completed session. The verifier
+    /// rejects legacy/unpromoted model output and de-duplicates by session ID.
+    func verifyCompletedCalibrationMeal(
+        at sessionURL: URL
+    ) throws -> CalibrationVerificationReceipt {
+        try CalibrationMealVerifier.verify(
+            sessionURL: sessionURL,
+            store: baselineStore
+        )
+    }
+
+    func calibrationProgress(for texture: MealTexture) -> CalibrationProgress {
+        let count = baselineStore.book.verifiedMealCount(for: texture)
+        return CalibrationProgress(
+            texture: texture,
+            verifiedMealCount: count,
+            cadenceGoalActivated: count >= 3
+        )
+    }
+
+    func personalizedGoals(for texture: MealTexture) -> PersonalizedCoachingGoals? {
+        baselineStore.goals(for: texture, capabilities: model.capabilities)
+    }
+
+    func updatePersonalizedCadenceGoal(
+        texture: MealTexture,
+        minimumMedianIntervalSec: Double
+    ) {
+        guard var goals = personalizedGoals(for: texture),
+              minimumMedianIntervalSec > 0 else { return }
+        goals.minimumMedianInterChewIntervalSec = minimumMedianIntervalSec
+        baselineStore.setGoals(goals, for: texture)
+    }
+
     // MARK: - Session Bundle
 
     private func createSessionBundle(
@@ -793,6 +937,9 @@ final class MotionManager: ObservableObject {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let id = "FieldTest-\(formatter.string(from: Date()))"
         sessionID = id
+        activeSessionMetadata = metadata
+        sessionCreatedAt = ISO8601DateFormatter().string(from: Date())
+        requestedVideoOriginHostTime = ProcessInfo.processInfo.systemUptime
 
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let root = docs.appendingPathComponent("FieldTests", isDirectory: true)
@@ -807,7 +954,7 @@ final class MotionManager: ObservableObject {
         )
         predictionsFileHandle = openFile(
             sessionURL.appendingPathComponent("predictions.csv"),
-            header: "timestamp,window_start,window_end,probability,smoothed,state,features_json\n"
+            header: "timestamp,window_start,window_end,window_start_video_ts,window_end_video_ts,eating_logit,probability,smoothed,state,chew_event_logit,chew_event_probability,phase_sin,phase_cos,phase_confidence,gap_coverage,decoded_chew_event_ts,decoded_chew_event_video_ts,features_json\n"
         )
         feedbackFileHandle = openFile(
             sessionURL.appendingPathComponent("feedback.csv"),
@@ -838,13 +985,18 @@ final class MotionManager: ObservableObject {
         recorder.startRecording(to: videoURL) { [weak self] error in
             if let error {
                 DispatchQueue.main.async {
+                    self?.closeSessionFiles()
+                    self?.isStartingSession = false
+                    self?.currentSessionURL = nil
                     self?.statusText = "Camera recording failed: \(error.localizedDescription)"
                 }
                 print("[MotionManager] startRecording failed: \(error)")
+                return
             }
+            self?.writeCanonicalSessionManifest(at: sessionURL, finalized: false)
+            self?.beginMotionUpdates()
         }
         videoRecorder = recorder
-        recordingStartedAt = Date()
         #endif
 
         writeSessionMetadata(
@@ -853,6 +1005,7 @@ final class MotionManager: ObservableObject {
             sessionURL: sessionURL,
             videoFileName: "\(id).mov"
         )
+        writeCanonicalSessionManifest(at: sessionURL, finalized: false)
         appendLogLine("timestamp,probability,smoothed,state")
     }
 
@@ -891,12 +1044,64 @@ final class MotionManager: ObservableObject {
             "activity_label": metadata.activityLabel,
             "expected_label_class": metadata.expectedLabelClass,
             "gold_lock_candidate": metadata.goldLockCandidate,
+            "meal_texture": metadata.mealTexture.rawValue,
             "video_file": videoFileName,
             "review_status": "unreviewed"
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: metadataDict, options: [.prettyPrinted]) {
             try? data.write(to: sessionURL.appendingPathComponent("session_metadata.json"))
+        }
+    }
+
+    private var canonicalVideoOriginHostTime: TimeInterval {
+        #if os(iOS)
+        if let confirmed = videoRecorder?.recordingStartHostTime {
+            return confirmed
+        }
+        #endif
+        return requestedVideoOriginHostTime ?? firstMotionHostTime ?? 0
+    }
+
+    private var hasConfirmedVideoOrigin: Bool {
+        #if os(iOS)
+        return videoRecorder?.recordingStartHostTime != nil
+        #else
+        return false
+        #endif
+    }
+
+    private func writeCanonicalSessionManifest(at sessionURL: URL, finalized: Bool) {
+        guard let sessionID,
+              let metadata = activeSessionMetadata,
+              let createdAt = sessionCreatedAt else { return }
+        let snapshot = LiveCaptureSnapshot(
+            sessionID: sessionID,
+            createdAt: createdAt,
+            activity: metadata.activitySlug,
+            videoFileName: "\(sessionID).mov",
+            motionFileName: "motion.csv",
+            videoClockOriginHostTime: canonicalVideoOriginHostTime,
+            usedConfirmedVideoOrigin: hasConfirmedVideoOrigin,
+            firstMotionHostTime: firstMotionHostTime,
+            lastMotionHostTime: lastMotionHostTime,
+            motionSampleCount: motionSampleCount,
+            motionSampleGapCount: motionSampleGapCount,
+            largestMotionSampleGapSec: largestMotionSampleGapSec,
+            interrupted: motionInterruptionCount > 0,
+            interruptionCount: motionInterruptionCount,
+            finalized: finalized,
+            modelID: NormalizationConstants.MODEL_ID,
+            modelMode: NormalizationConstants.MODE
+        )
+        do {
+            try LiveCanonicalSessionWriter.write(
+                snapshot: snapshot,
+                sessionURL: sessionURL,
+                sourceAppVersion: appVersion()
+            )
+        } catch {
+            print("[MotionManager] session.json write failed: \(error)")
         }
     }
 
@@ -931,10 +1136,18 @@ final class MotionManager: ObservableObject {
         lastWindow = nil
         sessionBaseTimestamp = nil
         recordedPredictions.removeAll()
+        activeSessionMetadata = nil
+        sessionCreatedAt = nil
+        requestedVideoOriginHostTime = nil
+        firstMotionHostTime = nil
+        lastMotionHostTime = nil
+        motionSampleCount = 0
+        motionSampleGapCount = 0
+        largestMotionSampleGapSec = 0
+        motionInterruptionCount = 0
         strokeCounter.reset()
-        phaseCounter.reset()
-        phaseStrokes.removeAll()
-        biteSegmenter.reset()
+        eventDecoder.reset()
+        boutSegmenter.reset()
         DispatchQueue.main.async { [weak self] in self?.mealMetrics.reset() }
         logLines.removeAll()
         feedbackCount = 0
@@ -955,6 +1168,18 @@ final class MotionManager: ObservableObject {
         if sessionBaseTimestamp == nil {
             sessionBaseTimestamp = sample.timestamp
         }
+        if firstMotionHostTime == nil {
+            firstMotionHostTime = sample.timestamp
+        }
+        if let previous = lastMotionHostTime {
+            let gap = sample.timestamp - previous
+            if gap > CanonicalCaptureContract.motionGapThresholdSeconds {
+                motionSampleGapCount += 1
+                largestMotionSampleGapSec = max(largestMotionSampleGapSec, gap)
+            }
+        }
+        lastMotionHostTime = sample.timestamp
+        motionSampleCount += 1
 
         let line = [
             String(format: "%.6f", sample.timestamp),
@@ -982,15 +1207,28 @@ final class MotionManager: ObservableObject {
         probability: Double,
         smoothed: Double,
         state: String,
-        featuresJSON: String
+        featuresJSON: String,
+        modelPrediction: ChewPrediction? = nil,
+        decodedChewEventTimestamp: Double? = nil
     ) {
         let fields = [
             timestamp,
             String(format: "%.6f", windowStart),
             String(format: "%.6f", windowEnd),
+            String(format: "%.6f", windowStart - canonicalVideoOriginHostTime),
+            String(format: "%.6f", windowEnd - canonicalVideoOriginHostTime),
+            String(format: "%.8f", modelPrediction?.eatingLogit ?? 0),
             String(format: "%.4f", probability),
             String(format: "%.4f", smoothed),
             state,
+            csvOptional(modelPrediction?.chewEventLogit),
+            csvOptional(modelPrediction?.chewEventProbability),
+            csvOptional(modelPrediction?.phaseSin),
+            csvOptional(modelPrediction?.phaseCos),
+            csvOptional(modelPrediction?.phaseConfidence),
+            String(format: "%.6f", modelPrediction?.gapCoverage ?? 0),
+            csvOptional(decodedChewEventTimestamp),
+            csvOptional(decodedChewEventTimestamp.map { $0 - canonicalVideoOriginHostTime }),
             featuresJSON
         ].map(csvEscape)
         appendLine(fields.joined(separator: ",") + "\n", to: predictionsFileHandle)
@@ -1002,7 +1240,15 @@ final class MotionManager: ObservableObject {
             probability: probability,
             smoothed: smoothed,
             state: state,
-            featuresJSON: featuresJSON
+            featuresJSON: featuresJSON,
+            eatingLogit: modelPrediction?.eatingLogit ?? 0,
+            chewEventLogit: modelPrediction?.chewEventLogit,
+            chewEventProbability: modelPrediction?.chewEventProbability,
+            phaseSin: modelPrediction?.phaseSin,
+            phaseCos: modelPrediction?.phaseCos,
+            phaseConfidence: modelPrediction?.phaseConfidence,
+            gapCoverage: modelPrediction?.gapCoverage ?? 0,
+            decodedChewEventTimestamp: decodedChewEventTimestamp
         )
         lastWindow = window
         recordedPredictions.append(window)
@@ -1050,6 +1296,10 @@ final class MotionManager: ObservableObject {
             return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         return value
+    }
+
+    private func csvOptional(_ value: Double?) -> String {
+        value.map { String(format: "%.8f", $0) } ?? ""
     }
 
     // MARK: - Metadata Helpers

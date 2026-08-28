@@ -1,30 +1,36 @@
 # Motion Data Pipeline
 
-This package owns canonical label ingestion, motion feature construction,
-personalized model training, locked evaluation, model registry, promotion, and
-CoreML deployment.
+This package owns canonical label ingestion, temporal motion-window
+construction, personalized model training, locked evaluation, model registry,
+promotion, and CoreML deployment.
 
-Reviewed vision labels are consumed directly from session bundles. Verified chew
-phases enable a two-head model with:
+The v2 materializer reads exact finalized session lineage and emits three
+seconds of six-axis IMU at 50 Hz plus a gap-validity mask. The causal TCN
+outputs eating, an individual-chew event logit, phase sine/cosine, and phase
+confidence. The event head counts chews; phase is auxiliary evidence.
 
-- chewing probability;
-- chew-cycle phase (`sin`, `cos`).
-
-Live derives individual motion chews from phase cycles. The older band-power
-peak counter is retained only for one-head checkpoint compatibility.
+The older twelve-feature MLP remains readable/trainable only for binary eating
+compatibility. It cannot pass temporal chew promotion.
 
 ## Main Commands
 
 ```bash
-chewsense-motion from-raw
-chewsense-motion from-field-test
-chewsense-motion evaluate
+chewsense-motion materialize-temporal --input ../../workspace/sessions/raw
+chewsense-motion from-raw --arch causal_tcn
+chewsense-motion evaluate \
+  --registry-entry ../../workspace/models/registry/<model_id> \
+  --features <printed-temporal-features-dir> --split test_locked
 chewsense-motion registry --latest
 chewsense-motion deploy
 ```
 
-Unverified video labels are rejected by default. Dataset hashes include
-reviewed annotations, annotation revisions, and model IDs.
+The retained `sample`, `from-features`, and `from-field-test` commands reproduce
+historical binary eating models only and require an explicit `--arch mlp`.
+They cannot promote individual-chew coaching.
+
+Coarse-only and migrated legacy sessions may supervise eating, but their event
+and phase masks are zero. Reviewed event supervision requires exact candidate,
+review, materialized, pointer, and motion-label hashes.
 
 Deployment is blocked unless the exact registry checkpoint passes locked
 promotion metrics and minimum verified-session counts.

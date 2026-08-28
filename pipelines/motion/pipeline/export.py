@@ -12,10 +12,106 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
 
 from .features import FEATURE_NAMES
-from .train import ChewNet, TwoHeadChewNet
+from .train import ChewNet
+from .temporal import (
+    CONTEXT_SAMPLES,
+    MODEL_INPUT_CHANNELS,
+    MODEL_OUTPUTS,
+    TemporalChewNet,
+)
+
+
+class CoreMLRuntimeUnavailable(RuntimeError):
+    """CoreML conversion worked, but this host cannot compile/run predictions."""
+
+
+def verify_temporal_coreml_parity(
+    model_path: Path,
+    mlpackage_path: Path,
+    windows: np.ndarray,
+    *,
+    tolerance: float = 1e-3,
+) -> dict[str, float | int]:
+    """Compare normalized PyTorch and CoreML temporal outputs exactly.
+
+    CoreML exports use a fixed batch of one, so each supplied raw ``(7,150)``
+    window is replayed independently.  The returned probability error applies
+    sigmoid to the eating and chew-event logits, matching the Swift runtime.
+    """
+
+    try:
+        import coremltools as ct
+    except BaseException as exc:
+        raise RuntimeError("coremltools is required for parity verification") from exc
+
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    if checkpoint.get("mode") != "temporal_tcn":
+        raise ValueError("CoreML temporal parity requires a temporal_tcn checkpoint")
+    raw = np.asarray(windows, dtype=np.float32)
+    if raw.ndim == 2:
+        raw = raw[None, ...]
+    expected_shape = (
+        int(checkpoint.get("input_channels", len(MODEL_INPUT_CHANNELS))),
+        int(checkpoint.get("context_samples", CONTEXT_SAMPLES)),
+    )
+    if raw.ndim != 3 or tuple(raw.shape[1:]) != expected_shape:
+        raise ValueError(f"windows must have shape (N, {expected_shape[0]}, {expected_shape[1]})")
+
+    mean = np.asarray(checkpoint["mean"], dtype=np.float32).reshape(1, 6, 1)
+    std = np.asarray(checkpoint["std"], dtype=np.float32).reshape(1, 6, 1)
+    normalized = raw.copy()
+    normalized[:, :6, :] = (normalized[:, :6, :] - mean) / std
+    normalized[:, :6, :] *= normalized[:, 6:7, :]
+
+    model = TemporalChewNet(
+        input_channels=expected_shape[0],
+        channels=checkpoint.get("channels", [24, 24, 32, 32]),
+        kernel_size=checkpoint.get("kernel_size", 5),
+        dropout=checkpoint.get("dropout", 0.0),
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+    with torch.no_grad():
+        pytorch_output = model(torch.from_numpy(normalized)).numpy()
+
+    try:
+        coreml_model = ct.models.MLModel(str(mlpackage_path))
+    except RuntimeError as exc:
+        raise CoreMLRuntimeUnavailable(f"CoreML runtime could not load the model: {exc}") from exc
+    coreml_rows: list[np.ndarray] = []
+    for window in normalized:
+        try:
+            prediction = coreml_model.predict({"input": window[None, ...]})
+        except RuntimeError as exc:
+            raise CoreMLRuntimeUnavailable(
+                f"CoreML runtime could not execute the model: {exc}"
+            ) from exc
+        if "output" not in prediction:
+            raise ValueError("CoreML temporal model has no 'output' feature")
+        coreml_rows.append(np.asarray(prediction["output"], dtype=np.float32).reshape(-1))
+    coreml_output = np.stack(coreml_rows)
+    if coreml_output.shape != pytorch_output.shape:
+        raise ValueError(
+            f"CoreML output shape {coreml_output.shape} != PyTorch {pytorch_output.shape}"
+        )
+
+    raw_error = float(np.max(np.abs(coreml_output - pytorch_output)))
+    pytorch_prob = 1.0 / (1.0 + np.exp(-pytorch_output[:, :2]))
+    coreml_prob = 1.0 / (1.0 + np.exp(-coreml_output[:, :2]))
+    probability_error = float(np.max(np.abs(coreml_prob - pytorch_prob)))
+    if raw_error > tolerance or probability_error > tolerance:
+        raise AssertionError(
+            "PyTorch/CoreML parity failed: "
+            f"raw={raw_error:.6g}, probability={probability_error:.6g}, tolerance={tolerance}"
+        )
+    return {
+        "windows": len(raw),
+        "max_raw_output_error": raw_error,
+        "max_probability_error": probability_error,
+        "tolerance": tolerance,
+    }
 
 
 # Path inside an .mlpackage where the actual CoreML model proto lives. Used
@@ -47,7 +143,7 @@ def export_coreml(
     """
     Export PyTorch model to CoreML format.
     
-    Supports both binary (1-output) and mouth shape (multi-output) models.
+    Supports the v2 temporal model and legacy binary eating-only checkpoints.
     
     Args:
         model_path: Path to PyTorch checkpoint
@@ -71,20 +167,34 @@ def export_coreml(
     # Load checkpoint
     ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
     
-    input_dim = ckpt["input_dim"]
-    hidden_dim = ckpt["hidden_dim"]
     num_outputs = ckpt.get("num_outputs", 1)
     mode = ckpt.get("mode", "binary")
 
-    if mode == "two_head":
-        model = TwoHeadChewNet(input_dim=input_dim, hidden_dim=hidden_dim)
+    if mode == "temporal_tcn":
+        model = TemporalChewNet(
+            input_channels=ckpt.get("input_channels", len(MODEL_INPUT_CHANNELS)),
+            channels=ckpt.get("channels", [24, 24, 32, 32]),
+            kernel_size=ckpt.get("kernel_size", 5),
+            dropout=ckpt.get("dropout", 0.0),
+        )
+        example_input = torch.randn(
+            1,
+            ckpt.get("input_channels", len(MODEL_INPUT_CHANNELS)),
+            ckpt.get("context_samples", CONTEXT_SAMPLES),
+        )
+    elif mode == "binary":
+        input_dim = ckpt["input_dim"]
+        hidden_dim = ckpt["hidden_dim"]
+        model = ChewNet(input_dim=input_dim, hidden_dim=hidden_dim)
+        example_input = torch.randn(1, input_dim)
     else:
-        model = ChewNet(input_dim=input_dim, hidden_dim=hidden_dim, num_outputs=num_outputs)
+        raise ValueError(
+            f"checkpoint mode {mode!r} is retired; retrain from canonical v2 temporal windows"
+        )
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     
     # Trace model
-    example_input = torch.randn(1, input_dim)
     traced = torch.jit.trace(model, example_input)
     traced.eval()
     
@@ -94,14 +204,12 @@ def export_coreml(
         inputs=[ct.TensorType(name="input", shape=example_input.shape)],
     )
     
-    # Rename output. Two-head models emit a single (B, 3) tensor we expose as
-    # `output` and let the Swift side slice columns [logit, sin, cos].
+    # Temporal models expose their five-column output tensor; legacy binary
+    # checkpoints expose one eating logit.
     spec = mlmodel.get_spec()
     old_name = spec.description.output[0].name
-    if mode == "two_head":
+    if mode == "temporal_tcn":
         output_name = "output"
-    elif num_outputs > 1:
-        output_name = "mouth_shape"
     else:
         output_name = "logit"
     ct.utils.rename_feature(spec, old_name, output_name)
@@ -134,23 +242,22 @@ def export_normalization_json(
     
     ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
     
+    mode = ckpt.get("mode", "binary")
     data = {
         "model_id": ckpt.get("model_id"),
         "feature_mean": ckpt["mean"].tolist(),
         "feature_std": ckpt["std"].tolist(),
-        "feature_names": FEATURE_NAMES,
-        "input_dim": ckpt["input_dim"],
-        "hidden_dim": ckpt["hidden_dim"],
+        "feature_names": (
+            list(MODEL_INPUT_CHANNELS[:6]) if mode == "temporal_tcn" else FEATURE_NAMES
+        ),
+        "input_dim": ckpt.get("input_dim"),
+        "hidden_dim": ckpt.get("hidden_dim"),
+        "input_channels": ckpt.get("input_channels"),
+        "context_samples": ckpt.get("context_samples"),
+        "output_names": ckpt.get("output_names"),
         "num_outputs": ckpt.get("num_outputs", 1),
-        "mode": ckpt.get("mode", "binary"),
+        "mode": mode,
     }
-    
-    # Mouth shape specific metadata
-    if ckpt.get("mode") == "mouth_shape":
-        data["label_names"] = ckpt.get("label_names", [])
-        if ckpt.get("label_mean") is not None:
-            data["label_mean"] = ckpt["label_mean"].tolist()
-            data["label_std"] = ckpt["label_std"].tolist()
     
     # Include W&B info if available
     if "wandb_run_id" in ckpt:
@@ -192,6 +299,8 @@ def generate_swift_constants(
     model_id: Optional[str] = None,
     model_package_sha256: Optional[str] = None,
     dataset_status: Optional[str] = None,
+    chew_event_promoted: bool = False,
+    food_entry_promoted: bool = False,
 ) -> Path:
     """
     Generate Swift normalization constants from trained model.
@@ -217,7 +326,6 @@ def generate_swift_constants(
     std = ckpt["std"].tolist()
     num_outputs = ckpt.get("num_outputs", 1)
     mode = ckpt.get("mode", "binary")
-    label_names = ckpt.get("label_names", [])
     model_id = model_id or ckpt.get("model_id") or "unknown"
     
     # Get W&B info for traceability
@@ -257,45 +365,56 @@ import Foundation
 /// These values are computed from the training set and must match the model.
 struct NormalizationConstants {
     
-    /// Feature means from training data (12 features)
-    /// Order: mean_accel_mag, var_accel_mag, rms_accel_mag, mean_gyro_mag, rms_gyro_mag,
-    ///        rms_jerk, zcr_accel_mag, chew_bandpower_1_3hz, bandpower_0_8_1_5hz,
-    ///        bandpower_2_4hz, spectral_centroid, spectral_rolloff_0_85
+    /// Training-set normalization. Temporal models store six raw-axis values;
+    /// legacy models store twelve aggregate-feature values.
 '''
     
     swift_code += f"    static let FEATURE_MEAN: [Double] = {format_swift_array(mean)}\n\n"
-    swift_code += "    /// Feature standard deviations from training data (12 features)\n"
+    swift_code += "    /// Training-set standard deviations\n"
     swift_code += f"    static let FEATURE_STD: [Double] = {format_swift_array(std)}\n\n"
     
     # Add output metadata
-    swift_code += f"    /// Number of model outputs\n"
+    swift_code += "    /// Number of model outputs\n"
     swift_code += f"    static let NUM_OUTPUTS: Int = {num_outputs}\n\n"
-    swift_code += f"    /// Model mode: \"binary\", \"mouth_shape\", or \"two_head\"\n"
+    swift_code += "    /// Model mode; new chew models use \"temporal_tcn\"\n"
     swift_code += f'    static let MODE: String = "{mode}"\n\n'
-    swift_code += f"    /// Local model registry id\n"
+    swift_code += "    /// Local model registry id\n"
     swift_code += f'    static let MODEL_ID: String = "{model_id}"\n\n'
-    swift_code += f"    /// Dataset hash used for training, when available\n"
+    swift_code += "    /// Dataset hash used for training, when available\n"
     swift_code += f'    static let DATASET_HASH: String = "{dataset_hash or ""}"\n\n'
-    swift_code += f"    /// Dataset lineage status for this bundled CoreML export\n"
+    swift_code += "    /// Dataset lineage status for this bundled CoreML export\n"
     swift_code += f'    static let DATASET_STATUS: String = "{dataset_status or ""}"\n\n'
-    swift_code += f"    /// SHA-256 of ChewNet.mlpackage/Data/com.apple.CoreML/model.mlmodel\n"
+    swift_code += "    /// SHA-256 of ChewNet.mlpackage/Data/com.apple.CoreML/model.mlmodel\n"
     swift_code += f'    static let MODEL_PACKAGE_SHA256: String = "{model_package_sha256 or ""}"\n\n'
-    swift_code += f"    /// Timestamp this file was generated by the pipeline\n"
+    swift_code += "    /// Timestamp this file was generated by the pipeline\n"
     swift_code += f'    static let GENERATED_AT: String = "{timestamp}"\n\n'
-    swift_code += f"    /// W&B run metadata, when available\n"
+    swift_code += "    /// W&B run metadata, when available\n"
     swift_code += f'    static let WANDB_RUN_ID: String = "{wandb_run_id or ""}"\n'
     swift_code += f'    static let WANDB_RUN_URL: String = "{wandb_run_url or ""}"\n\n'
+    swift_code += "    /// Exact capabilities passed by promotion for this model build\n"
+    swift_code += (
+        f"    static let CHEW_EVENT_HEAD_PROMOTED: Bool = "
+        f"{str(bool(chew_event_promoted)).lower()}\n"
+    )
+    swift_code += (
+        f"    static let FOOD_ENTRY_HEAD_PROMOTED: Bool = "
+        f"{str(bool(food_entry_promoted)).lower()}\n\n"
+    )
     
-    if mode == "mouth_shape" and label_names:
-        swift_code += "    /// Output parameter names (order matches model output)\n"
-        names_swift = ', '.join(f'"{n}"' for n in label_names)
-        swift_code += f"    static let OUTPUT_NAMES: [String] = [{names_swift}]\n\n"
-    elif mode == "two_head":
-        # Phase 5: two-head model emits [eating_logit, chew_phase_sin, chew_phase_cos].
-        output_names = ckpt.get("output_names", ["eating_logit", "chew_phase_sin", "chew_phase_cos"])
-        swift_code += "    /// Output column order in the two-head ChewNet (length 3)\n"
+    if mode == "temporal_tcn":
+        output_names = ckpt.get("output_names", list(MODEL_OUTPUTS))
         names_swift = ', '.join(f'"{n}"' for n in output_names)
-        swift_code += f"    static let OUTPUT_NAMES: [String] = [{names_swift}]\n\n"
+        temporal_config = ckpt.get("config", {}).get("temporal_model", {})
+        swift_code += f"    static let OUTPUT_NAMES: [String] = [{names_swift}]\n"
+        swift_code += (
+            f"    static let SAMPLE_RATE_HZ: Int = "
+            f"{temporal_config.get('sample_rate_hz', 50)}\n"
+        )
+        swift_code += (
+            f"    static let CONTEXT_SAMPLES: Int = "
+            f"{ckpt.get('context_samples', CONTEXT_SAMPLES)}\n"
+        )
+        swift_code += "    static let INPUT_CHANNELS: Int = 7\n\n"
     
     swift_code += r'''    /// Normalize features using training statistics
     /// - Parameter features: Raw feature vector (12 elements)
@@ -305,6 +424,22 @@ struct NormalizationConstants {
             fatalError("Expected \(FEATURE_MEAN.count) features, got \\(features.count)")
         }
         return zip(zip(features, FEATURE_MEAN), FEATURE_STD).map { (($0.0 - $0.1) / $1) }
+    }
+
+    /// Normalize six raw IMU axes while leaving the gap-validity mask intact.
+    static func normalizeTemporal(_ input: [Double]) -> [Double] {
+        guard input.count == 7 * 150, FEATURE_MEAN.count == 6 else { return input }
+        var output = input
+        for channel in 0..<6 {
+            for sample in 0..<150 {
+                let index = channel * 150 + sample
+                let validity = input[6 * 150 + sample]
+                output[index] = validity >= 0.5
+                    ? (input[index] - FEATURE_MEAN[channel]) / FEATURE_STD[channel]
+                    : 0
+            }
+        }
+        return output
     }
 }
 
@@ -321,11 +456,12 @@ struct RuntimeConfig {
         low = runtime_config.get("low_threshold", 0.4)
         min_start = runtime_config.get("min_start_windows", 3)
         min_end = runtime_config.get("min_end_windows", 2)
-        min_chew_period = runtime_config.get("min_chew_period_sec", 0.35)
-        min_gap = runtime_config.get("min_gap_sec", 1.5)
-        min_bite_dur = runtime_config.get("min_bite_duration_sec", 1.0)
-        rushed = runtime_config.get("rushed_chews_per_bite", 5)
-        bite_rate_win = runtime_config.get("bite_rate_window_sec", 300.0)
+        event_threshold = runtime_config.get("chew_event_threshold", 0.5)
+        min_gap_coverage = runtime_config.get("min_gap_coverage", 0.8)
+        refractory = runtime_config.get("event_refractory_sec", 0.25)
+        confident_event = runtime_config.get("confident_event_threshold", 0.5)
+        bout_gap = runtime_config.get("bout_merge_gap_sec", 1.5)
+        min_bout_duration = runtime_config.get("min_bout_duration_sec", 1.0)
 
         swift_code += f'''    /// EMA smoothing factor (0 = no smoothing, 1 = no memory)
     static let alpha: Double = {alpha}
@@ -342,26 +478,25 @@ struct RuntimeConfig {
     /// Consecutive windows below lowThreshold to confirm chewing end
     static let minEndWindows: Int = {min_end}
 
+    /// Learned chew-event peak decoder. Phase is auxiliary only.
+    static let chewEventThreshold: Double = {event_threshold}
+    static let minGapCoverage: Double = {min_gap_coverage}
+    static let eventRefractorySec: Double = {refractory}
+    static let confidentEventThreshold: Double = {confident_event}
+
     // ------------------------------------------------------------------
-    // Chew-stroke / bite segmentation (motion-only metrics layer)
+    // Legacy chewing-bout segmentation (never interpreted as food entry)
     // ------------------------------------------------------------------
 
-    /// Minimum spacing between two chew strokes (seconds).
-    /// Roughly 1 / max chew frequency, default 0.35 s ≈ 2.86 Hz upper bound.
-    static let minChewPeriodSec: Double = {min_chew_period}
+    /// Compatibility-only bandpower counter; never drives coaching.
+    static let legacyHeuristicMinChewPeriodSec: Double = 0.35
 
-    /// Two chewing episodes whose gap is less than this are merged into a
-    /// single bite (seconds).
-    static let minGapSec: Double = {min_gap}
+    /// Two chewing episodes whose gap is less than this are merged into one
+    /// diagnostic chewing bout (seconds).
+    static let boutMergeGapSec: Double = {bout_gap}
 
     /// Episodes shorter than this are dropped as noise (seconds).
-    static let minBiteDurationSec: Double = {min_bite_dur}
-
-    /// Bites with fewer than this many chew strokes are flagged as rushed.
-    static let rushedChewsPerBite: Int = {rushed}
-
-    /// Rolling window for `bite_rate_per_minute` (seconds).
-    static let biteRateWindowSec: Double = {bite_rate_win}
+    static let minBoutDurationSec: Double = {min_bout_duration}
 }}
 '''
     

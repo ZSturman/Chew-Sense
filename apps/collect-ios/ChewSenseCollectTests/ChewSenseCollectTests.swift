@@ -195,17 +195,28 @@ struct ChewSenseCollectTests {
 
     @Test
     func videoEditor_relabelCSVAddsLabelColumnAndMarksChewingRows() throws {
-        // Prepare a fake CSV with timestamps.
-        let tmp = FileManager.default.temporaryDirectory
-        let csvURL = tmp.appendingPathComponent("imu-\(UUID().uuidString)").appendingPathExtension("csv")
+        // The first motion row arrives 250 ms after video time zero. Labels
+        // must still use the manifest origin rather than shifting to that row.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bundle-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let csvURL = folder.appendingPathComponent("motion.csv")
         let csv = """
         timestamp,ax,ay,az
-        0.0,0,0,0
-        0.5,0,0,0
-        1.0,0,0,0
-        2.0,0,0,0
+        100.25,0,0,0
+        100.5,0,0,0
+        101.0,0,0,0
+        102.0,0,0,0
         """
         try csv.write(to: csvURL, atomically: true, encoding: .utf8)
+        let manifest: [String: Any] = [
+            "schema_version": "2.0.0",
+            "session_id": folder.lastPathComponent,
+            "clock_sync": ["video_clock_origin_host_time_s": 100.0]
+        ]
+        let manifestData = try JSONSerialization.data(withJSONObject: manifest)
+        try manifestData.write(to: folder.appendingPathComponent("session.json"))
 
         let videoURL = try makeDummyVideoURL()
         let viewModel = VideoEditorViewModel(videoURL: videoURL)
@@ -216,7 +227,7 @@ struct ChewSenseCollectTests {
         viewModel.addMarkerAtCurrentTime()
         viewModel.currentTime = 1.5
         viewModel.addMarkerAtCurrentTime()
-        viewModel.completeEditing()
+        try viewModel.completeEditing()
 
         try viewModel.relabelCSV(at: csvURL)
 
@@ -224,10 +235,100 @@ struct ChewSenseCollectTests {
         let lines = updated.split(separator: "\n").map(String.init)
 
         #expect(lines[0].contains("label"))
-        // timestamps 0.0 -> false, 0.5 and 1.0 within chewing -> true, 2.0 -> false
+        // Video-relative 0.25 -> false, 0.5 and 1.0 -> true, 2.0 -> false.
         #expect(lines[1].hasSuffix(",false"))
         #expect(lines[2].hasSuffix(",true"))
         #expect(lines[3].hasSuffix(",true"))
         #expect(lines[4].hasSuffix(",false"))
+    }
+
+    @Test
+    func videoEditor_refusesToInferOriginFromFirstMotionRow() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bundle-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let csvURL = folder.appendingPathComponent("motion.csv")
+        try "timestamp,ax\n100.25,0\n".write(to: csvURL, atomically: true, encoding: .utf8)
+        let manifestData = try JSONSerialization.data(withJSONObject: [
+            "schema_version": "2.0.0",
+            "session_id": folder.lastPathComponent,
+            "clock_sync": [:]
+        ])
+        try manifestData.write(to: folder.appendingPathComponent("session.json"))
+
+        let videoURL = try makeDummyVideoURL()
+        let viewModel = VideoEditorViewModel(videoURL: videoURL)
+        viewModel.duration = 3.0
+
+        do {
+            try viewModel.relabelCSV(at: csvURL)
+            #expect(Bool(false), "Expected a missing video-clock origin error")
+        } catch BundleError.missingVideoClockOrigin {
+            #expect(true)
+        }
+    }
+
+    @Test
+    func canonicalBundle_recordsDelayedMotionGapsInterruptionsAndAllNegativeLabels() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bundle-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let videoURL = folder.appendingPathComponent("session.mov")
+        FileManager.default.createFile(atPath: videoURL.path, contents: Data())
+        let csvURL = folder.appendingPathComponent("session.csv")
+        try "timestamp,ax,label\n100.25,0,false\n100.75,0,false\n".write(
+            to: csvURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try CanonicalBundleWriter.writeInitialBundle(
+            videoURL: videoURL,
+            isEating: false,
+            timing: CaptureTimingSnapshot(
+                videoStartHostTime: 100.0,
+                firstVideoFrameHostTime: 100.03,
+                firstMotionHostTime: 100.25,
+                lastMotionHostTime: 100.75,
+                motionSampleCount: 2,
+                motionSampleGapCount: 1,
+                largestMotionSampleGap: 0.5,
+                interrupted: true,
+                interruptionCount: 1,
+                reviewAudioEnabled: false,
+                reviewAudioPermission: "denied",
+                reviewAudioPath: nil
+            )
+        )
+
+        let manifestData = try Data(contentsOf: folder.appendingPathComponent("session.json"))
+        let manifest = try JSONSerialization.jsonObject(with: manifestData) as! [String: Any]
+        #expect(manifest["schema_version"] as? String == "2.0.0")
+        let clock = manifest["clock_sync"] as! [String: Any]
+        #expect(clock["video_clock_origin_host_time_s"] as? Double == 100.0)
+        #expect(clock["motion_to_video_offset_s"] as? Double == 0.25)
+        #expect(clock["drift_status"] as? String == "not_estimated")
+        let capture = manifest["capture"] as! [String: Any]
+        #expect(capture["motion_sample_gap_count"] as? Int == 1)
+        #expect(capture["interrupted"] as? Bool == true)
+        let audio = manifest["audio"] as! [String: Any]
+        #expect(audio["enabled"] as? Bool == false)
+        #expect(audio["permission"] as? String == "denied")
+        let video = manifest["video"] as! [String: Any]
+        let motion = manifest["motion"] as! [String: Any]
+        #expect((video["sha256"] as? String)?.count == 64)
+        #expect((motion["sha256"] as? String)?.count == 64)
+
+        let coarseData = try Data(
+            contentsOf: folder.appendingPathComponent("annotations/coarse_labels.json")
+        )
+        let coarse = try JSONSerialization.jsonObject(with: coarseData) as! [String: Any]
+        #expect(coarse["artifact_type"] as? String == "coarse_labels")
+        let intervals = coarse["intervals"] as! [[String: Any]]
+        #expect(intervals.count == 1)
+        #expect(intervals[0]["label"] as? String == "not_chewing")
+        #expect(intervals[0]["start_ts"] as? Double == 0.25)
     }
 }

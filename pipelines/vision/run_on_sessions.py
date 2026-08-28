@@ -4,8 +4,9 @@
 Iterates ``$CHEWSENSE_WORKSPACE/sessions/raw/*/`` and writes automatic
 outputs to ``$CHEWSENSE_WORKSPACE/derived/vision/<session_id>/``.
 
-This is the Phase 1 driver. The Phase 2 motion-alignment bridge will be
-invoked from here in addition to `chewsense run` once it lands.
+This command writes detector telemetry and one immutable candidate revision.
+It never writes motion truth: ``finalize-session`` materializes targets only
+after a complete review of that exact candidate hash.
 
 Usage
 -----
@@ -22,10 +23,11 @@ import time
 from pathlib import Path
 
 from chewsense.config import load_config
-from chewsense.integrations.export_to_pipeline import export_session, load_events_json
+from chewsense.integrations.export_to_pipeline import load_events_json
 from chewsense.pipeline import run as run_pipeline
 from chewsense.paths import derived_vision_root, raw_sessions_root
 from chewsense.session_bundle import (
+    create_candidates_from_events,
     load_coarse_intervals,
     migrate_legacy_session,
     save_auto_predictions,
@@ -33,10 +35,10 @@ from chewsense.session_bundle import (
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_SESSIONS = raw_sessions_root()
-DERIVED_VIDEO_LABELS = derived_vision_root()
+DERIVED_VISION_OUTPUTS = derived_vision_root()
 
-# Files written by `chewsense.pipeline.run` whose presence marks a session as
-# already-labeled. We check `events.json` because it's the canonical artifact.
+# ``events.json`` is automatic detector telemetry. A completed vision pass also
+# requires at least one immutable candidate revision.
 DONE_MARKER = "events.json"
 
 
@@ -88,8 +90,6 @@ def main() -> int:
                         help="Re-run even if outputs already exist.")
     parser.add_argument("--config", type=Path, default=None,
                         help="Optional chewsense config YAML to override defaults.")
-    parser.add_argument("--user", type=str, default=None,
-                        help="User id for per-user baselines (default: from config).")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -97,7 +97,7 @@ def main() -> int:
     if args.limit is not None:
         sessions = sessions[: args.limit]
 
-    DERIVED_VIDEO_LABELS.mkdir(parents=True, exist_ok=True)
+    DERIVED_VISION_OUTPUTS.mkdir(parents=True, exist_ok=True)
 
     processed = 0
     skipped_no_video = 0
@@ -113,17 +113,17 @@ def main() -> int:
             print(f"[skip] {session_id}: no .mov/.mp4 in bundle")
             continue
 
-        out_dir = DERIVED_VIDEO_LABELS / session_id
+        out_dir = DERIVED_VISION_OUTPUTS / session_id
         already_labeled = (out_dir / DONE_MARKER).exists()
-        already_aligned = (out_dir / "motion_aligned_labels.csv").exists()
-        if not args.force and already_labeled and already_aligned:
+        already_candidateized = any(out_dir.glob("candidates-v*.json"))
+        if not args.force and already_labeled and already_candidateized:
             skipped_done += 1
-            print(f"[skip] {session_id}: already labeled + aligned (use --force to redo)")
+            print(f"[skip] {session_id}: telemetry + candidates exist (use --force to redo)")
             continue
 
         out_dir.mkdir(parents=True, exist_ok=True)
         try:
-            manifest = migrate_legacy_session(
+            migrate_legacy_session(
                 session_dir,
                 source_app="collect",
             )
@@ -140,52 +140,57 @@ def main() -> int:
                     video,
                     out_dir,
                     cfg,
-                    user_id=args.user,
                     coarse_intervals=coarse_intervals,
                 )
                 save_auto_predictions(session_dir, events)
+                candidate_path, candidates = create_candidates_from_events(
+                    session_dir,
+                    out_dir,
+                    events,
+                )
             except Exception as exc:  # noqa: BLE001 — surface and continue
                 failed += 1
                 print(f"[fail] {session_id}: {exc!r}")
                 continue
             dt = time.time() - t0
-            n_chews = sum(e.chew_count for e in events.episodes)
-            n_bites = sum(e.bite_count for e in events.episodes)
+            n_chews = len(events.mouth_cycles)
+            n_food_entries = len(events.food_entry_proposals)
             print(
-                f"[ok]   {session_id}: {len(events.episodes)} episodes / "
-                f"{n_bites} bites / {n_chews} chews in {dt:.1f}s"
+                f"[ok]   {session_id}: {n_food_entries} food-entry proposals / "
+                f"{n_chews} chew-cycle proposals in {dt:.1f}s"
+            )
+            print(
+                f"[candidates] {session_id}: {candidate_path.name} "
+                f"sha256={candidates.content_sha256[:12]} "
+                f"chews={len(candidates.chews)} food_entries={len(candidates.food_entries)}"
             )
         else:
-            print(f"[reuse] {session_id}: reusing existing events.json for alignment")
+            print(f"[reuse] {session_id}: reusing existing events.json for candidates")
             try:
                 events = load_events_json(out_dir / DONE_MARKER)
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 print(f"[fail-load] {session_id}: {exc!r}")
                 continue
+            if not already_candidateized:
+                try:
+                    candidate_path, candidates = create_candidates_from_events(
+                        session_dir,
+                        out_dir,
+                        events,
+                    )
+                    print(
+                        f"[candidates] {session_id}: {candidate_path.name} "
+                        f"sha256={candidates.content_sha256[:12]}"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    print(f"[fail-candidates] {session_id}: {exc!r}")
+                    continue
 
-        # Phase 2 — motion-alignment bridge.
-        motion_csv = find_session_motion_csv(session_dir)
-        if motion_csv is None:
-            print(f"[warn] {session_id}: no motion CSV found; skipping alignment")
-        else:
-            try:
-                summary = export_session(
-                    motion_csv,
-                    events,
-                    out_dir,
-                    session_manifest_path=session_dir / "session.json",
-                )
-                print(
-                    f"[align] {session_id}: {summary['n_motion_rows']} rows, "
-                    f"eating={summary['n_eating_rows']}, "
-                    f"chew_rows={summary['n_chew_rows']}, "
-                    f"offset={summary['time_offset']:.3f}"
-                )
-            except Exception as exc:  # noqa: BLE001
-                failed += 1
-                print(f"[fail-align] {session_id}: {exc!r}")
-                continue
+        # Motion labels are intentionally not generated from automatic events.
+        # ``finalize-session`` derives them from the exact reviewed candidate
+        # revision after lineage/hash validation.
 
         processed += 1
 

@@ -1,23 +1,25 @@
 from .schema import (
     SCHEMA_VERSION,
-    Bite,
-    Chew,
-    Episode,
+    FoodEntryProposal,
     FrameLabel,
     FrameRecord,
-    ProbableCompletion,
+    MouthCycle,
+    MouthStateSegment,
+    SessionCounters,
+    SignalQuality,
     Span,
     VideoEvents,
 )
 
 __all__ = [
     "SCHEMA_VERSION",
-    "Bite",
-    "Chew",
-    "Episode",
+    "FoodEntryProposal",
     "FrameLabel",
     "FrameRecord",
-    "ProbableCompletion",
+    "MouthCycle",
+    "MouthStateSegment",
+    "SessionCounters",
+    "SignalQuality",
     "Span",
     "VideoEvents",
 ]

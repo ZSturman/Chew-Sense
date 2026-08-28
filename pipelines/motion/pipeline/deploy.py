@@ -8,7 +8,6 @@ iOS/macOS testing app, ensuring all references are up to date.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -18,7 +17,6 @@ from typing import Optional
 
 from .export import (
     compute_mlpackage_sha256,
-    export_coreml,
     export_normalization_json,
     generate_swift_collection_recommendations,
     generate_swift_constants,
@@ -34,6 +32,13 @@ LAB_ONLY_MODEL_FILENAME = "visual_labeler.pth"
 # Versions of torch known to crash inside coremltools.convert on macOS arm64.
 # Update as compatibility improves.
 _LAST_TESTED_TORCH = (2, 7)
+
+
+def _load_json_file(path: Path) -> dict:
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _check_export_env() -> dict:
@@ -145,7 +150,7 @@ def _coreml_export_subprocess(
         "from pipeline.export import export_coreml;"
         f"export_coreml(r'{model_path}', r'{output_path}')"
     )
-    print(f"   ↪ Running CoreML conversion in isolated subprocess…")
+    print("   ↪ Running CoreML conversion in isolated subprocess…")
     proc = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -311,7 +316,7 @@ def deploy_to_app(
     # ---- 3. Compute SHA of bundled mlpackage (for traceability in app)
     mlpackage_sha = compute_mlpackage_sha256(mlpackage_xcode)
     if not mlpackage_sha:
-        print(f"   ⚠️  Could not compute mlpackage SHA (missing inner model.mlmodel).")
+        print("   ⚠️  Could not compute mlpackage SHA (missing inner model.mlmodel).")
     deployed["model_package_sha256"] = mlpackage_sha
 
     # ---- 4. Resolve dataset_status from registry metadata (best-effort)
@@ -323,6 +328,26 @@ def deploy_to_app(
     )
     deployed["dataset_status"] = dataset_status
 
+    # Capabilities are tied to the exact checkpoint, never inferred from a
+    # newer registry entry or merely from the presence of an output column.
+    chew_event_promoted = False
+    food_entry_promoted = False
+    try:
+        from .promotion import registry_entry_for_model
+
+        exact_entry = registry_entry_for_model(repo_root, model_path)
+        if exact_entry is not None:
+            promotion = _load_json_file(exact_entry / "promotion_report.json")
+            food_promotion = _load_json_file(
+                exact_entry / "food_entry_promotion_report.json"
+            )
+            chew_event_promoted = bool(promotion.get("passed"))
+            food_entry_promoted = bool(food_promotion.get("passed"))
+    except (OSError, ValueError):
+        pass
+    deployed["chew_event_promoted"] = chew_event_promoted
+    deployed["food_entry_promoted"] = food_entry_promoted
+
     # ---- 5. Normalization JSON
     norm_json = exports_dir / "chewnet_norm.json"
     export_normalization_json(model_path, norm_json)
@@ -332,6 +357,8 @@ def deploy_to_app(
             norm_data = json.load(f)
         norm_data["model_package_sha256"] = mlpackage_sha
         norm_data["dataset_status"] = dataset_status
+        norm_data["chew_event_head_promoted"] = chew_event_promoted
+        norm_data["food_entry_head_promoted"] = food_entry_promoted
         with open(norm_json, "w") as f:
             json.dump(norm_data, f, indent=2)
     except (OSError, json.JSONDecodeError) as exc:
@@ -345,6 +372,8 @@ def deploy_to_app(
         swift_constants,
         model_package_sha256=mlpackage_sha,
         dataset_status=dataset_status,
+        chew_event_promoted=chew_event_promoted,
+        food_entry_promoted=food_entry_promoted,
     )
     deployed["swift_constants"] = swift_constants
 

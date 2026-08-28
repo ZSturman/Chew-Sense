@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException

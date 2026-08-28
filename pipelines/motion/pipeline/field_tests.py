@@ -16,8 +16,6 @@ import pandas as pd
 REQUIRED_MOTION_COLUMNS = ["timestamp", "ax", "ay", "az", "gx", "gy", "gz"]
 LABELED_MOTION_FILE = "labeled_motion.csv"
 PORTABLE_REVIEW_ARTIFACTS = (
-    "review_overrides.json",
-    "bite_review.json",
     "review_feedback.csv",
     "face_presence.json",
 )

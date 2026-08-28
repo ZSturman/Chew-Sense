@@ -1,8 +1,9 @@
 # ChewSense
 
 ChewSense is a role-based monorepo for collecting paired eating video and
-AirPods motion, reviewing computer-vision chew and bite candidates, training
-video and motion models, and field-testing promoted motion models.
+AirPods motion, reviewing computer-vision chew-cycle and food-entry candidates,
+materializing trustworthy supervision, training a personalized temporal motion
+model, and field-testing promoted checkpoints.
 
 Start with [START_HERE.md](START_HERE.md).
 
@@ -11,13 +12,13 @@ Start with [START_HERE.md](START_HERE.md).
 | Product | Path | Purpose |
 | --- | --- | --- |
 | Collect | `apps/collect-ios/` | Record video, AirPods motion, metadata, synchronization, and coarse chewing labels |
-| Review | `apps/review-macos/` | Verify chew cycles, bite events, boundaries, missed events, and the final full-video pass |
+| Review | `apps/review-macos/` | Verify closed/open/closed chew anchors, food-entry events, missed events, and the final full-video pass |
 | Live | `apps/live-ios/` | Run promoted motion-only models during field testing |
 
 ## Active Pipelines
 
-- `pipelines/vision/`: mouth state and visual chew/bite candidate generation,
-  finalization, and CV training.
+- `pipelines/vision/`: mouth-state telemetry, fused visual chew/food-entry
+  candidate generation, audit, and finalization.
 - `pipelines/motion/`: reviewed-label import, motion training, evaluation,
   registry, promotion, and Live deployment.
 
@@ -36,4 +37,5 @@ not source code and are ignored by Git.
 - [Blocking work](docs/BLOCKERS.md)
 - [Roadmap](docs/ROADMAP.md)
 
-The canonical annotation schema remains version `1.0.0`.
+The canonical session and annotation schemas are version `2.0.0`. Version-1
+sessions require explicit migration and fresh chew review.

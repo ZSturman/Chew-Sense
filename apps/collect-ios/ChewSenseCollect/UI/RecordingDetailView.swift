@@ -166,15 +166,22 @@ struct RecordingDetailView: View {
                             .font(.footnote)
                             .foregroundColor(.red)
                     } else if !isLabelled {
+                        CollectGuidanceView(stage: .coarseReview)
                         HStack(spacing: 12) {
                             Button("Labelling finished") {
-                                viewModel.completeEditing()
-                                validationMessage = nil
-                                // Mark as labelled when done
-                                recorderController.setLabelled(true, for: folder)
-                                refreshMetadata()
+                                do {
+                                    try viewModel.completeEditing()
+                                    validationMessage = nil
+                                    // Mark as labelled only after the canonical
+                                    // coarse artifact is safely on disk.
+                                    recorderController.setLabelled(true, for: folder)
+                                    refreshMetadata()
+                                } catch {
+                                    validationMessage = error.localizedDescription
+                                }
                             }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("finishCoarseReviewButton")
                             .disabled(viewModel.hasUnclosedChewingSegment)
                             .simultaneousGesture(
                                 TapGesture().onEnded {
@@ -193,6 +200,7 @@ struct RecordingDetailView: View {
                             .buttonStyle(.bordered)
                         }
                     } else if isLabelled && !isShared {
+                        CollectGuidanceView(stage: .export)
                         HStack(spacing: 12) {
                             Button {
                                 prepareShareItems()
@@ -201,6 +209,7 @@ struct RecordingDetailView: View {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("shareSessionButton")
 
                             Button("Edit labels") {
                                 recorderController.setLabelled(false, for: folder)

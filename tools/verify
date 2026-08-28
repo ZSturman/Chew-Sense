@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+PYTHON="${CHEWSENSE_PYTHON:-$ROOT/.venv/bin/python}"
+MODE="${1:-fast}"
+BUILD_ROOT="$ROOT/.build"
+
+if [[ ! -x "$PYTHON" ]]; then
+  printf 'Missing locked environment at %s\n' "$PYTHON" >&2
+  printf 'Install it with: uv sync --locked\n' >&2
+  exit 2
+fi
+
+python_version="$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if [[ "$python_version" != "3.12" ]]; then
+  printf 'ChewSense verification requires Python 3.12; found %s\n' "$python_version" >&2
+  exit 2
+fi
+
+export PYTHONPATH="$ROOT/pipelines/vision:$ROOT/pipelines/motion${PYTHONPATH:+:$PYTHONPATH}"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-$BUILD_ROOT/matplotlib}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$BUILD_ROOT/cache}"
+mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME"
+
+verify_repo_boundary() {
+  if git -C "$ROOT" ls-files -s | grep -q '^160000 '; then
+    printf 'Nested Git links remain in the active checkout.\n' >&2
+    exit 1
+  fi
+  if git -C "$ROOT" ls-files 'archive/**' | grep -q .; then
+    printf 'Cold-storage archive content must not be tracked.\n' >&2
+    exit 1
+  fi
+}
+
+run_fast() {
+  verify_repo_boundary
+  "$PYTHON" -m pytest \
+    "$ROOT/pipelines/vision/tests" \
+    "$ROOT/pipelines/motion/tests" \
+    -q
+}
+
+run_fixture() {
+  "$PYTHON" -m pytest \
+    "$ROOT/pipelines/vision/tests/test_golden_session_v2.py" \
+    "$ROOT/pipelines/motion/tests/test_temporal_chewnet.py" \
+    -q
+}
+
+select_simulator() {
+  if [[ -n "${CHEWSENSE_SIMULATOR_ID:-}" ]]; then
+    printf '%s\n' "$CHEWSENSE_SIMULATOR_ID"
+    return
+  fi
+
+  local device_id
+  device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone.*Booted/{print $2; exit}')"
+  if [[ -z "$device_id" ]]; then
+    device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')"
+    if [[ -z "$device_id" ]]; then
+      printf 'No available iPhone simulator was found. Set CHEWSENSE_SIMULATOR_ID.\n' >&2
+      exit 2
+    fi
+    xcrun simctl boot "$device_id" 2>/dev/null || true
+  fi
+  xcrun simctl bootstatus "$device_id" -b >&2
+  printf '%s\n' "$device_id"
+}
+
+write_result_artifacts() {
+  local result_bundle="$1"
+  local artifact_dir="$2"
+
+  mkdir -p "$artifact_dir"
+  xcrun xcresulttool get test-results summary --path "$result_bundle" \
+    > "$artifact_dir/summary.json"
+  # XCTest attachments are the visual acceptance evidence. Exporting is safe
+  # even for targets without screenshots; xcresulttool writes a manifest.
+  xcrun xcresulttool export attachments \
+    --path "$result_bundle" \
+    --output-path "$artifact_dir/attachments"
+}
+
+run_xcodebuild() {
+  local project_dir="$1"
+  local project="$2"
+  local scheme="$3"
+  local destination="$4"
+  local action="${5:-build}"
+  local signing_allowed="${6:-NO}"
+  local derived="$BUILD_ROOT/xcode/$scheme"
+  local -a command=(
+    xcodebuild
+    -project "$ROOT/$project_dir/$project"
+    -scheme "$scheme"
+    -configuration Debug
+    -destination "$destination"
+    -derivedDataPath "$derived"
+    "CODE_SIGNING_ALLOWED=$signing_allowed"
+  )
+
+  if [[ "$destination" == "generic/platform=iOS" ]]; then
+    # Icon Composer needs simulator services even for a device build. Exclude
+    # only the icon source so this command remains a deterministic code build.
+    command+=("EXCLUDED_SOURCE_FILE_NAMES=AppIcon.icon")
+    command+=("ASSETCATALOG_COMPILER_APPICON_NAME=")
+  fi
+  command+=("$action")
+  "${command[@]}"
+}
+
+run_xcode_test() {
+  local project_dir="$1"
+  local project="$2"
+  local scheme="$3"
+  local destination="$4"
+  local signing_allowed="${5:-NO}"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local result_bundle="$BUILD_ROOT/results/${scheme}-${stamp}.xcresult"
+  local artifact_dir="$BUILD_ROOT/test-artifacts/${scheme}-${stamp}"
+
+  mkdir -p "$(dirname "$result_bundle")"
+  local -a command=(
+    xcodebuild
+    -project "$ROOT/$project_dir/$project"
+    -scheme "$scheme"
+    -configuration Debug
+    -destination "$destination"
+    -derivedDataPath "$BUILD_ROOT/xcode/$scheme"
+    -resultBundlePath "$result_bundle"
+    "CODE_SIGNING_ALLOWED=$signing_allowed"
+    test
+  )
+  "${command[@]}"
+  write_result_artifacts "$result_bundle" "$artifact_dir"
+  printf 'Test result: %s\nVisual evidence: %s\n' "$result_bundle" "$artifact_dir/attachments"
+}
+
+run_apps() {
+  local simulator_id
+  simulator_id="$(select_simulator)"
+  local simulator_destination="platform=iOS Simulator,id=$simulator_id"
+
+  run_xcode_test \
+    "apps/review-macos" \
+    "ChewSenseReview.xcodeproj" \
+    "ChewSenseReview" \
+    "platform=macOS"
+
+  run_xcode_test \
+    "apps/collect-ios" \
+    "ChewSenseCollect.xcodeproj" \
+    "ChewSenseCollect" \
+    "$simulator_destination"
+  run_xcode_test \
+    "apps/live-ios" \
+    "ChewSenseLive.xcodeproj" \
+    "ChewSenseLive" \
+    "$simulator_destination"
+}
+
+run_device_tests() {
+  local device_id="${CHEWSENSE_DEVICE_ID:-}"
+  if [[ -z "$device_id" ]]; then
+    printf 'Set CHEWSENSE_DEVICE_ID to the paired physical iPhone UDID.\n' >&2
+    exit 2
+  fi
+  local destination="id=$device_id"
+  run_xcode_test \
+    "apps/collect-ios" "ChewSenseCollect.xcodeproj" "ChewSenseCollect" \
+    "$destination" YES
+  run_xcode_test \
+    "apps/live-ios" "ChewSenseLive.xcodeproj" "ChewSenseLive" \
+    "$destination" YES
+}
+
+case "$MODE" in
+  fast)
+    run_fast
+    ;;
+  fixture)
+    run_fixture
+    ;;
+  apps)
+    run_apps
+    ;;
+  device)
+    run_device_tests
+    ;;
+  all)
+    run_fast
+    run_fixture
+    run_apps
+    ;;
+  *)
+    printf 'Usage: %s fast|fixture|apps|device|all\n' "$0" >&2
+    exit 2
+    ;;
+esac

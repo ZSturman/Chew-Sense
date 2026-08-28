@@ -55,8 +55,18 @@ struct NormalizationConstants {
     /// Number of model outputs
     static let NUM_OUTPUTS: Int = 1
 
-    /// Model mode: "binary" or "mouth_shape"
+    /// Model mode: legacy "binary" or promoted "temporal_tcn".
     static let MODE: String = "binary"
+
+    /// Capabilities are false until the exact bundled model passes the locked
+    /// promotion gates. Output presence alone never enables coaching.
+    static let CHEW_EVENT_HEAD_PROMOTED: Bool = false
+    static let FOOD_ENTRY_HEAD_PROMOTED: Bool = false
+
+    /// V2 temporal contract values (unused by this legacy binary checkpoint).
+    static let SAMPLE_RATE_HZ: Int = 50
+    static let CONTEXT_SAMPLES: Int = 150
+    static let INPUT_CHANNELS: Int = 7
 
     /// Local model registry id
     static let MODEL_ID: String = "chewnet-20260503-134131-816cea53"
@@ -86,6 +96,23 @@ struct NormalizationConstants {
         }
         return zip(zip(features, FEATURE_MEAN), FEATURE_STD).map { (($0.0 - $0.1) / $1) }
     }
+
+    static func normalizeTemporal(_ input: [Double]) -> [Double] {
+        guard input.count == 7 * CONTEXT_SAMPLES, FEATURE_MEAN.count == 6 else {
+            return input
+        }
+        var output = input
+        for channel in 0..<6 {
+            for sample in 0..<CONTEXT_SAMPLES {
+                let index = channel * CONTEXT_SAMPLES + sample
+                let validity = input[6 * CONTEXT_SAMPLES + sample]
+                output[index] = validity >= 0.5
+                    ? (input[index] - FEATURE_MEAN[channel]) / FEATURE_STD[channel]
+                    : 0
+            }
+        }
+        return output
+    }
 }
 
 /// Runtime detection parameters.
@@ -106,22 +133,22 @@ struct RuntimeConfig {
     /// Consecutive windows below lowThreshold to confirm chewing end
     static let minEndWindows: Int = 2
 
+    /// Learned event-head decoder. Phase outputs are auxiliary only.
+    static let chewEventThreshold: Double = 0.5
+    static let minGapCoverage: Double = 0.8
+    static let eventRefractorySec: Double = 0.25
+    static let confidentEventThreshold: Double = 0.5
+
     // ------------------------------------------------------------------
-    // Chew-stroke / bite segmentation (motion-only metrics layer)
+    // Legacy chewing-bout segmentation (never interpreted as food entry)
     // ------------------------------------------------------------------
 
-    /// Minimum spacing between two chew strokes (seconds).
-    static let minChewPeriodSec: Double = 0.35
+    /// Compatibility-only bandpower counter; never drives coaching.
+    static let legacyHeuristicMinChewPeriodSec: Double = 0.35
 
-    /// Two chewing episodes whose gap is less than this are merged into a single bite.
-    static let minGapSec: Double = 1.5
+    /// Two chewing episodes whose gap is less than this are merged into one diagnostic bout.
+    static let boutMergeGapSec: Double = 1.5
 
     /// Episodes shorter than this are dropped as noise.
-    static let minBiteDurationSec: Double = 1.0
-
-    /// Bites with fewer than this many chew strokes are flagged as rushed.
-    static let rushedChewsPerBite: Int = 5
-
-    /// Rolling window for `bite_rate_per_minute` (seconds).
-    static let biteRateWindowSec: Double = 300.0
+    static let minBoutDurationSec: Double = 1.0
 }

@@ -87,7 +87,6 @@ cycle:
   talking_reject_overlap: 0.5
   occluded_reject_overlap: 0.5
   pose_other_reject_overlap: 0.5
-  ml_refinement_enabled: false      # Phase 2 turns this on once a model exists
 
 hands:
   max_num_hands: 2
@@ -111,24 +110,16 @@ jaw_signal:
   rolling_mad_window_s: 3.0
   chew_flank_max_s: 0.7     # max look-back/forward for chew start/end minima
 
-bite:
+food_entry:
   approach_window_s: 3.5    # local window around the peak; real bites often linger
   mouth_open_min_norm: 0.05 # mouth must open at least this much above resting
   alignment_window_s: 0.6   # all signals must align within this
   between_run_merge_s: 0.4  # bridge brief h2m blips above proximity_exit
   candidate_merge_s: 0.8    # NMS: collapse candidates closer than this
-  episode_attach_window_s: 4.0  # attach bite to episode within ±this many s
-
-episode:
-  min_chews_per_episode: 3
-  min_chewing_duration_s: 1.5
-  episode_end_hold_s: 1.5
-  merge_gap_s: 2.0
-  amplitude_decay_window: 5  # last K chews considered for slowing trend
 
 annotate:
   # Clean mode: drop high-frequency markers (chew start/peak/end dots, cycle
-  # flashes, bite pulses, hand-to-mouth lines, chin-nose ref, bbox, proxy
+  # flashes, food-entry pulses, hand-to-mouth lines, chin-nose ref, bbox, proxy
   # strip). Keep the essentials so the open/close state and label are easy to
   # eyeball frame-by-frame. Toggle individual flags below to override.
   clean: true
@@ -141,44 +132,12 @@ annotate:
   show_jaw_proxy_strip: false
   show_chew_marks: false    # per-chew start/peak/end circles
   show_cycle_flash: false   # full-height side flash on cycle end
-  show_bite_pulse: false    # expanding ring on bite frame
+  show_food_entry_pulse: false # expanding ring on proposed food-entry frame
   show_chin_nose_ref: false # diagonal nose->chin reference line
   cycle_flash_seconds: 0.5
   font_scale: 0.6
 
 export:
-  schema_version: "1.0.0"
+  schema_version: "2.0.0"
   write_parquet: true
   write_plots: true
-
-quality:
-  # Healthy chew rate range (Hz). Outside = flagged.
-  chew_rate_hz_min: 1.0
-  chew_rate_hz_max: 2.5
-  # Coefficient-of-variation of inter-peak intervals; >0.4 is irregular.
-  rhythm_cv_max: 0.4
-  # Chews per bite: clinical "chew your food well" guidance is 20-40.
-  chews_per_bite_min: 15
-  chews_per_bite_max: 60
-  # Inter-episode rest in seconds.
-  inter_session_gap_s_min: 20.0
-  # Bite size: jaw_open at food-entry as fraction of user max.
-  bite_size_oversized_ratio: 0.85
-  # Per-user baseline tightens these once we have enough sessions.
-  baseline_min_sessions: 3
-  baseline_k_sigma: 1.5     # personal flag = baseline_mean ± k * baseline_sigma
-  # Below this fraction of frames with face detected, mark session low_signal_quality
-  min_face_detection_fraction: 0.6
-
-baselines:
-  enabled: true
-  # File location: $CHEWSENSE_BASELINES_DIR/<user>.json
-  # Defaults to ~/.config/chewsense/baselines
-  rolling_max_sessions: 30
-  default_user: "default"
-
-chew_head:
-  enabled: false                 # set true to gate chew detection with the learned head
-  model_path: null               # path to .pt; if null, loaded from ~/.cache/chewsense/models/chew_head.pt
-  threshold: 0.5                 # min P(chewing) to keep a chew candidate
-  feature_window_frames: 31      # context window (odd)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +21,19 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 
 from .config import PipelineConfig
+from .temporal import (
+    CONTEXT_SAMPLES,
+    MASK_EATING,
+    MASK_EVENT,
+    MODEL_INPUT_CHANNELS,
+    MODEL_OUTPUTS,
+    TARGET_EATING,
+    TARGET_EVENT,
+    TARGET_WIDTH,
+    TEMPORAL_CONTRACT_VERSION,
+    TemporalChewNet,
+    temporal_multitask_loss,
+)
 
 try:
     import wandb
@@ -29,11 +43,7 @@ except ImportError:
 
 
 class ChewNet(nn.Module):
-    """MLP for chewing detection or mouth shape regression.
-    
-    Binary mode (num_outputs=1): outputs single logit for chewing probability.
-    Mouth shape mode (num_outputs>1): outputs continuous mouth shape parameters.
-    """
+    """Legacy aggregate-feature MLP for binary eating detection only."""
     
     def __init__(self, input_dim: int, hidden_dim: int = 32, num_outputs: int = 1):
         super().__init__()
@@ -51,85 +61,6 @@ class ChewNet(nn.Module):
         if self.num_outputs == 1:
             return out.squeeze(-1)
         return out
-
-
-class TwoHeadChewNet(nn.Module):
-    """Phase 5 two-head model: shared MLP trunk → eating logit + chew-phase (sin, cos).
-
-    Forward returns a tensor of shape ``(batch, 3)``:
-      - column 0: eating logit (apply sigmoid for probability)
-      - column 1: chew_phase_sin (tanh-bounded to [-1, 1])
-      - column 2: chew_phase_cos (tanh-bounded to [-1, 1])
-
-    The tanh on the phase head keeps the output in the unit circle's bounding
-    box, matching the target distribution.
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int = 32):
-        super().__init__()
-        self.trunk = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
-        self.eating_head = nn.Linear(hidden_dim, 1)
-        self.phase_head = nn.Linear(hidden_dim, 2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.trunk(x)
-        eating_logit = self.eating_head(h)             # (B, 1)
-        phase = torch.tanh(self.phase_head(h))         # (B, 2)
-        return torch.cat([eating_logit, phase], dim=-1)  # (B, 3)
-
-
-def two_head_composite_loss(
-    output: torch.Tensor,
-    target: torch.Tensor,
-    eating_weight: float,
-    phase_weight: float,
-    eating_criterion: nn.Module,
-    mask_when_not_eating: bool,
-    eating_threshold: float = 0.5,
-) -> tuple[torch.Tensor, dict[str, float]]:
-    """Composite BCE (eating) + masked MSE (chew-phase) loss.
-
-    Args:
-        output: ``(B, 3)`` tensor from ``TwoHeadChewNet.forward``.
-    target: ``(B, 3|4)`` tensor of
-        [eating_soft, sin_target, cos_target, optional_phase_valid].
-        eating_weight: α weight on BCE term.
-        phase_weight: β weight on MSE term.
-        eating_criterion: BCE-like loss applied to the eating logit and the
-            soft eating target column.
-        mask_when_not_eating: if True, the phase MSE is computed only on rows
-            where the eating target ≥ ``eating_threshold``.
-    """
-    eating_logit = output[:, 0]
-    eating_target = target[:, 0]
-    phase_pred = output[:, 1:3]
-    phase_target = target[:, 1:3]
-
-    bce = eating_criterion(eating_logit, eating_target)
-
-    if mask_when_not_eating:
-        mask = (eating_target >= eating_threshold)
-        if target.shape[1] >= 4:
-            mask = mask & (target[:, 3] >= 0.5)
-        if mask.any():
-            mse = F.mse_loss(phase_pred[mask], phase_target[mask])
-        else:
-            # No eating rows in this batch — skip the phase term.
-            mse = torch.zeros((), device=output.device, dtype=output.dtype)
-    else:
-        mse = F.mse_loss(phase_pred, phase_target)
-
-    total = eating_weight * bce + phase_weight * mse
-    return total, {
-        "loss_total": float(total.detach().item()),
-        "loss_eating_bce": float(bce.detach().item()),
-        "loss_phase_mse": float(mse.detach().item()),
-    }
 
 
 class FocalLoss(nn.Module):
@@ -200,6 +131,271 @@ def compute_data_hash(X: np.ndarray, y: np.ndarray) -> str:
     return hasher.hexdigest()[:16]
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def train_temporal_model(
+    windows: np.ndarray,
+    targets: np.ndarray,
+    *,
+    features_dir: Path,
+    output_path: Path,
+    config: PipelineConfig,
+    dataset_hash: str | None = None,
+    data_source: str = "unknown",
+    split_manifest_path: Path | None = None,
+) -> dict[str, Any]:
+    """Train the v2 causal TCN without leaking rows between sessions.
+
+    ``windows`` must be ``(N, 7, 150)`` and targets must use the eight-column
+    mask-aware layout in :mod:`pipeline.temporal`.  A locked session manifest
+    is preferred.  Without one, whole sessions are assigned chronologically;
+    a row split is available only through the explicit legacy
+    ``training.allow_unsplit`` escape hatch.
+    """
+
+    windows = np.asarray(windows, dtype=np.float32)
+    targets = np.asarray(targets, dtype=np.float32)
+    expected = (len(MODEL_INPUT_CHANNELS), CONTEXT_SAMPLES)
+    if windows.ndim != 3 or tuple(windows.shape[1:]) != expected:
+        raise ValueError(f"temporal X.npy must have shape (N, {expected[0]}, {expected[1]})")
+    if targets.ndim != 2 or targets.shape != (len(windows), TARGET_WIDTH):
+        raise ValueError(f"temporal y.npy must have shape (N, {TARGET_WIDTH})")
+
+    temporal_manifest_path = Path(features_dir) / "dataset_manifest.json"
+    temporal_manifest: dict[str, Any] = {}
+    if temporal_manifest_path.exists():
+        temporal_manifest = json.loads(temporal_manifest_path.read_text())
+        if (
+            temporal_manifest.get("artifact_type") != "temporal_motion_dataset"
+            or temporal_manifest.get("temporal_contract_version") != TEMPORAL_CONTRACT_VERSION
+        ):
+            raise ValueError("features dataset_manifest.json is not a temporal v2 dataset")
+        recorded_hash = temporal_manifest.get("dataset_hash")
+        if not isinstance(recorded_hash, str) or len(recorded_hash) != 64:
+            raise ValueError("temporal dataset manifest has no full SHA-256 dataset hash")
+        if dataset_hash is not None and recorded_hash != dataset_hash:
+            raise ValueError("requested dataset hash does not match temporal dataset manifest")
+        dataset_hash = recorded_hash
+        for name, metadata in temporal_manifest.get("arrays", {}).items():
+            path = Path(features_dir) / name
+            if not path.exists() or not isinstance(metadata, dict):
+                raise ValueError(f"temporal dataset array is missing: {name}")
+            digest = _file_sha256(path)
+            if digest != metadata.get("sha256"):
+                raise ValueError(f"temporal dataset array hash mismatch: {name}")
+
+    session_ids_path = Path(features_dir) / "session_ids.npy"
+    session_ids = (
+        np.load(session_ids_path, allow_pickle=True).astype(str)
+        if session_ids_path.exists()
+        else None
+    )
+    if session_ids is not None and len(session_ids) != len(windows):
+        raise ValueError("session_ids.npy length does not match temporal windows")
+    train_idx: np.ndarray | None = None
+    val_idx: np.ndarray | None = None
+    train_sessions: list[str] = []
+    validation_sessions: list[str] = []
+    split_name = ""
+
+    if session_ids is not None and split_manifest_path and Path(split_manifest_path).exists():
+        manifest = json.loads(Path(split_manifest_path).read_text())
+        if temporal_manifest and manifest.get("dataset_hash") != dataset_hash:
+            raise ValueError("locked split manifest does not match temporal dataset hash")
+        splits = manifest.get("splits", {})
+        train_sessions = list(map(str, splits.get("train", [])))
+        validation_sessions = list(map(str, splits.get("validation_locked", [])))
+        train_idx = np.flatnonzero(np.isin(session_ids, train_sessions))
+        val_idx = np.flatnonzero(np.isin(session_ids, validation_sessions))
+        if len(train_idx) and len(val_idx):
+            split_name = "locked_session_split"
+
+    if not split_name and session_ids is not None and config.training.allow_unsplit:
+        unique = sorted(set(session_ids))
+        if len(unique) >= 2:
+            n_val_sessions = max(1, int(round(len(unique) * config.training.val_ratio)))
+            validation_sessions = unique[-n_val_sessions:]
+            train_sessions = unique[:-n_val_sessions]
+            train_idx = np.flatnonzero(np.isin(session_ids, train_sessions))
+            val_idx = np.flatnonzero(np.isin(session_ids, validation_sessions))
+            split_name = "chronological_session_split"
+
+    if not split_name:
+        if not config.training.allow_unsplit:
+            raise ValueError(
+                "temporal training requires a locked split manifest with non-empty "
+                "train and validation_locked session assignments"
+            )
+        cutoff = max(1, int(round(len(windows) * (1.0 - config.training.val_ratio))))
+        train_idx = np.arange(cutoff)
+        val_idx = np.arange(cutoff, len(windows))
+        split_name = "explicit_unsafe_row_split"
+
+    assert train_idx is not None and val_idx is not None
+    if not len(train_idx) or not len(val_idx):
+        raise ValueError("temporal train and validation splits must both be non-empty")
+    if not np.any(
+        (targets[train_idx, MASK_EVENT] > 0)
+        & (targets[train_idx, TARGET_EVENT] > 0.5)
+    ):
+        raise ValueError(
+            "temporal training split has no reviewed observable chew events; "
+            "legacy/coarse sessions may supplement eating but cannot train the event head"
+        )
+
+    def require_eating_classes(indices: np.ndarray, split_label: str) -> None:
+        supervised = indices[targets[indices, MASK_EATING] >= 0.5]
+        labels = targets[supervised, TARGET_EATING] >= 0.5
+        if not len(supervised) or not labels.any() or labels.all():
+            raise ValueError(
+                f"temporal {split_label} split must contain supervised eating and negative rows"
+            )
+
+    require_eating_classes(train_idx, "train")
+    require_eating_classes(val_idx, "validation")
+
+    # Per-axis normalization uses valid training samples only.  The validity
+    # mask remains binary and invalid normalized values stay exactly zero.
+    mean = np.zeros(6, dtype=np.float32)
+    std = np.ones(6, dtype=np.float32)
+    train_valid = windows[train_idx, 6, :] >= 0.5
+    for channel in range(6):
+        values = windows[train_idx, channel, :][train_valid]
+        if len(values):
+            mean[channel] = float(values.mean())
+            channel_std = float(values.std())
+            std[channel] = channel_std if channel_std > 1e-8 else 1.0
+
+    def normalize(source: np.ndarray) -> np.ndarray:
+        result = source.copy()
+        result[:, :6, :] = (
+            result[:, :6, :] - mean.reshape(1, 6, 1)
+        ) / std.reshape(1, 6, 1)
+        result[:, :6, :] *= result[:, 6:7, :]
+        return result
+
+    train_x = torch.from_numpy(normalize(windows[train_idx]))
+    val_x = torch.from_numpy(normalize(windows[val_idx]))
+    train_y = torch.from_numpy(targets[train_idx])
+    val_y = torch.from_numpy(targets[val_idx])
+    train_loader = DataLoader(
+        TensorDataset(train_x, train_y),
+        batch_size=config.training.batch_size,
+        shuffle=True,
+    )
+    val_loader = DataLoader(
+        TensorDataset(val_x, val_y),
+        batch_size=config.training.batch_size,
+        shuffle=False,
+    )
+
+    temporal = config.temporal_model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = TemporalChewNet(
+        channels=temporal.channels,
+        kernel_size=temporal.kernel_size,
+        dropout=temporal.dropout,
+    ).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.lr)
+    best_loss = float("inf")
+    best_state: dict[str, torch.Tensor] | None = None
+    epochs_no_improve = 0
+    epoch = 0
+
+    def loss_for(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        loss, _ = temporal_multitask_loss(
+            output,
+            target,
+            eating_weight=temporal.eating_weight,
+            event_weight=temporal.event_weight,
+            phase_weight=temporal.phase_weight,
+            confidence_weight=temporal.confidence_weight,
+        )
+        return loss
+
+    for epoch in range(1, config.training.epochs + 1):
+        model.train()
+        train_total = 0.0
+        for batch_x, batch_y in train_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            optimizer.zero_grad()
+            loss = loss_for(model(batch_x), batch_y)
+            loss.backward()
+            optimizer.step()
+            train_total += float(loss.detach()) * len(batch_x)
+
+        model.eval()
+        validation_total = 0.0
+        with torch.no_grad():
+            for batch_x, batch_y in val_loader:
+                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+                validation_total += float(loss_for(model(batch_x), batch_y)) * len(batch_x)
+        train_loss = train_total / len(train_idx)
+        validation_loss = validation_total / len(val_idx)
+        print(
+            f"Epoch {epoch:03d} | temporal_train_loss={train_loss:.4f} "
+            f"| temporal_val_loss={validation_loss:.4f}"
+        )
+        if validation_loss < best_loss - 1e-4:
+            best_loss = validation_loss
+            best_state = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= config.training.patience:
+                break
+
+    if best_state is None:
+        best_state = copy.deepcopy(model.state_dict())
+    dataset_hash = dataset_hash or compute_data_hash(windows, targets)
+    model_id = (
+        f"chewnet-temporal-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        f"-{dataset_hash[:8]}"
+    )
+    checkpoint = {
+        "model_id": model_id,
+        "mode": "temporal_tcn",
+        "temporal_contract_version": TEMPORAL_CONTRACT_VERSION,
+        "model_state_dict": best_state,
+        "input_channels": len(MODEL_INPUT_CHANNELS),
+        "input_names": list(MODEL_INPUT_CHANNELS),
+        "context_samples": CONTEXT_SAMPLES,
+        "output_names": list(MODEL_OUTPUTS),
+        "num_outputs": len(MODEL_OUTPUTS),
+        "channels": list(temporal.channels),
+        "kernel_size": temporal.kernel_size,
+        "dropout": temporal.dropout,
+        "mean": mean,
+        "std": std,
+        "best_val_loss": best_loss,
+        "dataset_hash": dataset_hash,
+        "data_source": data_source,
+        "config": config.to_dict(),
+        "split_name": split_name,
+        "split_manifest_path": str(split_manifest_path) if split_manifest_path else None,
+        "split_train_sessions": train_sessions,
+        "split_validation_sessions": validation_sessions,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, output_path)
+    return {
+        "output_path": output_path,
+        "model_id": model_id,
+        "best_val_loss": best_loss,
+        "final_epoch": epoch,
+        "wandb_run_id": None,
+        "wandb_run_url": None,
+        "mean": mean.tolist(),
+        "std": std.tolist(),
+    }
+
+
 def train_model(
     features_dir: Path,
     output_path: Path,
@@ -229,29 +425,32 @@ def train_model(
     X = np.load(features_dir / "X.npy").astype(np.float32)
     y = np.load(features_dir / "y.npy").astype(np.float32)
     
+    if X.ndim == 3:
+        return train_temporal_model(
+            X,
+            y,
+            features_dir=features_dir,
+            output_path=output_path,
+            config=config,
+            dataset_hash=dataset_hash,
+            data_source=data_source,
+            split_manifest_path=split_manifest_path,
+        )
+    if config.training.arch == "causal_tcn":
+        raise ValueError(
+            "causal_tcn requires temporal X.npy shaped (N, 7, 150); "
+            "12-D aggregate features are legacy eating-only inputs"
+        )
+    if y.ndim != 1:
+        raise ValueError(
+            "aggregate-feature MLP accepts scalar eating targets only; "
+            "use canonical v2 temporal windows for chew event and phase supervision"
+        )
+
     n_samples, input_dim = X.shape
-    
-    # Determine mode: binary classification or mouth shape regression
-    ms_config = config.mouth_shape
-    use_mouth_shape = ms_config.enabled and y.ndim == 2 and y.shape[1] == ms_config.num_outputs
-    # Two-head mode. y is [eating_soft, sin, cos, phase_valid].
-    cph_config = getattr(config, "chew_phase_head", None)
-    use_chew_phase = (
-        not use_mouth_shape
-        and cph_config is not None
-        and cph_config.enabled
-        and y.ndim == 2
-        and y.shape[1] in (3, 4)
-    )
-    num_outputs = ms_config.num_outputs if use_mouth_shape else 1
 
     print(f"Loaded X: {X.shape}, y: {y.shape}")
-    if use_mouth_shape:
-        print(f"Mode: mouth shape regression ({num_outputs} outputs)")
-    elif use_chew_phase:
-        print("Mode: two-head (eating BCE + chew-phase MSE)")
-    else:
-        print(f"Mode: binary chewing classification")
+    print("Mode: legacy binary eating classification")
     
     # Compute data hash if not provided
     if dataset_hash is None:
@@ -272,12 +471,8 @@ def train_model(
             "data_source": data_source,
             "n_samples": n_samples,
             "input_dim": input_dim,
-            "num_outputs": num_outputs,
-            "mode": (
-                "mouth_shape" if use_mouth_shape
-                else "two_head" if use_chew_phase
-                else "binary"
-            ),
+            "num_outputs": 1,
+            "mode": "binary",
             "architecture": "3-layer MLP",
         }
         
@@ -318,7 +513,7 @@ def train_model(
         # (single-class val). Fall back to a session-aware random split.
         train_single_class = False
         val_single_class = False
-        eating_targets = y[:, 0] if use_chew_phase else y
+        eating_targets = y
         if len(train_idx) > 0:
             yt = (eating_targets[train_idx] >= 0.5).astype(np.int32)
             train_single_class = (yt.sum() == 0) or (yt.sum() == len(yt))
@@ -376,7 +571,7 @@ def train_model(
                 t_idx = np.flatnonzero(~np.isin(session_ids, list(val_set)))
                 if len(t_idx) == 0 or len(v_idx) == 0:
                     continue
-                source_targets = y[:, 0] if use_chew_phase else y
+                source_targets = y
                 yv = (source_targets[v_idx] >= 0.5).astype(np.int32)
                 yt = (source_targets[t_idx] >= 0.5).astype(np.int32)
                 two_class_val = 0 < int(yv.sum()) < len(yv)
@@ -428,16 +623,8 @@ def train_model(
     X_train_norm = (X_train - mean) / std
     X_val_norm = (X_val - mean) / std
     
-    # Label normalization for mouth shape mode
-    label_mean = None
-    label_std = None
-    if use_mouth_shape:
-        label_mean = y_train.mean(axis=0)
-        label_std = y_train.std(axis=0)
-        label_std[label_std == 0] = 1.0
-    
     # Dataloaders
-    feature_noise = float(getattr(tc, "feature_noise_std", 0.0)) if not use_mouth_shape else 0.0
+    feature_noise = float(getattr(tc, "feature_noise_std", 0.0))
     train_X_t = torch.from_numpy(X_train_norm)
     train_y_t = torch.from_numpy(y_train)
     val_X_t = torch.from_numpy(X_val_norm)
@@ -450,41 +637,37 @@ def train_model(
         train_ds = TensorDataset(train_X_t, train_y_t)
     val_ds = TensorDataset(val_X_t, val_y_t)
 
-    # Class-balanced sampler for binary / two-head modes
+    # Class-balanced sampler for the legacy binary eating model.
     sampler = None
     pos_weight_value: float | None = None
-    if not use_mouth_shape:
-        # For two-head mode the eating signal lives in y[:, 0]; for binary it's y itself.
-        y_train_eating = y_train[:, 0] if use_chew_phase else y_train
-        y_val_eating = y_val[:, 0] if use_chew_phase else y_val
-        y_train_bin = (y_train_eating >= config.evaluation.chew_threshold).astype(np.int64)
-        n_pos_train = int(y_train_bin.sum())
-        n_neg_train = int(len(y_train_bin) - n_pos_train)
-        n_pos_val = int((y_val_eating >= config.evaluation.chew_threshold).sum())
-        n_neg_val = int(len(y_val_eating) - n_pos_val)
-        print("\nDATASET BALANCE")
-        print("---------------")
-        print(f"  train: pos={n_pos_train}  neg={n_neg_train}  "
-              f"pos_pct={100.0 * n_pos_train / max(1, len(y_train_bin)):.1f}%")
-        print(f"    val: pos={n_pos_val}  neg={n_neg_val}  "
-              f"pos_pct={100.0 * n_pos_val / max(1, len(y_val)):.1f}%")
+    y_train_bin = (y_train >= config.evaluation.chew_threshold).astype(np.int64)
+    n_pos_train = int(y_train_bin.sum())
+    n_neg_train = int(len(y_train_bin) - n_pos_train)
+    n_pos_val = int((y_val >= config.evaluation.chew_threshold).sum())
+    n_neg_val = int(len(y_val) - n_pos_val)
+    print("\nDATASET BALANCE")
+    print("---------------")
+    print(f"  train: pos={n_pos_train}  neg={n_neg_train}  "
+          f"pos_pct={100.0 * n_pos_train / max(1, len(y_train_bin)):.1f}%")
+    print(f"    val: pos={n_pos_val}  neg={n_neg_val}  "
+          f"pos_pct={100.0 * n_pos_val / max(1, len(y_val)):.1f}%")
 
-        pos_weight_value = _resolve_pos_weight(tc.pos_weight, y_train_bin)
-        if pos_weight_value is not None:
-            print(f"  pos_weight: {pos_weight_value:.3f}")
+    pos_weight_value = _resolve_pos_weight(tc.pos_weight, y_train_bin)
+    if pos_weight_value is not None:
+        print(f"  pos_weight: {pos_weight_value:.3f}")
 
-        if tc.use_weighted_sampler and n_pos_train > 0 and n_neg_train > 0:
-            class_w = np.where(y_train_bin == 1,
-                               1.0 / max(n_pos_train, 1),
-                               1.0 / max(n_neg_train, 1)).astype(np.float64)
-            sampler = WeightedRandomSampler(
-                weights=torch.from_numpy(class_w),
-                num_samples=len(class_w),
-                replacement=True,
-            )
-            print("  weighted sampler: ON")
-        else:
-            print("  weighted sampler: OFF")
+    if tc.use_weighted_sampler and n_pos_train > 0 and n_neg_train > 0:
+        class_w = np.where(y_train_bin == 1,
+                           1.0 / max(n_pos_train, 1),
+                           1.0 / max(n_neg_train, 1)).astype(np.float64)
+        sampler = WeightedRandomSampler(
+            weights=torch.from_numpy(class_w),
+            num_samples=len(class_w),
+            replacement=True,
+        )
+        print("  weighted sampler: ON")
+    else:
+        print("  weighted sampler: OFF")
 
     if sampler is not None:
         train_loader = DataLoader(train_ds, batch_size=tc.batch_size, sampler=sampler)
@@ -494,39 +677,21 @@ def train_model(
     
     # Model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if use_chew_phase:
-        phase_valid = y_train[:, 3] if y_train.shape[1] >= 4 else y_train[:, 0]
-        if int((phase_valid >= 0.5).sum()) == 0:
-            raise ValueError(
-                "two-head training is enabled but no reviewed chew-phase windows are present"
-            )
-        model: nn.Module = TwoHeadChewNet(
-            input_dim=input_dim, hidden_dim=tc.hidden_dim
-        ).to(device)
-    else:
-        model = ChewNet(
-            input_dim=input_dim, hidden_dim=tc.hidden_dim, num_outputs=num_outputs
-        ).to(device)
-    
-    if use_mouth_shape:
-        criterion = nn.SmoothL1Loss()
-    else:
-        pw_tensor = (
-            torch.tensor([pos_weight_value], dtype=torch.float32, device=device)
-            if pos_weight_value is not None else None
+    model = ChewNet(input_dim=input_dim, hidden_dim=tc.hidden_dim).to(device)
+
+    pw_tensor = (
+        torch.tensor([pos_weight_value], dtype=torch.float32, device=device)
+        if pos_weight_value is not None else None
+    )
+    if tc.loss == "focal":
+        criterion = FocalLoss(
+            alpha=tc.focal_alpha, gamma=tc.focal_gamma, pos_weight=pw_tensor
         )
-        if tc.loss == "focal":
-            criterion = FocalLoss(
-                alpha=tc.focal_alpha, gamma=tc.focal_gamma, pos_weight=pw_tensor
-            )
-            print(f"  loss: focal(alpha={tc.focal_alpha}, gamma={tc.focal_gamma})")
-        else:
-            criterion = nn.BCEWithLogitsLoss(pos_weight=pw_tensor)
-            print(f"  loss: bce_with_logits"
-                  + (f"(pos_weight={pos_weight_value:.3f})" if pw_tensor is not None else ""))
-        if use_chew_phase:
-            print(f"  composite: α·BCE + β·MSE (α={cph_config.eating_weight}, β={cph_config.phase_weight}, "
-                  f"mask_when_not_eating={cph_config.mask_when_not_eating})")
+        print(f"  loss: focal(alpha={tc.focal_alpha}, gamma={tc.focal_gamma})")
+    else:
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pw_tensor)
+        print("  loss: bce_with_logits"
+              + (f"(pos_weight={pos_weight_value:.3f})" if pw_tensor is not None else ""))
     optimizer = torch.optim.Adam(model.parameters(), lr=tc.lr)
     
     best_val_loss = float("inf")
@@ -543,17 +708,7 @@ def train_model(
             
             optimizer.zero_grad()
             logits = model(xb)
-            if use_chew_phase:
-                loss, _ = two_head_composite_loss(
-                    logits, yb,
-                    eating_weight=cph_config.eating_weight,
-                    phase_weight=cph_config.phase_weight,
-                    eating_criterion=criterion,
-                    mask_when_not_eating=cph_config.mask_when_not_eating,
-                    eating_threshold=config.evaluation.chew_threshold,
-                )
-            else:
-                loss = criterion(logits, yb)
+            loss = criterion(logits, yb)
             loss.backward()
             optimizer.step()
             
@@ -568,17 +723,7 @@ def train_model(
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 logits = model(xb)
-                if use_chew_phase:
-                    loss, _ = two_head_composite_loss(
-                        logits, yb,
-                        eating_weight=cph_config.eating_weight,
-                        phase_weight=cph_config.phase_weight,
-                        eating_criterion=criterion,
-                        mask_when_not_eating=cph_config.mask_when_not_eating,
-                        eating_threshold=config.evaluation.chew_threshold,
-                    )
-                else:
-                    loss = criterion(logits, yb)
+                loss = criterion(logits, yb)
                 val_loss += loss.item() * xb.size(0)
         
         val_loss /= n_val
@@ -614,7 +759,7 @@ def train_model(
         "model_state_dict": best_state,
         "input_dim": input_dim,
         "hidden_dim": tc.hidden_dim,
-        "num_outputs": num_outputs,
+        "num_outputs": 1,
         "mean": mean,
         "std": std,
         "best_val_loss": float(best_val_loss),
@@ -626,27 +771,11 @@ def train_model(
         "split_train_sessions": split_train_sessions,
         "split_validation_sessions": split_val_sessions,
         "loss": getattr(tc, "loss", "bce"),
-        "pos_weight_used": pos_weight_value if not use_mouth_shape else None,
-        "weighted_sampler_used": (sampler is not None) if not use_mouth_shape else False,
+        "pos_weight_used": pos_weight_value,
+        "weighted_sampler_used": sampler is not None,
         "feature_noise_std": feature_noise,
+        "mode": "binary",
     }
-    
-    if use_mouth_shape:
-        checkpoint["label_names"] = ms_config.parameters
-        checkpoint["label_mean"] = label_mean
-        checkpoint["label_std"] = label_std
-        checkpoint["mode"] = "mouth_shape"
-    elif use_chew_phase:
-        checkpoint["mode"] = "two_head"
-        checkpoint["output_names"] = ["eating_logit", "chew_phase_sin", "chew_phase_cos"]
-        checkpoint["num_outputs"] = 3
-        checkpoint["chew_phase_head"] = {
-            "eating_weight": cph_config.eating_weight,
-            "phase_weight": cph_config.phase_weight,
-            "mask_when_not_eating": cph_config.mask_when_not_eating,
-        }
-    else:
-        checkpoint["mode"] = "binary"
     
     if use_wandb:
         checkpoint["wandb_run_id"] = wandb_run_id

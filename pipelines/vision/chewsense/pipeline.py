@@ -1,5 +1,7 @@
-"""End-to-end pipeline. Runs feature extraction over a video, derives signals,
-detects chews and bites, builds episodes, and writes outputs.
+"""End-to-end automatic Vision telemetry pipeline.
+
+The only chew proposal stream is the fused closed/open/closed mouth-cycle
+detector. Food-entry proposals remain independent until human review.
 """
 from __future__ import annotations
 
@@ -10,18 +12,22 @@ import numpy as np
 from tqdm import tqdm
 
 from .annotate import render_annotated_video
-from .events.schema import FrameRecord, SessionCounters, Span, VideoEvents
-from .events.state_machine import _BiteIn, _ChewIn, build_episodes
+from .events.schema import (
+    FoodEntryProposal,
+    FrameRecord,
+    SessionCounters,
+    SignalQuality,
+    Span,
+    VideoEvents,
+)
 from .export import write_outputs
 from .features.audio import compute_audio_frame_features
 from .features.face import FaceExtractor
 from .features.hands import HandsExtractor
 from .ingest import extract_audio, iter_frames, probe
-from .quality.baselines import Baseline, update_baseline_from_report
-from .quality.metrics import compute_quality_report
-from .signals.bite_detector import detect_bites
+from .signals.food_entry_detector import detect_food_entries
 from .signals.head_pose import classify_pose
-from .signals.jaw_signal import bandpass, detect_chews, smooth
+from .signals.jaw_signal import bandpass, smooth
 from .signals.mouth_calibration import calibrate, write_baselines
 from .signals.mouth_state import detect_mouth_states, state_name
 
@@ -36,13 +42,10 @@ def run(
     out_dir: str | Path,
     cfg: dict,
     *,
-    user_id: str | None = None,
     coarse_intervals: Iterable[object] | None = None,
 ) -> VideoEvents:
     video_path = Path(video_path)
     out_dir = Path(out_dir)
-    if user_id is None and cfg.get("baselines", {}).get("enabled", False):
-        user_id = cfg["baselines"]["default_user"]
     meta = probe(video_path)
     fps = meta.fps
 
@@ -148,20 +151,24 @@ def run(
     jaw_smooth = smooth(jaw, cfg)
     jaw_bp = bandpass(jaw_smooth, fps, cfg)
 
-    # Detect chews
-    chew_cands = detect_chews(jaw_smooth, jaw_bp, fps, cfg)
-
-    # Detect bites
-    bite_cands = detect_bites(h2m_arr, jaw_smooth, ts_arr, fps, cfg)
+    # Food-entry proposals remain separate automatic telemetry until review.
+    food_entry_cands = detect_food_entries(h2m_arr, jaw_smooth, ts_arr, fps, cfg)
 
     # Human coarse chewing intervals are the authority for event generation.
     # Mouth-state inference still runs across every usable frame, but chew and
     # food-entry candidates outside the reviewed chewing spans are discarded.
+    coarse_intervals_list = (
+        list(coarse_intervals) if coarse_intervals is not None else None
+    )
     coarse = [
-        interval for interval in (coarse_intervals or [])
+        interval for interval in (coarse_intervals_list or [])
         if getattr(interval, "label", None) == "chewing"
     ]
-    if coarse:
+    if coarse_intervals_list is not None and not coarse:
+        # Presence is meaningful: an explicit review with no chewing intervals
+        # is an all-negative session, not an invitation to run ungated.
+        food_entry_cands = []
+    elif coarse:
         padding = float(cfg.get("coarse_label_gate", {}).get("padding_s", 0.15))
 
         def inside_coarse(ts: float) -> bool:
@@ -170,48 +177,10 @@ def run(
                 for interval in coarse
             )
 
-        chew_cands = [
-            candidate for candidate in chew_cands
-            if inside_coarse(float(ts_arr[candidate.peak_idx]))
-        ]
-        bite_cands = [
-            candidate for candidate in bite_cands
+        food_entry_cands = [
+            candidate for candidate in food_entry_cands
             if inside_coarse(float(ts_arr[candidate.frame_idx]))
         ]
-
-    # Optional gate: chew-head classifier P(chewing) per frame
-    chew_prob: np.ndarray | None = None
-    if cfg.get("chew_head", {}).get("enabled", False):
-        try:
-            from .training.infer import is_available, predict
-            from .features.extract import FEATURE_COLS
-            if is_available(cfg):
-                d_jaw = np.zeros_like(jaw_smooth); d_jaw[1:] = np.diff(jaw_smooth)
-                feature_table = {
-                    "jaw_open": jaw,
-                    "jaw_open_smooth": jaw_smooth,
-                    "jaw_open_bp": jaw_bp,
-                    "d_jaw_open": d_jaw,
-                    "mouth_width": np.array(mouth_width, dtype=np.float32),
-                    "head_yaw": np.array(head_yaw, dtype=np.float32),
-                    "head_pitch": np.array(head_pitch, dtype=np.float32),
-                    "hand_to_mouth_min": h2m_arr,
-                    "n_hands": np.array(n_hands, dtype=np.float32),
-                    "audio_rms": audio_rms,
-                    "is_speaking": is_speaking.astype(np.float32),
-                    "face_detected": face_det.astype(np.float32),
-                    "face_scale": face_scale_arr,
-                }
-                X = np.stack([feature_table[c] for c in FEATURE_COLS], axis=1)
-                chew_prob = predict(X, cfg)
-                # Filter chew candidates whose peak prob is below threshold
-                thr = float(cfg["chew_head"]["threshold"])
-                chew_cands = [
-                    c for c in chew_cands
-                    if chew_prob[c.peak_idx] >= thr
-                ]
-        except Exception as e:
-            print(f"[chew_head] gating skipped: {e}")
 
     # Occlusion: face not detected for >0.3s = occluded
     occ_min_frames = max(1, int(0.3 * fps))
@@ -297,45 +266,22 @@ def run(
             cycle_counts.ambiguous += 1
     # ------------------------------------------------------------------------
 
-    # Convert chew candidates with overlap stats
-    def _overlap_frac(a, b, flags):
-        a = max(0, a); b = min(len(flags), b)
-        if b <= a:
-            return 0.0
-        return float(np.mean(flags[a:b].astype(np.float32)))
-
-    chews_in: list[_ChewIn] = []
-    for c in chew_cands:
-        chews_in.append(_ChewIn(
-            start_idx=c.start_idx,
-            peak_idx=c.peak_idx,
-            end_idx=c.end_idx,
-            start_ts=float(ts_arr[c.start_idx]),
-            peak_ts=float(ts_arr[c.peak_idx]),
-            end_ts=float(ts_arr[c.end_idx]),
-            amplitude=c.amplitude,
-            prominence=c.prominence,
-            talking_overlap=_overlap_frac(c.start_idx, c.end_idx + 1, talking_flags),
-            occluded_overlap=_overlap_frac(c.start_idx, c.end_idx + 1, occluded_flags),
-        ))
-
-    bites_in: list[_BiteIn] = []
-    for b in bite_cands:
-        bites_in.append(_BiteIn(
-            frame_idx=b.frame_idx,
-            ts=float(ts_arr[b.frame_idx]),
-            confidence=b.confidence,
-            evidence=b.evidence,
-        ))
-
-    episodes, talking_spans = build_episodes(
-        chews=chews_in,
-        bites=bites_in,
-        timestamps=ts_arr,
-        talking_flags=talking_flags,
-        occluded_flags=occluded_flags,
-        cfg=cfg,
-    )
+    # Frame labels are a derived view of the exact fused cycle stream. Coarse
+    # labels gate this view when present, including the explicit all-negative
+    # case. Raw hypotheses stay in ``mouth_cycles`` for debug telemetry.
+    label_cycles = list(mouth_out.cycles)
+    if coarse_intervals_list is not None:
+        label_cycles = [
+            cycle
+            for cycle in label_cycles
+            if any(
+                getattr(interval, "label", None) == "chewing"
+                and float(interval.start_ts) - 1e-6
+                <= cycle.peak_ts
+                <= float(interval.end_ts) + 1e-6
+                for interval in coarse_intervals_list
+            )
+        ]
 
     # Build per-frame label with face-confidence weighting. The legacy version
     # emitted hardcoded confidences (0.5/0.6/0.8) regardless of how trustworthy
@@ -344,11 +290,11 @@ def run(
     labels: list[str] = []
     label_conf: list[float] = []
     enter = cfg["hands"]["proximity_enter"]
-    in_ep = np.zeros(len(ts_arr), dtype=bool)
-    for ep in episodes:
-        a = int(np.searchsorted(ts_arr, ep.start_ts))
-        b = int(np.searchsorted(ts_arr, ep.end_ts))
-        in_ep[a:b] = True
+    in_chew_cycle = np.zeros(len(ts_arr), dtype=bool)
+    for cycle in label_cycles:
+        a = int(np.searchsorted(ts_arr, cycle.start_ts, side="left"))
+        b = int(np.searchsorted(ts_arr, cycle.end_ts, side="right"))
+        in_chew_cycle[a:b] = True
     used_ch_arr = mouth_out.used_channels if mouth_out.used_channels.size else np.zeros(len(ts_arr), dtype=np.uint8)
     for i in range(len(ts_arr)):
         fc = float(face_conf_arr[i]) if i < len(face_conf_arr) else 0.0
@@ -358,7 +304,7 @@ def run(
         base_scale = fc if consensus_ok else max(fc * 0.5, 0.3)
         if occluded_flags[i]:
             labels.append("occluded"); label_conf.append(0.5); continue
-        if in_ep[i]:
+        if in_chew_cycle[i]:
             labels.append("chewing"); label_conf.append(min(1.0, 0.7 + 0.3 * base_scale)); continue
         if h2m_arr[i] < enter:
             labels.append("hand_to_mouth"); label_conf.append(min(1.0, 0.55 + 0.4 * base_scale)); continue
@@ -431,40 +377,48 @@ def run(
         else:
             i += 1
 
+    talking_spans: list[Span] = []
+    i = 0
+    while i < len(talking_flags):
+        if talking_flags[i]:
+            j = i + 1
+            while j < len(talking_flags) and talking_flags[j]:
+                j += 1
+            talking_spans.append(Span(
+                start_ts=float(ts_arr[i]),
+                end_ts=float(ts_arr[min(j, len(ts_arr) - 1)]),
+                kind="talking_mouth_motion",
+            ))
+            i = j
+        else:
+            i += 1
+
     events = VideoEvents(
         video_id=video_path.stem,
         duration_s=meta.duration_s,
         fps=meta.fps,
         width=meta.width,
         height=meta.height,
-        episodes=episodes,
         non_eating_mouth_spans=talking_spans,
         occlusion_spans=occlusion_spans,
         drinking_spans=[],
         mouth_state_segments=mouth_out.segments,
         mouth_cycles=mouth_out.cycles,
+        food_entry_proposals=[
+            FoodEntryProposal(
+                id=f"fe_{index:04d}",
+                food_entry_ts=float(ts_arr[item.frame_idx]),
+                confidence=item.confidence,
+                evidence=item.evidence,
+            )
+            for index, item in enumerate(food_entry_cands)
+        ],
         cycle_counts=cycle_counts,
     )
 
-    # Quality metrics + per-user baseline
-    baseline = Baseline.load_or_new(user_id) if user_id else None
     face_det_frac = float(np.mean(face_det.astype(np.float32))) if len(face_det) else 0.0
-    quality = compute_quality_report(
-        events,
-        timestamps=ts_arr,
-        jaw_open_smooth=jaw_smooth,
-        face_detected_fraction=face_det_frac,
-        cfg=cfg,
-        baseline=baseline,
-        user_id=user_id,
-    )
-    events.quality = quality
-    if user_id:
-        update_baseline_from_report(user_id, quality, cfg)
-
-    # Phase B: signal-health summary so reviewers can tell at a glance whether
+    # Signal-health summary lets reviewers tell at a glance whether
     # the labels are trustworthy or the inputs were degraded.
-    from .events.schema import SignalQuality
     n_frames = len(face_det)
     if n_frames > 0:
         used_ch_arr_q = mouth_out.used_channels

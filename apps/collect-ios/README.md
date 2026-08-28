@@ -14,7 +14,8 @@ Each new session contains:
 Both AVFoundation and headphone motion use the same host-clock origin. New
 sessions do not infer alignment from the first motion row.
 
-Collect owns capture and coarse intervals only. Individual mouth states,
-chews, bites, and final verification belong to Vision and ChewSenseReview.
+Collect owns capture and coarse intervals only. Automatic mouth telemetry,
+individual chew cycles, food-entry candidates, and final verification belong
+to Vision and ChewSenseReview.
 
 See [`../../docs/DATA_CONTRACT.md`](../../docs/DATA_CONTRACT.md).

@@ -27,6 +27,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A20000000000000000000001 /* SharedCapture */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "../shared-capture";
+			sourceTree = "<group>";
+		};
 		EF6F1D112EED9A0E0076E1CC /* ChewSenseLive */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = ChewSenseLive;
@@ -61,6 +66,7 @@
 			isa = PBXGroup;
 			children = (
 				EF6F1D062EED0DCC0076E1CC /* ChewNet.mlpackage */,
+				A20000000000000000000001 /* SharedCapture */,
 				EF6F1D112EED9A0E0076E1CC /* ChewSenseLive */,
 				EF6F1D122EED9A0E0076E1CC /* ChewSenseLiveTests */,
 				EF7BFA272EEBCA9D00E0611E /* Products */,
@@ -115,6 +121,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				A20000000000000000000001 /* SharedCapture */,
 				EF6F1D112EED9A0E0076E1CC /* ChewSenseLive */,
 			);
 			name = ChewSenseLive;

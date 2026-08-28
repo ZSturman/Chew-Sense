@@ -29,10 +29,22 @@
 		A1000021 /* ReviewQueueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000021 /* ReviewQueueSheet.swift */; };
 		A1000022 /* FramePredictionsLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000022 /* FramePredictionsLoader.swift */; };
 		A1000023 /* CycleShapeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000023 /* CycleShapeChart.swift */; };
+		A2000001 /* ReviewContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* ReviewContractTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		K2000001 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = H1000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F1000001;
+			remoteInfo = ChewSenseReview;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		C1000001 /* ChewSenseReview.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChewSenseReview.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C2000001 /* ChewSenseReviewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChewSenseReviewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000001 /* ChewSenseReviewApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChewSenseReviewApp.swift; sourceTree = "<group>"; };
 		B1000002 /* ReviewerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewerState.swift; sourceTree = "<group>"; };
 		B1000003 /* PlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackController.swift; sourceTree = "<group>"; };
@@ -56,10 +68,18 @@
 		B1000021 /* ReviewQueueSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQueueSheet.swift; sourceTree = "<group>"; };
 		B1000022 /* FramePredictionsLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePredictionsLoader.swift; sourceTree = "<group>"; };
 		B1000023 /* CycleShapeChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleShapeChart.swift; sourceTree = "<group>"; };
+		B2000001 /* ReviewContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewContractTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D1000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -73,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				E1000002 /* ChewSenseReview */,
+				E2000001 /* ChewSenseReviewTests */,
 				E1000099 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -81,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000001 /* ChewSenseReview.app */,
+				C2000001 /* ChewSenseReviewTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -147,6 +169,14 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
+		E2000001 /* ChewSenseReviewTests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000001 /* ReviewContractTests.swift */,
+			);
+			path = ChewSenseReviewTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -167,6 +197,23 @@
 			productReference = C1000001 /* ChewSenseReview.app */;
 			productType = "com.apple.product-type.application";
 		};
+		F2000010 /* ChewSenseReviewTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F2000003 /* Build configuration list for PBXNativeTarget "ChewSenseReviewTests" */;
+			buildPhases = (
+				G2000001 /* Sources */,
+				D2000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				K2000002 /* PBXTargetDependency */,
+			);
+			name = ChewSenseReviewTests;
+			productName = ChewSenseReviewTests;
+			productReference = C2000001 /* ChewSenseReviewTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -179,6 +226,10 @@
 				TargetAttributes = {
 					F1000001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					F2000010 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = F1000001;
 					};
 				};
 			};
@@ -196,6 +247,7 @@
 			projectRoot = "";
 			targets = (
 				F1000001 /* ChewSenseReview */,
+				F2000010 /* ChewSenseReviewTests */,
 			);
 		};
 /* End PBXProject section */
@@ -240,7 +292,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		G2000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2000001 /* ReviewContractTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		K2000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F1000001 /* ChewSenseReview */;
+			targetProxy = K2000001;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		I1000001 /* Debug */ = {
@@ -339,6 +407,34 @@
 			};
 			name = Release;
 		};
+		I2000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chewsense.cyclereviewer.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChewSenseReview.app/Contents/MacOS/ChewSenseReview";
+			};
+			name = Debug;
+		};
+		I2000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chewsense.cyclereviewer.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChewSenseReview.app/Contents/MacOS/ChewSenseReview";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -356,6 +452,15 @@
 			buildConfigurations = (
 				I1000001 /* Debug */,
 				I1000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F2000003 /* Build configuration list for PBXNativeTarget "ChewSenseReviewTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I2000001 /* Debug */,
+				I2000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -1,18 +1,21 @@
 # Blocking Work
 
-Ordered by pipeline impact.
+The source refactor can be verified locally and in CI. Model promotion is
+blocked by evidence, not by missing scaffolding.
 
-| Priority | Blocker | Owner | Validation | Complete When |
-| --- | --- | --- | --- | --- |
-| P0 | Finish parent Git history merge and stage the role-based layout | Repository | `git ls-files -s` has no `160000`; `git log -- apps/collect-ios` and `apps/live-ios` show imported history | Two history-preserving merge commits and a clean reorganization commit exist |
-| P0 | Re-run all builds and tests after path and scheme renames | Repository | Python suites pass; all three `xcodebuild` commands pass | Verification results are recorded in `STATUS.md` |
-| P0 | Add a tracked canonical video+motion fixture | Data/CV | End-to-end test runs without participant data | Fixture covers collect bundle, vision, review, finalize, and both manifests |
-| P0 | Validate recording synchronization on physical hardware | Collect | Offset, drift, dropped rows, missing frames, and interrupted recordings are measured | Shared-clock sessions pass acceptance fixtures and device tests |
-| P1 | Finish Review clip context and completion UX validation | Review | Five frames before/after each chew, wider bite clips, keyboard flow, split/merge/reset, and completion gate tested | Reviewer can finish a session without editing JSON or CSV manually |
-| P1 | Confirm reviewed revisions survive every field-test import path | Motion | Imported bundle retains canonical review JSON and revision/model metadata | Import round trip preserves checksums and training eligibility |
-| P1 | Add chew-event metrics to locked evaluation | ML | F1@250 ms and count error appear in registry metrics | Promotion gate evaluates all required metrics |
-| P2 | Remove remaining old path text from active source comments and helper docs | Repository | Active-path `rg` check returns no numbered-layout references | Only archived material contains old path names |
-| P2 | Validate external `CHEWSENSE_WORKSPACE` with Review and both CLIs | Repository | Default and external-workspace smoke tests pass | No command depends on repository-local data |
+| Priority | Remaining requirement | Evidence needed |
+| --- | --- | --- |
+| P0 | Recover and freshly review usable legacy video/motion pairs | Schema-v2 immutable revisions; legacy event labels remain masked |
+| P0 | Build the personalized dataset | ≥20 verified eating and ≥20 varied hard-negative sessions |
+| P0 | Validate capture on physical AirPods | Recorded delayed-motion, gap, drift, interruption, and optional-audio checks |
+| P0 | Train/evaluate a temporal checkpoint | All initial chew promotion gates pass on locked chronological test sessions |
+| P1 | Establish personal coaching baselines | Three verified calibration meals per supported texture |
+| P1 | Validate food entry separately | Every food-entry promotion gate passes before bite UI is enabled |
+| P1 | Measure reviewer agreement | Blind second review of ≥10% of sessions and anchor-disagreement report |
 
-Do not promote a replacement Live model while any P0 model/data blocker is
-open.
+Local candidate recovery also needs the pinned MediaPipe assets. They were not
+available in this checkout, and the restricted environment denied the network
+download, so the recovered real pairs remain deliberately unreviewed.
+
+Do not enable bite count, chews-per-bite, “not enough chews,” or promote a
+replacement Live model while the corresponding P0/P1 evidence is absent.

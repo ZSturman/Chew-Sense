@@ -1,8 +1,9 @@
-"""Pydantic schema for ChewSense events.
+"""Pydantic schema for automatic Vision telemetry.
 
-This is the canonical contract between the pipeline, the exporter, and the
-future correction/review app. Bump `SCHEMA_VERSION` on breaking changes; readers
-must check it.
+Human-reviewed truth lives in :mod:`chewsense.canonical`.  This payload keeps
+the fused mouth-state/cycle stream, independent food-entry proposals, and the
+signals needed to inspect a detector run.  It must never be treated as reviewed
+annotations.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
 
 
 # ----------------------------- Frame-level labels ----------------------------
@@ -65,84 +66,13 @@ class SessionCounters(BaseModel):
     total: int = 0
 
 
-# ----------------------------- Atomic events --------------------------------
+class FoodEntryProposal(BaseModel):
+    """Automatic telemetry only; never a verified food-entry boundary."""
 
-class Bite(BaseModel):
     id: str
-    ts: float = Field(description="seconds in original video time domain")
+    food_entry_ts: float = Field(description="seconds in original video time domain")
     confidence: float
     evidence: dict = Field(default_factory=dict)
-
-
-class Chew(BaseModel):
-    id: str
-    start_ts: float
-    peak_ts: float
-    end_ts: float
-    duration_s: float
-    amplitude: float = Field(description="normalized jaw-open amplitude (face-scale units)")
-    relative_amplitude: float = Field(
-        description="amplitude / median(amplitudes earlier in episode)"
-    )
-    confidence: float
-    evidence: dict = Field(default_factory=dict)
-
-
-class ProbableCompletion(BaseModel):
-    ts: float
-    kind: Literal[
-        "probable_swallow",
-        "likely_episode_end",
-        "chewing_stopped",
-        "food_likely_cleared",
-    ]
-    confidence: float
-
-
-# ----------------------------- Episodes -------------------------------------
-
-EpisodeStartReason = Literal[
-    "bite_detected",
-    "chewing_without_observed_bite",
-    "food_entry",
-]
-EpisodeEndReason = Literal[
-    "chewing_stopped",
-    "food_likely_cleared",
-    "new_bite_started",
-    "occlusion_episode_break",
-    "interrupted_by_drinking",
-    "interrupted_by_talking",
-    "video_ended",
-]
-
-
-class Episode(BaseModel):
-    id: str
-    start_ts: float
-    end_ts: float
-    start_reason: EpisodeStartReason
-    end_reason: EpisodeEndReason
-    confidence: float
-    uncertainty_notes: list[str] = Field(default_factory=list)
-    evidence: dict = Field(default_factory=dict)
-    bites: list[Bite] = Field(default_factory=list)
-    chews: list[Chew] = Field(default_factory=list)
-    probable_completion: ProbableCompletion | None = None
-
-    @property
-    def chew_count(self) -> int:
-        return len(self.chews)
-
-    @property
-    def bite_count(self) -> int:
-        return len(self.bites)
-
-    @property
-    def duration_s(self) -> float:
-        return self.end_ts - self.start_ts
-
-
 # ----------------------------- Spans / video -------------------------------
 
 class Span(BaseModel):
@@ -151,54 +81,6 @@ class Span(BaseModel):
     kind: str
     confidence: float = 1.0
     note: str = ""
-
-
-# ----------------------------- Quality metrics -----------------------------
-
-QualityFlag = Literal[
-    "too_fast",
-    "too_slow",
-    "too_few_chews_per_bite",
-    "too_many_chews_per_bite",
-    "rhythm_irregular",
-    "inter_session_gap_too_short",
-    "bite_appears_oversized",
-    "low_signal_quality",
-]
-
-
-class EpisodeQuality(BaseModel):
-    episode_id: str
-    chew_count: int
-    duration_s: float
-    chew_rate_hz: float
-    chew_rate_cv: float                 # coefficient-of-variation of inter-peak intervals
-    mean_chew_duration_s: float
-    amplitude_decay_slope: float        # negative = slowing/decaying
-    chews_per_bite: float | None        # None if no bite detected
-    bite_size_norm: float | None        # max jaw_open during food-entry window, face-scale units
-    flags: list[QualityFlag] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-
-
-class SessionQuality(BaseModel):
-    """Aggregate metrics across all episodes in this video."""
-    n_episodes: int
-    n_bites: int
-    n_chews: int
-    total_eating_duration_s: float
-    mean_chews_per_bite: float | None
-    mean_chew_rate_hz: float | None
-    rhythm_cv: float | None
-    inter_episode_gaps_s: list[float] = Field(default_factory=list)
-    flags: list[QualityFlag] = Field(default_factory=list)
-    user_baseline_used: bool = False
-    user_id: str | None = None
-
-
-class QualityReport(BaseModel):
-    session: SessionQuality
-    episodes: list[EpisodeQuality] = Field(default_factory=list)
 
 
 class SignalQuality(BaseModel):
@@ -226,15 +108,13 @@ class VideoEvents(BaseModel):
     fps: float
     width: int
     height: int
-    episodes: list[Episode] = Field(default_factory=list)
     non_eating_mouth_spans: list[Span] = Field(default_factory=list)
     occlusion_spans: list[Span] = Field(default_factory=list)
     drinking_spans: list[Span] = Field(default_factory=list)
-    quality: QualityReport | None = None
     signal_quality: SignalQuality | None = None
-    # Phase 1 additions — emitted alongside the existing chew/episode streams.
     mouth_state_segments: list[MouthStateSegment] = Field(default_factory=list)
     mouth_cycles: list[MouthCycle] = Field(default_factory=list)
+    food_entry_proposals: list[FoodEntryProposal] = Field(default_factory=list)
     cycle_counts: SessionCounters = Field(default_factory=SessionCounters)
 
 

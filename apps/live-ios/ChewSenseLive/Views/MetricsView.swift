@@ -2,13 +2,9 @@
 //  MetricsView.swift
 //  ChewSenseLive
 //
-//  Live readout of motion-only meal metrics. Bind directly to the
-//  `MealMetricsTracker` exposed by `MotionManager.mealMetrics` to see
-//  updates as bites are committed during a recording session.
+//  Cadence-only live/post-meal summary. Bite and chews-per-bite UI stays
+//  absent until the independently evaluated food-entry capability is promoted.
 //
-//  Designed as a standalone screen so it can be reached from a
-//  toolbar item, a TabView, or embedded inside the recording composer
-//  without further refactoring.
 
 import SwiftUI
 
@@ -18,92 +14,75 @@ struct MetricsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                if !ModelCapabilities.bundled.temporalChewEventHead {
+                    Label(
+                        "The bundled model is legacy eating detection. Individual-chew coaching is disabled.",
+                        systemImage: "exclamationmark.shield"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if metrics.latestCue == .slowDown {
+                    Label("Try a slightly slower, steadier pace", systemImage: "tortoise")
+                        .font(.headline)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                }
+
                 summaryGrid
-                Divider()
-                bitesList
+
+                Text(
+                    ModelCapabilities.bundled.foodEntryCoachingEnabled
+                        ? "Food-entry grouping is available for this promoted model."
+                        : "Bite count and chews-per-bite are hidden until a food-entry model passes its independent evaluation."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding()
         }
-        .navigationTitle("Live Metrics")
+        .navigationTitle("Meal Cadence")
     }
 
     private var summaryGrid: some View {
         let columns = [GridItem(.flexible()), GridItem(.flexible())]
         return LazyVGrid(columns: columns, spacing: 12) {
-            metricCard(label: "Bites", value: "\(metrics.biteCount)")
-            metricCard(label: "Chews", value: "\(metrics.chewCount)")
+            metricCard(label: "Detected chews", value: "\(metrics.chewCount)")
+            metricCard(label: "Texture", value: metrics.texture.title)
             metricCard(
-                label: "Chews / bite",
-                value: String(format: "%.1f", metrics.avgChewsPerBite)
+                label: "Median interval",
+                value: metrics.medianInterChewIntervalSec.map { String(format: "%.2f s", $0) } ?? "—"
             )
             metricCard(
-                label: "Bite rate (per min)",
-                value: String(format: "%.2f", metrics.biteRatePerMinute)
+                label: "Cadence",
+                value: metrics.cadencePerMinute.map { String(format: "%.0f / min", $0) } ?? "—"
             )
             metricCard(
-                label: "Last IBI (s)",
-                value: String(format: "%.1f", metrics.lastInterBiteIntervalSec)
+                label: "Confidence coverage",
+                value: String(format: "%.0f%%", 100 * metrics.confidenceCoverage)
             )
             metricCard(
-                label: "Rushed bites",
-                value: "\(metrics.rushedBiteCount)",
-                tint: metrics.rushedBiteCount > 0 ? .orange : .secondary
+                label: "Excluded uncertain",
+                value: String(format: "%.1f s", metrics.uncertainTimeSec)
             )
         }
     }
 
-    private func metricCard(label: String, value: String, tint: Color = .primary) -> some View {
+    private func metricCard(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.system(.title2, design: .rounded).weight(.semibold))
-                .foregroundStyle(tint)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    @ViewBuilder
-    private var bitesList: some View {
-        if metrics.bites.isEmpty {
-            Text("No bites yet — start chewing to populate metrics.")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 24)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Bites")
-                    .font(.headline)
-                ForEach(Array(metrics.bites.enumerated()), id: \.element.id) { idx, bite in
-                    biteRow(index: idx + 1, bite: bite)
-                }
-            }
-        }
-    }
-
-    private func biteRow(index: Int, bite: BiteEvent) -> some View {
-        let rushed = bite.chewCount < RuntimeConfig.rushedChewsPerBite
-        return HStack(spacing: 8) {
-            Text("#\(index)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .leading)
-            Text(String(format: "%.1f–%.1f s", bite.startTime, bite.endTime))
-                .font(.caption.monospacedDigit())
-            Spacer()
-            Label(
-                "\(bite.chewCount) chews",
-                systemImage: rushed ? "exclamationmark.triangle.fill" : "circle.fill"
-            )
-            .labelStyle(.titleAndIcon)
-            .font(.caption)
-            .foregroundStyle(rushed ? .orange : .green)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(.gray.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
     }
 }

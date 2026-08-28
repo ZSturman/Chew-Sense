@@ -2,9 +2,7 @@
 //  ChewStroke.swift
 //  ChewSenseLive
 //
-//  Canonical schema for a single jaw-stroke event detected in the
-//  motion stream. Mirrors `pipeline/events.py::ChewStroke` — keep
-//  field names in sync.
+//  Runtime telemetry for one decoded chew-closure event in the motion stream.
 //
 
 import Foundation
@@ -13,7 +11,7 @@ import Foundation
 enum ChewStrokeSource: String, Codable, CaseIterable {
     /// Python/Swift peak-detector output.
     case heuristic
-    /// Learned chew-stroke head output (future).
+    /// Learned chew-event head output.
     case model
     /// Seeded from video (mouth-openness peak), pre-review.
     case auto
@@ -25,11 +23,11 @@ enum ChewStrokeSource: String, Codable, CaseIterable {
 
 /// A single jaw-stroke event.
 ///
-/// Timestamps are in seconds, relative to session start, matching
-/// `motion.csv` and `predictions.csv` in field-test bundles.
+/// Timestamps use the host-monotonic motion clock. Exported telemetry also
+/// includes video-relative timestamps derived from session.json.
 struct ChewStroke: Codable, Equatable, Identifiable {
     var id: UUID
-    /// Seconds, session-relative.
+    /// Seconds in the host-monotonic clock.
     var timestamp: Double
     /// Detector confidence in [0, 1].
     var confidence: Double

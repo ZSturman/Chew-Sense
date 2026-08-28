@@ -26,6 +26,10 @@ final class RecorderController: NSObject, ObservableObject {
     @Published var isMotionAvailable: Bool = false
 
     @Published var latestMotion: (ax: Double, ay: Double, az: Double)?
+    @Published private(set) var reviewAudioPermission = "not_requested"
+    @Published var captureReviewAudio: Bool {
+        didSet { UserDefaults.standard.set(captureReviewAudio, forKey: reviewAudioDefaultsKey) }
+    }
 
     // Capture session to show live preview (owned by VideoIMURecorder internally)
     @Published var captureSession: AVCaptureSession?
@@ -36,13 +40,16 @@ final class RecorderController: NSObject, ObservableObject {
     
     @Published private(set) var sessionMetadata: [String: RecordingMetadata] = [:]
     private let metadataDefaultsKey = "RecordingSessionMetadata"
+    private let reviewAudioDefaultsKey = "CaptureLocalReviewAudio"
     private var currentEatingLabel: Bool?
 
     private var recorder: VideoIMURecorder?
     private var cancellables = Set<AnyCancellable>()
     private var imuCheckTimer: DispatchSourceTimer?
+    private var isPreparingRecording = false
 
     override init() {
+        self.captureReviewAudio = UserDefaults.standard.bool(forKey: "CaptureLocalReviewAudio")
         super.init()
         loadMetadata()
     }
@@ -65,13 +72,22 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     func prepare() {
+        if CollectionTestMode.isEnabled {
+            isMotionAvailable = CollectionTestMode.simulatedMotionAvailable
+            statusText = isMotionAvailable ? "Ready – simulated AirPods" : "Ready"
+            return
+        }
         Task { @MainActor in
             do {
                 try await requestPermissions()
                 self.activateAudioSession()
                 if self.recorder == nil {
                     let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("warmup.mov")
-                    let r = VideoIMURecorder(outputURL: tmp)
+                    let r = VideoIMURecorder(
+                        outputURL: tmp,
+                        captureReviewAudio: self.captureReviewAudio,
+                        reviewAudioPermission: self.reviewAudioPermission
+                    )
                     
                     r.onError = { [weak self] err in
                         DispatchQueue.main.async { self?.alert = AppAlert("Recorder error", err.localizedDescription) }
@@ -110,8 +126,15 @@ final class RecorderController: NSObject, ObservableObject {
                             self?.latestMotion = (ax, ay, az)
                         }
                     }
+                } else {
+                    try self.recorder?.updateReviewAudioConfiguration(
+                        enabled: self.captureReviewAudio,
+                        permission: self.reviewAudioPermission
+                    )
+                    self.captureSession = self.recorder?.exposedSession
+                    self.recorder?.startPreview()
                 }
-                
+
                 imuCheckTimer?.cancel()
                 let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
                 timer.schedule(deadline: .now(), repeating: 2.5)
@@ -156,11 +179,45 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     func start(withLabel label: Bool?) {
-        guard !isRecording else { return }
-        guard let r = recorder else {
+        if CollectionTestMode.isEnabled {
+            startSimulatedRecording(withLabel: label)
+            return
+        }
+        guard !isRecording, !isPreparingRecording else { return }
+        guard recorder != nil else {
             alert = AppAlert("Not ready", "Recorder is not initialized yet.")
             return
         }
+
+        isPreparingRecording = true
+        statusText = "Preparing capture…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isPreparingRecording = false }
+            do {
+                try await self.resolveReviewAudioPreference()
+                guard let recorder = self.recorder else {
+                    throw Err("Recorder is not initialized yet.")
+                }
+                try recorder.updateReviewAudioConfiguration(
+                    enabled: self.captureReviewAudio,
+                    permission: self.reviewAudioPermission
+                )
+                guard self.isMotionAvailable else {
+                    throw Err("AirPods motion became unavailable before capture started.")
+                }
+                self.startPreparedRecording(withLabel: label, recorder: recorder)
+            } catch {
+                self.statusText = "Ready"
+                self.alert = AppAlert("Could not start capture", error.localizedDescription)
+            }
+        }
+    }
+
+    private func startPreparedRecording(
+        withLabel label: Bool?,
+        recorder r: VideoIMURecorder
+    ) {
 
         currentEatingLabel = label
 
@@ -198,6 +255,10 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     func stop() {
+        if CollectionTestMode.isEnabled {
+            finishSimulatedRecording()
+            return
+        }
         guard isRecording, let r = recorder else { return }
         // Flip immediately so UI can't call stop again
         isRecording = false
@@ -226,6 +287,8 @@ final class RecorderController: NSObject, ObservableObject {
     /// Automatically invoked when IMU data becomes unavailable during an active recording.
     private func pauseDueToMotionLoss() {
         guard isRecording, let r = recorder else { return }
+
+        r.markInterrupted()
 
         // Flip flags so the UI enters the paused state.
         isRecording = false
@@ -275,6 +338,64 @@ final class RecorderController: NSObject, ObservableObject {
         start(withLabel: currentEatingLabel)
     }
 
+    // MARK: - Deterministic UI-test capture
+
+    private func startSimulatedRecording(withLabel label: Bool?) {
+        guard !isRecording, isMotionAvailable else { return }
+        currentEatingLabel = label
+        isRecording = true
+        isPaused = false
+        statusText = "Recording…"
+    }
+
+    private func finishSimulatedRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        let isEating = currentEatingLabel ?? true
+        let baseName = isEating ? "Eating-UI-Test" : "Not-eating-UI-Test"
+        guard let documents = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else { return }
+        let folder = documents.appendingPathComponent(baseName, isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let videoURL = folder.appendingPathComponent("\(baseName).mov")
+            let motionURL = folder.appendingPathComponent("\(baseName).csv")
+            try Data("ui-test-video".utf8).write(to: videoURL)
+            try Data(
+                "timestamp,ax,ay,az,gx,gy,gz\n100.00,0,0,0,0,0,0\n100.02,0,0,0,0,0,0\n".utf8
+            ).write(to: motionURL)
+            try CanonicalBundleWriter.writeInitialBundle(
+                videoURL: videoURL,
+                isEating: isEating,
+                timing: CaptureTimingSnapshot(
+                    videoStartHostTime: 100.0,
+                    firstVideoFrameHostTime: 100.0,
+                    firstMotionHostTime: 100.0,
+                    lastMotionHostTime: 100.02,
+                    motionSampleCount: 2,
+                    motionSampleGapCount: 0,
+                    largestMotionSampleGap: nil,
+                    interrupted: false,
+                    interruptionCount: 0,
+                    reviewAudioEnabled: false,
+                    reviewAudioPermission: "not_requested",
+                    reviewAudioPath: nil
+                )
+            )
+            lastURL = videoURL
+            lastSessionFolder = folder
+            setMetadata(for: folder, labelled: !isEating, shared: false)
+            statusText = "Saved"
+        } catch {
+            alert = AppAlert("Test capture failed", error.localizedDescription)
+            statusText = "Ready"
+        }
+        currentEatingLabel = nil
+    }
+
 
     // MARK: - Permissions
     private func requestPermissions() async throws {
@@ -287,7 +408,24 @@ final class RecorderController: NSObject, ObservableObject {
         default:
             throw Err("Camera access denied")
         }
+        try await resolveReviewAudioPreference()
         // Headphone motion prompts when starting the manager; no preflight API needed.
+    }
+
+    private func resolveReviewAudioPreference() async throws {
+        if captureReviewAudio {
+            let allowed = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+            reviewAudioPermission = allowed ? "granted" : "denied"
+            if !allowed {
+                captureReviewAudio = false
+            }
+        } else {
+            reviewAudioPermission = "not_requested"
+        }
     }
 
     // MARK: - Sessions folder helpers

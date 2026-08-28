@@ -2,71 +2,56 @@
 
 Run commands from the repository root.
 
-## Install CLIs
+## Environment And Verification
 
 ```bash
-python3 -m pip install -e pipelines/vision -e pipelines/motion
+uv sync --locked
+./tools/verify fast       # repository boundary + all Python tests
+./tools/verify fixture    # canonical session + temporal replay golden tests
+./tools/verify apps       # Review tests and all app/test builds
+./tools/verify all
 ```
 
-Available commands:
-
-```text
-chewsense-vision
-chewsense-motion
-```
+The verifier rejects a non-3.12 interpreter, nested gitlinks, and tracked cold
+archive content. CI runs `fast`, `fixture`, and `apps` from `uv.lock`.
 
 ## Workspace
 
-Default: `<repo>/workspace`.
+The default is `<repo>/workspace`. To use another location:
 
 ```bash
 export CHEWSENSE_WORKSPACE="/absolute/path/to/workspace"
 ```
 
-The path must be absolute. Confirm it with:
-
-```bash
-python3 tools/migrate_workspace.py --print-workspace
-```
-
 ## Collect
 
-Open `apps/collect-ios/ChewSenseCollect.xcodeproj` and run the
-`ChewSenseCollect` scheme. Export each canonical session into
-`workspace/sessions/raw/`.
+Open `apps/collect-ios/ChewSenseCollect.xcodeproj`. Choose Eating or Not
+Eating, optionally enable Local Review Audio before entering capture, and
+record with AirPods motion available. The resulting schema-v2 session stores
+the video-clock origin, first-motion latency, sample gaps, interruptions, and
+optional deletable `.m4a` review audio.
 
-Migrate an old session:
+Do not manually remove a referenced review-audio file: run audit after any
+manifest-safe purge so media hashes and presence flags remain truthful.
+
+Coarse label markers use video-relative time. If the origin is absent, the app
+refuses to relabel rather than substituting the first motion row.
+
+## Vision And Review
 
 ```bash
-chewsense-vision migrate-session \
+python pipelines/vision/run_on_sessions.py --only <session_id>
+chewsense-vision audit-session \
   workspace/sessions/raw/<session_id> \
-  --source-app legacy_import
+  --derived workspace/derived/vision/<session_id>
 ```
 
-## Vision
+The batch runner writes automatic telemetry plus one immutable candidate
+revision. It does not generate an automatic motion truth file.
 
-```bash
-python3 pipelines/vision/run_on_sessions.py --only <session_id>
-python3 pipelines/vision/run_on_sessions.py
-```
-
-Use `--force` to regenerate automatic outputs. Results land in
-`workspace/derived/vision/<session_id>/`.
-
-## Review
-
-Open `apps/review-macos/ChewSenseReview.xcodeproj`, run `ChewSenseReview`, and
-select the workspace directory.
-
-For each candidate:
-
-1. Accept, reject, or edit the chew.
-2. Review bite events with wider context.
-3. Add missed events.
-4. Watch the full video.
-5. Acknowledge the full-video pass and save.
-
-## Finalize
+In ChewSenseReview, the anchors are Closed start, Maximum open, and Closed
+end. Accept, edit, reject, add, or mark an event unobservable/uncertain. Finish
+with a full-video pass. Any candidate revision/hash mismatch blocks saving.
 
 ```bash
 chewsense-vision finalize-session \
@@ -74,71 +59,89 @@ chewsense-vision finalize-session \
   --derived workspace/derived/vision/<session_id>
 ```
 
-Incomplete reviews are rejected unless `--allow-incomplete` is explicitly
-used. Incomplete sessions are not admitted to training by default.
+Finalization refuses incomplete review, freezes an immutable revision,
+materializes event/phase targets, and updates the pointer and training
+manifests. Re-run `audit-session` after finalization.
 
-## Train Vision
-
-```bash
-chewsense-vision pseudolabel \
-  workspace/derived/vision/<session_id> \
-  --annotations workspace/sessions/raw/<session_id>/annotations/canonical_events.json \
-  --out workspace/derived/vision/<session_id>/reviewed_labels.parquet
-```
-
-Train from reviewed frame labels with `chewsense-vision train-chew-head`.
-
-## Train Motion
+## Legacy Recovery
 
 ```bash
-chewsense-motion from-raw --no-wandb
+python tools/inventory_local_data.py
+python tools/stage_legacy_pairs.py /path/to/source
+python tools/stage_legacy_pairs.py /path/to/source \
+  --destination workspace/sessions/raw --apply
+chewsense-vision migrate-session workspace/sessions/raw/<session_id>
 ```
 
-Import field-test bundles:
+Migration preserves media hashes and coarse row labels where present, but
+sets legacy event/phase/food-entry eligibility to zero and requires fresh
+review. Do not use `--force` without retaining the existing manifest.
+
+## Temporal Motion Model
+
+V2 training input is `X.npy` shaped `(N, 7, 150)` and `y.npy` shaped `(N, 8)`
+with `session_ids.npy` and a locked chronological split. Six raw axes are
+normalized from valid training samples; the seventh channel is the untouched
+gap mask. Legacy/coarse sessions may train eating only.
 
 ```bash
-chewsense-motion from-field-test
+chewsense-motion materialize-temporal \
+  --input workspace/sessions/raw \
+  --output workspace/derived/motion/manual-temporal-check
+chewsense-motion from-raw --input workspace/sessions/raw \
+  --arch causal_tcn --no-wandb
 ```
 
-Both commands reject unverified reviewed labels by default.
+Use `materialize-temporal` for a deterministic dataset/lineage check without
+training. `from-raw --arch causal_tcn` performs materialization, locked split
+creation, training, validation evaluation, and registration prompts. Locked
+splits require at least three fully reviewed eating and three fully reviewed
+hard-negative sessions; the workspace does not have those sessions yet.
 
-## Evaluate And Promote
+After training, evaluate the exact registered checkpoint against its exact
+locked test assignment and attach the result to that entry:
 
 ```bash
-chewsense-motion evaluate
-chewsense-motion registry --latest
-chewsense-motion status
-chewsense-motion compare
-chewsense-motion deploy
+chewsense-motion evaluate \
+  --registry-entry workspace/models/registry/<model_id> \
+  --features <temporal-features-directory-printed-by-from-raw> \
+  --split test_locked \
+  --arch causal_tcn \
+  --output workspace/reports/motion/<model_id>-test.json
+chewsense-motion deploy \
+  --model workspace/models/registry/<model_id>/chewnet.pth
 ```
 
-Production deployment requires an exact registry checkpoint and a passing
-locked evaluation. `--development-override` must not be used as a production
-promotion.
+Registry evaluation verifies dataset, array, split, and checkpoint lineage,
+updates `metrics.json`, and writes a promotion report. Deployment still
+refuses the checkpoint unless every gate passes. `chewsense-motion status`
+and `registry --latest` are inspection commands only.
 
-## Tests
+Deployment binds capability flags to the exact promoted checkpoint. The
+longer-context food-entry head is not implemented yet; its future promotion
+report remains independent from chew/cadence promotion.
 
-```bash
-PYTHONPATH=pipelines/vision python3 -m pytest -q pipelines/vision/tests
-PYTHONPATH=pipelines/motion python3 -m pytest -q pipelines/motion/tests
+## Live
 
-xcodebuild -project apps/collect-ios/ChewSenseCollect.xcodeproj \
-  -scheme ChewSenseCollect -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+Select a texture before starting. A temporal promoted checkpoint logs every
+raw output, validity coverage, and decoded chew timestamp. The event head
+drives chew counting; phase is telemetry. The cadence summary reports detected
+chews, median interval/distribution, confidence coverage, and excluded
+uncertain time.
 
-xcodebuild -project apps/review-macos/ChewSenseReview.xcodeproj \
-  -scheme ChewSenseReview CODE_SIGNING_ALLOWED=NO build
-
-xcodebuild -project apps/live-ios/ChewSenseLive.xcodeproj \
-  -scheme ChewSenseLive -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
-```
+If the bundled model is legacy eating-only, individual-chew coaching is
+disabled. If food entry is not independently promoted, bite count,
+chews-per-bite, and “not enough chews” are absent.
 
 ## Troubleshooting
 
-- No sessions in Review: select `workspace/`, then confirm both
-  `sessions/raw/<id>` and `derived/vision/<id>` exist.
-- Training rejects a session: complete every candidate and the full-video
-  pass, save, then finalize again.
-- Wrong local paths: unset `CHEWSENSE_WORKSPACE` or set it to an absolute
-  directory.
-- Live refuses deployment: inspect the latest registry metrics and promotion
-  report; do not bypass locked evaluation for production.
+- Review shows no session: confirm both `sessions/raw/<id>` and
+  `derived/vision/<id>/candidates-vNNNN.json` exist.
+- Review cannot save: reload the exact candidate revision; do not edit hashes.
+- Audit reports clock errors: preserve the bundle and recapture or explicitly
+  migrate; never hand-shift CSV timestamps.
+- Training rejects data: verify every event, the full-video pass, and locked
+  session-level splits.
+- iOS Icon Composer fails locally: `tools/verify apps` performs a code/test
+  build with the `.icon` source excluded; archive assets still need a normal
+  Xcode release build before distribution.

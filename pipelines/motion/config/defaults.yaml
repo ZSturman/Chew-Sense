@@ -32,8 +32,9 @@ training:
   focal_alpha: 0.25
   focal_gamma: 2.0
   # ---- Architecture ----
-  # arch: "mlp" (default 12-feature 3-layer MLP) or "cnn" (1D-CNN over raw windows; future)
-  arch: "mlp"
+  # New models use the causal TCN over raw three-second windows. "mlp" is a
+  # read/train compatibility option for legacy binary eating checkpoints only.
+  arch: "causal_tcn"
   # ---- Split policy ----
   # If true, allow training without a locked split manifest (session-aware random fallback).
   allow_unsplit: false
@@ -56,24 +57,25 @@ features:
   window_sec: 0.75      # Sliding window duration in seconds
   step_sec: 0.10        # Step size between windows in seconds
   # Sampling rate is auto-detected from data
-  # extended_chew_phase: when true, feature targets become a 4-vector
-  # [eating_soft, chew_phase_sin_mean, chew_phase_cos_mean, phase_valid]
-  # so the two-head ChewNet can learn reviewed chew-cycle phase while
-  # retaining binary-only sessions for the eating head.
-  # Requires Stage 02b video-assisted labels to have been ingested.
-  extended_chew_phase: false
 
 # =============================================================================
-# TWO-HEAD CHEW PHASE LOSS PARAMETERS
+# V2 TEMPORAL CHEW MODEL
 # =============================================================================
-# Active when features.extended_chew_phase is true. The training loop
-# dispatches to TwoHeadChewNet and a composite BCE + MSE loss.
+# Input is (7, 150): six IMU axes at 50 Hz for three seconds plus a validity
+# mask. Output is eating_logit, chew_event_logit, phase sin/cos/confidence.
 
-chew_phase_head:
-  enabled: false              # Master switch for the two-head training path
-  eating_weight: 1.0          # α — BCE term on the eating logit
-  phase_weight: 0.5           # β — MSE term on (sin, cos) phase outputs
-  mask_when_not_eating: true  # Skip phase loss on rows where eating_soft < 0.5
+temporal_model:
+  enabled: true
+  sample_rate_hz: 50
+  context_sec: 3.0
+  inference_step_sec: 0.10
+  channels: [24, 24, 32, 32]
+  kernel_size: 5
+  dropout: 0.10
+  eating_weight: 1.0
+  event_weight: 2.0
+  phase_weight: 0.5
+  confidence_weight: 0.25
 
 # =============================================================================
 # SOFT LABEL GENERATION PARAMETERS
@@ -108,6 +110,12 @@ runtime:
   low_threshold: 0.4    # Probability threshold to END chewing episode
   min_start_windows: 3  # Consecutive windows above high_threshold to confirm start
   min_end_windows: 2    # Consecutive windows below low_threshold to confirm end
+  chew_event_threshold: 0.5
+  min_gap_coverage: 0.8
+  event_refractory_sec: 0.25
+  confident_event_threshold: 0.5
+  bout_merge_gap_sec: 1.5       # diagnostic eating-bout telemetry only
+  min_bout_duration_sec: 1.0
 
 # =============================================================================
 # CLOSED-LOOP COLLECTION RECOMMENDATIONS
@@ -169,25 +177,6 @@ collection:
       expected_label_class: mixed
       target_minutes: 6
       aliases: []
-
-# =============================================================================
-# MOUTH SHAPE ESTIMATION
-# =============================================================================
-# Parameters for the mouth shape regression pipeline.
-# When mode is "mouth_shape", the pipeline trains a multi-output regressor
-# instead of binary chewing classifier.
-
-mouth_shape:
-  enabled: false         # Set to true to use mouth shape regression mode
-  parameters:            # Output parameter names (order matters)
-    - mouth_openness
-    - mouth_width
-    - jaw_displacement
-    - lip_compression
-  num_outputs: 4
-  video_fps: 30          # Expected video framerate for mouth shape extraction
-  interpolation: linear  # Interpolation method for aligning video to motion
-  temporal_smooth_sigma: 0.0  # Gaussian smoothing sigma (0 = disabled)
 
 # =============================================================================
 # WEIGHTS & BIASES

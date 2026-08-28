@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0.0",
+  "inference_step_sec": 0.1,
+  "probability_tolerance": 0.001,
+  "decoder": {
+    "event_threshold": 0.5,
+    "eating_threshold": 0.5,
+    "min_gap_coverage": 0.8,
+    "refractory_sec": 0.25
+  },
+  "rows": [
+    {"timestamp": 0.0, "eating_logit": 2.19722458, "chew_event_logit": -2.19722458, "phase_sin": 0.0, "phase_cos": 1.0, "phase_confidence": 1.0, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.1},
+    {"timestamp": 0.1, "eating_logit": 2.19722458, "chew_event_logit": 1.38629436, "phase_sin": 0.8, "phase_cos": 0.6, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.8},
+    {"timestamp": 0.2, "eating_logit": 2.19722458, "chew_event_logit": -2.19722458, "phase_sin": 0.0, "phase_cos": 1.0, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.1},
+    {"timestamp": 0.3, "eating_logit": 2.19722458, "chew_event_logit": 2.19722458, "phase_sin": -0.8, "phase_cos": 0.6, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.9},
+    {"timestamp": 0.4, "eating_logit": 2.19722458, "chew_event_logit": -2.19722458, "phase_sin": 0.0, "phase_cos": 1.0, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.1},
+    {"timestamp": 0.5, "eating_logit": 2.19722458, "chew_event_logit": -1.38629436, "phase_sin": 0.0, "phase_cos": 1.0, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.2},
+    {"timestamp": 0.6, "eating_logit": 2.19722458, "chew_event_logit": 1.73460106, "phase_sin": 0.7, "phase_cos": 0.7, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.85},
+    {"timestamp": 0.7, "eating_logit": 2.19722458, "chew_event_logit": -2.19722458, "phase_sin": 0.0, "phase_cos": 1.0, "phase_confidence": 0.9, "gap_coverage": 1.0, "eating_probability": 0.9, "chew_event_probability": 0.1},
+    {"timestamp": 0.8, "eating_logit": -1.38629436, "chew_event_logit": 2.19722458, "phase_sin": 0.0, "phase_cos": 0.0, "phase_confidence": 0.1, "gap_coverage": 1.0, "eating_probability": 0.2, "chew_event_probability": 0.9},
+    {"timestamp": 0.9, "eating_logit": -1.38629436, "chew_event_logit": -2.19722458, "phase_sin": 0.0, "phase_cos": 0.0, "phase_confidence": 0.1, "gap_coverage": 1.0, "eating_probability": 0.2, "chew_event_probability": 0.1}
+  ],
+  "decoded_event_timestamps": [0.1, 0.6]
+}

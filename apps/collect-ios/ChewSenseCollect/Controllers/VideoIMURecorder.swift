@@ -7,13 +7,16 @@
 
 import Foundation
 import AVFoundation
+import AudioToolbox
 import CoreMedia
 import CoreMotion
 
 
 /// Records a .mov with a video track + a timed-metadata track containing
 /// 10 ms packets of AirPods IMU samples, keyed to the host clock.
-final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class VideoIMURecorder: NSObject,
+    AVCaptureVideoDataOutputSampleBufferDelegate,
+    AVCaptureAudioDataOutputSampleBufferDelegate {
     // Public
     private(set) var outputURL: URL
     var onError: ((Error) -> Void)?
@@ -21,7 +24,8 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     var deviceMotionHandler: ((CMDeviceMotion?) -> Void)?
     var exposedSession: AVCaptureSession { session }
     /// Initial activity selection for the current recording (true = Eating, false = Not Eating).
-    /// Used only after recording for CSV post-processing; motion events are saved without labels during capture.
+    /// Used only to materialize a separate coarse-label artifact after capture;
+    /// motion events are always saved without truth labels.
     var recordingLabel: Bool? = nil
     
     @objc dynamic private(set) var isMotionAvailable: Bool = false
@@ -30,6 +34,29 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     // Call this to build the AVCaptureSession without starting the writer yet.
     func configureSessionOnly() throws {
         try setupSession()
+    }
+
+    /// Applies the current user choice before every capture. In particular,
+    /// disabling review audio removes the microphone input rather than merely
+    /// omitting the sidecar writer.
+    func updateReviewAudioConfiguration(
+        enabled: Bool,
+        permission: String
+    ) throws {
+        guard !isRecording else {
+            throw Err("Review-audio settings cannot change during a recording.")
+        }
+        reviewAudioPermission = permission
+        guard isSessionConfigured else {
+            captureReviewAudio = enabled
+            return
+        }
+        guard captureReviewAudio != enabled else { return }
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        try configureReviewAudioComponents(enabled: enabled)
+        captureReviewAudio = enabled
     }
 
     // Call this to run the preview without writing to disk.
@@ -87,10 +114,16 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     // Private
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
+    private let audioOutput = AVCaptureAudioDataOutput()
     private var writer: AVAssetWriter!
     private var videoInput: AVAssetWriterInput!
+    private var audioWriter: AVAssetWriter?
+    private var audioInput: AVAssetWriterInput?
+    private var reviewAudioURL: URL?
+    private var microphoneInput: AVCaptureDeviceInput?
     private let hmm = CMHeadphoneMotionManager()
     private let motionQueue = OperationQueue()
+    private let audioCaptureQueue = DispatchQueue(label: "audio.queue")
 
     // Batching
     private let batchWindowNs: UInt32 = 10_000_000 // 10 ms
@@ -112,6 +145,15 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     private var firstMotionHostTimeSeconds: Double?
     private var lastMotionHostTimeSeconds: Double?
     private var motionSampleCount: Int = 0
+    private var previousMotionHostTimeSeconds: Double?
+    private var motionSampleGapCount: Int = 0
+    private var largestMotionSampleGapSeconds: Double?
+    private let interruptionTracker = CaptureInterruptionTracker()
+    private var captureNotificationTokens: [NSObjectProtocol] = []
+
+    private var captureReviewAudio: Bool
+    private var reviewAudioPermission: String
+    private var isSessionConfigured = false
 
     private var csvFileHandle: FileHandle?
     private var csvURL: URL?
@@ -120,9 +162,16 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     
     private var motionAvailabilityTimer: DispatchSourceTimer?
 
-    init(outputURL: URL) {
+    init(
+        outputURL: URL,
+        captureReviewAudio: Bool = false,
+        reviewAudioPermission: String = "not_requested"
+    ) {
         self.outputURL = outputURL
+        self.captureReviewAudio = captureReviewAudio
+        self.reviewAudioPermission = reviewAudioPermission
         super.init()
+        installCaptureInterruptionObservers()
         // Start timer to poll isDeviceMotionAvailable every 0.5s
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
         timer.schedule(deadline: .now(), repeating: .milliseconds(500))
@@ -142,6 +191,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     deinit {
         motionAvailabilityTimer?.cancel()
         motionAvailabilityTimer = nil
+        captureNotificationTokens.forEach(NotificationCenter.default.removeObserver)
     }
 
     func start() {
@@ -170,6 +220,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             return
         }
         isRecording = false
+        let interruptionSummary = interruptionTracker.snapshot()
 
         // Flush any remaining IMU events before stopping timers and motion updates.
         flushBatch()
@@ -182,51 +233,74 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         guard let writer = writer else {
             csvFileHandle?.closeFile()
             csvFileHandle = nil
-            self.postprocessCSVIfNeeded()
-            self.writeCanonicalBundle()
+            self.writeCanonicalBundle(interruptions: interruptionSummary)
             completion()
             return
         }
         
-        switch writer.status {
-        case .writing:
+        let group = DispatchGroup()
+        if writer.status == .writing {
             videoInput?.markAsFinished()
-            writer.finishWriting {
-                self.csvFileHandle?.closeFile()
-                self.csvFileHandle = nil
-                self.postprocessCSVIfNeeded()
-                self.writeCanonicalBundle()
-                completion()
-            }
-        default:
+            group.enter()
+            writer.finishWriting { group.leave() }
+        } else {
             writer.cancelWriting()
-            csvFileHandle?.closeFile()
-            csvFileHandle = nil
-            self.postprocessCSVIfNeeded()
-            self.writeCanonicalBundle()
+        }
+        if let audioWriter {
+            if audioWriter.status == .writing {
+                audioInput?.markAsFinished()
+                group.enter()
+                audioWriter.finishWriting { group.leave() }
+            } else {
+                audioWriter.cancelWriting()
+            }
+        }
+        group.notify(queue: .global(qos: .utility)) {
+            self.csvFileHandle?.closeFile()
+            self.csvFileHandle = nil
+            self.writeCanonicalBundle(interruptions: interruptionSummary)
             completion()
         }
     }
 
+    func markInterrupted() {
+        interruptionTracker.recordMotionInterruption()
+    }
+
     // MARK: Setup
     private func setupSession() throws {
+        guard !isSessionConfigured else { return }
         session.beginConfiguration()
         session.sessionPreset = .high
-        session.usesApplicationAudioSession = false
-        session.automaticallyConfiguresApplicationAudioSession = false
         // Removed: session.masterClock = hostClock
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-        else { throw Err("No camera") }
+        else {
+            session.commitConfiguration()
+            throw Err("No camera")
+        }
         let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else { throw Err("Cannot add camera input") }
+        guard session.canAddInput(input) else {
+            session.commitConfiguration()
+            throw Err("Cannot add camera input")
+        }
         session.addInput(input)
 
         let q = DispatchQueue(label: "video.queue")
         videoOutput.setSampleBufferDelegate(self, queue: q)
         videoOutput.alwaysDiscardsLateVideoFrames = false
-        guard session.canAddOutput(videoOutput) else { throw Err("Cannot add video output") }
+        guard session.canAddOutput(videoOutput) else {
+            session.commitConfiguration()
+            throw Err("Cannot add video output")
+        }
         session.addOutput(videoOutput)
+
+        do {
+            try configureReviewAudioComponents(enabled: captureReviewAudio)
+        } catch {
+            session.commitConfiguration()
+            throw error
+        }
         if #available(iOS 17.0, *) {
             // Set video output rotation to 90 degrees for portrait orientation
             videoOutput.connection(with: .video)?.videoRotationAngle = 90
@@ -234,6 +308,85 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             videoOutput.connection(with: .video)?.videoOrientation = .portrait
         }
         session.commitConfiguration()
+        isSessionConfigured = true
+    }
+
+    /// Must be called inside an AVCaptureSession configuration transaction.
+    private func configureReviewAudioComponents(enabled: Bool) throws {
+        session.usesApplicationAudioSession = enabled
+        session.automaticallyConfiguresApplicationAudioSession = enabled
+
+        if !enabled {
+            audioOutput.setSampleBufferDelegate(nil, queue: nil)
+            if session.outputs.contains(where: { $0 === audioOutput }) {
+                session.removeOutput(audioOutput)
+            }
+            if let microphoneInput,
+               session.inputs.contains(where: { $0 === microphoneInput }) {
+                session.removeInput(microphoneInput)
+            }
+            microphoneInput = nil
+            return
+        }
+
+        var addedMicrophoneInput: AVCaptureDeviceInput?
+        if microphoneInput == nil {
+            guard let microphone = AVCaptureDevice.default(
+                .builtInMicrophone,
+                for: .audio,
+                position: .unspecified
+            ) else {
+                throw Err("Review audio was enabled, but no microphone is available.")
+            }
+            let input = try AVCaptureDeviceInput(device: microphone)
+            guard session.canAddInput(input) else {
+                throw Err("Cannot add microphone input for review audio.")
+            }
+            session.addInput(input)
+            microphoneInput = input
+            addedMicrophoneInput = input
+        }
+
+        if !session.outputs.contains(where: { $0 === audioOutput }) {
+            guard session.canAddOutput(audioOutput) else {
+                if let addedMicrophoneInput {
+                    session.removeInput(addedMicrophoneInput)
+                    microphoneInput = nil
+                }
+                throw Err("Cannot add review audio output.")
+            }
+            session.addOutput(audioOutput)
+        }
+        audioOutput.setSampleBufferDelegate(self, queue: audioCaptureQueue)
+    }
+
+    private func installCaptureInterruptionObservers() {
+        let center = NotificationCenter.default
+        captureNotificationTokens = [
+            center.addObserver(
+                forName: AVCaptureSession.wasInterruptedNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self, self.isRecording else { return }
+                self.interruptionTracker.avCaptureWasInterrupted()
+            },
+            center.addObserver(
+                forName: AVCaptureSession.interruptionEndedNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] _ in
+                self?.interruptionTracker.avCaptureInterruptionEnded()
+            },
+            center.addObserver(
+                forName: AVCaptureSession.runtimeErrorNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self, self.isRecording else { return }
+                self.interruptionTracker.avCaptureRuntimeError()
+            }
+        ]
     }
 
     private func setupWriter() throws {
@@ -253,14 +406,44 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         guard writer.canAdd(videoInput) else { throw Err("Cannot add video input") }
         writer.add(videoInput)
 
+        audioInput = nil
+        audioWriter = nil
+        reviewAudioURL = nil
+        if captureReviewAudio {
+            let audioURL = outputURL.deletingPathExtension().appendingPathExtension("m4a")
+            try? FileManager.default.removeItem(at: audioURL)
+            let sidecarWriter = try AVAssetWriter(outputURL: audioURL, fileType: .m4a)
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 64_000
+            ]
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            input.expectsMediaDataInRealTime = true
+            guard sidecarWriter.canAdd(input) else {
+                throw Err("Cannot add review audio writer input")
+            }
+            sidecarWriter.add(input)
+            audioWriter = sidecarWriter
+            audioInput = input
+            reviewAudioURL = audioURL
+        }
+
         writer.startWriting()
+        audioWriter?.startWriting()
         let origin = CMClockGetTime(hostClock)
         videoStartHostTimeSeconds = CMTimeGetSeconds(origin)
         firstVideoFrameHostTimeSeconds = nil
         firstMotionHostTimeSeconds = nil
         lastMotionHostTimeSeconds = nil
         motionSampleCount = 0
+        previousMotionHostTimeSeconds = nil
+        motionSampleGapCount = 0
+        largestMotionSampleGapSeconds = nil
+        interruptionTracker.reset()
         writer.startSession(atSourceTime: origin)
+        audioWriter?.startSession(atSourceTime: origin)
     }
 
     private func setupMotion() {
@@ -295,6 +478,14 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
         lastMotionHostTimeSeconds = m.timestamp
         motionSampleCount += 1
+        if let previous = previousMotionHostTimeSeconds {
+            let gap = m.timestamp - previous
+            if gap > CanonicalCaptureContract.motionGapThresholdSeconds {
+                motionSampleGapCount += 1
+                largestMotionSampleGapSeconds = max(largestMotionSampleGapSeconds ?? 0, gap)
+            }
+        }
+        previousMotionHostTimeSeconds = m.timestamp
         if batchStartSeconds == nil { batchStartSeconds = m.timestamp }
         let dt = m.timestamp - (batchStartSeconds ?? m.timestamp)
         let dtNs = UInt32(max(0, min(Double(UInt32.max)/1e9, dt)) * 1e9)
@@ -362,6 +553,12 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
 
     // MARK: Video delegate
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output === audioOutput {
+            guard let audioWriter, audioWriter.status == .writing,
+                  let audioInput, audioInput.isReadyForMoreMediaData else { return }
+            audioInput.append(sb)
+            return
+        }
         guard let writer = writer,
               let videoInput = videoInput,
               writer.status == .writing else { return }
@@ -412,36 +609,7 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
     }
     
-    private func postprocessCSVIfNeeded() {
-        // Only apply when the initial selection was Not Eating (false)
-        guard let csvURL = self.csvURL, recordingLabel == false else { return }
-        do {
-            let data = try Data(contentsOf: csvURL)
-            guard let text = String(data: data, encoding: .utf8) else { return }
-            // Split into lines preserving order
-            var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard !lines.isEmpty else { return }
-            // If header already contains label, do nothing
-            if lines[0].contains(",label") { return }
-            // Append label column to header
-            lines[0] += ",label"
-            // Append ",false" to each non-empty data line
-            for i in 1..<lines.count {
-                if !lines[i].isEmpty { lines[i] += ",false" }
-            }
-            let newText = lines.joined(separator: "\n")
-            // Write atomically via a temp file
-            let tmpURL = csvURL.deletingLastPathComponent().appendingPathComponent(csvURL.lastPathComponent + ".tmp")
-            try newText.data(using: .utf8)?.write(to: tmpURL, options: .atomic)
-            // Replace original
-            try FileManager.default.replaceItemAt(csvURL, withItemAt: tmpURL)
-        } catch {
-            // Non-fatal; surface via onError if provided
-            onError?(error)
-        }
-    }
-
-    private func writeCanonicalBundle() {
+    private func writeCanonicalBundle(interruptions: CaptureInterruptionSnapshot) {
         do {
             try CanonicalBundleWriter.writeInitialBundle(
                 videoURL: outputURL,
@@ -451,7 +619,20 @@ final class VideoIMURecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                     firstVideoFrameHostTime: firstVideoFrameHostTimeSeconds,
                     firstMotionHostTime: firstMotionHostTimeSeconds,
                     lastMotionHostTime: lastMotionHostTimeSeconds,
-                    motionSampleCount: motionSampleCount
+                    motionSampleCount: motionSampleCount,
+                    motionSampleGapCount: motionSampleGapCount,
+                    largestMotionSampleGap: largestMotionSampleGapSeconds,
+                    interrupted: interruptions.interrupted,
+                    interruptionCount: interruptions.count,
+                    reviewAudioEnabled: reviewAudioURL.map {
+                        FileManager.default.fileExists(atPath: $0.path)
+                    } ?? false,
+                    reviewAudioPermission: reviewAudioPermission,
+                    reviewAudioPath: reviewAudioURL.flatMap {
+                        FileManager.default.fileExists(atPath: $0.path)
+                            ? $0.lastPathComponent
+                            : nil
+                    }
                 )
             )
         } catch {

@@ -191,13 +191,13 @@ final class VideoEditorViewModel: ObservableObject {
 
     // MARK: - Session control
 
-    func completeEditing() {
+    func completeEditing() throws {
         //print("[VideoEditor] completeEditing() called; markers=\(markers.count), segments=\(segments.count)")
-        guard duration > 0 else {
-            //print("[VideoEditor] completeEditing() early return: duration=\(duration)")
-            return
+        guard duration.isFinite, duration > 0 else {
+            throw BundleError.invalidVideoDuration
         }
         recomputeSegments()
+        try writeCoarseLabelsForBoundSession()
         saveMarkers()
         originalMarkers = markers
     }
@@ -289,180 +289,89 @@ final class VideoEditorViewModel: ObservableObject {
         }
     }
     
-    // MARK: - CSV labelling
+    // MARK: - Coarse annotation persistence
 
-    /// Bind a CSV file whose `label` column should be kept in sync with the current markers.
-    /// Call this once you know which CSV belongs to this video.
+    /// Bind the immutable motion file that identifies this canonical session.
+    /// Human decisions are written to `annotations/coarse_labels.json`; the
+    /// captured CSV is never modified.
     func bindCSVForLabelling(_ url: URL) {
-        //print("[VideoEditor] bindCSVForLabelling called with \(url.lastPathComponent)")
         boundCSVURL = url
-        //print("[VideoEditor] bindCSVForLabelling: attempting initial relabel")
-        try? updateLabelsInBoundCSV()
     }
-    /// Re-run labelling on the currently bound CSV, if any.
-    /// This is automatically called whenever markers are saved,
-    /// but you may also call it manually if needed.
+
+    /// Explicitly persists the current coarse decision set.
     func relabelBoundCSV() {
-        try? updateLabelsInBoundCSV()
+        try? writeCoarseLabelsForBoundSession()
     }
 
-    /// Core implementation that walks the CSV and fills the `label` column
-    /// based on whether each timestamp falls inside a chewing segment.
-    ///
-    /// - Parameter csvURL: Path to the CSV file to update in-place.
+    /// Compatibility entry point retained for callers that already bind by CSV
+    /// URL. Marker timestamps are already video-relative; the manifest origin
+    /// is validated so a legacy/mixed-clock session cannot be silently labelled.
     func relabelCSV(at csvURL: URL) throws {
-        //print("[VideoEditor] relabelCSV(at:) started for \(csvURL.lastPathComponent)")
+        guard FileManager.default.fileExists(atPath: csvURL.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        guard duration.isFinite, duration > 0 else {
+            throw BundleError.invalidVideoDuration
+        }
+        _ = try CanonicalBundleWriter.videoClockOrigin(for: csvURL)
+        recomputeSegments()
+        try CanonicalBundleWriter.writeCoarseLabels(
+            intervals: coarseLabelIntervals(),
+            forMotionCSV: csvURL
+        )
+    }
 
-        let data = try Data(contentsOf: csvURL)
-        guard var content = String(data: data, encoding: .utf8) else {
-            //int("[VideoEditor] relabelCSV: failed to decode CSV as UTF-8")
+    private func writeCoarseLabelsForBoundSession() throws {
+        guard let url = boundCSVURL else {
             return
         }
-        //print("[VideoEditor] relabelCSV: loaded CSV content (\(content.count) chars)")
+        try relabelCSV(at: url)
+    }
 
-        // If the CSV is completely empty, there is nothing to label.
-        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            //print("[VideoEditor] relabelCSV: CSV is empty, nothing to relabel")
-            return
-        }
-
-        // Normalize line endings to `\n` for simpler processing.
-        content = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-
-        var lines = content.components(separatedBy: "\n")
-        if lines.count == 1 && lines[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            //print("[VideoEditor] relabelCSV: no lines in CSV (only empty line)")
-            return
-        }
-
-        // Parse header.
-        let header = lines[0]
-        var headerColumns = header
-            .split(separator: ",", omittingEmptySubsequences: false)
-            .map { String($0) }
-
-        // Find or create timestamp and label columns.
-        guard let timestampIndex = headerColumns.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "timestamp"
-        }) else {
-            //print("[VideoEditor] relabelCSV: no 'timestamp' column in header: \(headerColumns)")
-            return
-        }
-
-        var labelIndex = headerColumns.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "label"
-        })
-
-        if labelIndex == nil {
-            headerColumns.append("label")
-            labelIndex = headerColumns.count - 1
-        }
-
-        //print("[VideoEditor] relabelCSV: timestampIndex=\(timestampIndex), labelIndex=\(labelIndex ?? -1)")
-
-        lines[0] = headerColumns.joined(separator: ",")
-
-        // Find the first non-empty, parsable timestamp from the data rows.
-        var firstDataTimestamp: Double?
-        for rowIndex in 1..<lines.count {
-            let rawLine = lines[rowIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-            if rawLine.isEmpty { continue }
-            let columns = rawLine
-                .split(separator: ",", omittingEmptySubsequences: false)
-                .map { String($0) }
-            if timestampIndex < columns.count {
-                let timestampString = columns[timestampIndex]
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if let t = Double(timestampString) {
-                    firstDataTimestamp = t
-                    break
-                }
-            }
-        }
-
-//        if let firstDataTimestamp {
-//            print("[VideoEditor] relabelCSV: firstDataTimestamp=\(firstDataTimestamp)")
-//        } else {
-//            print("[VideoEditor] relabelCSV: no parsable data timestamp found; labels may remain unchanged")
-//        }
-
-        // Counters for debugging.
-        var totalRows = 0
-        var chewingRows = 0
-        var nonChewingRows = 0
-        var unparsableRows = 0
-
-        // Process each data row.
-        for rowIndex in 1..<lines.count {
-            let rawLine = lines[rowIndex]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if rawLine.isEmpty {
-                continue
-            }
-
-            totalRows += 1
-
-            var columns = rawLine
-                .split(separator: ",", omittingEmptySubsequences: false)
-                .map { String($0) }
-
-            // Make sure we have enough columns.
-            if columns.count <= max(timestampIndex, labelIndex!) {
-                columns += Array(
-                    repeating: "",
-                    count: max(timestampIndex, labelIndex!) - columns.count + 1
+    private func coarseLabelIntervals() -> [[String: Any]] {
+        let videoEnd = max(0, duration)
+        let normalizedSegments = segments
+            .map { segment in
+                (
+                    start: min(max(0, segment.startTime), videoEnd),
+                    end: min(max(0, segment.endTime), videoEnd)
                 )
             }
+            .filter { $0.end > $0.start }
+            .sorted { $0.start < $1.start }
 
-            let timestampString = columns[timestampIndex]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard let timestamp = Double(timestampString) else {
-                unparsableRows += 1
-                //print("[VideoEditor] relabelCSV: unparsable timestamp at row \(rowIndex): '\(timestampString)'")
-                lines[rowIndex] = columns.joined(separator: ",")
-                continue
+        var intervals: [[String: Any]] = []
+        var cursor = 0.0
+        for segment in normalizedSegments {
+            let start = max(cursor, segment.start)
+            if start > cursor {
+                intervals.append(coarseInterval(cursor, start, "not_chewing"))
             }
-
-            let base = firstDataTimestamp ?? timestamp
-            let relativeTime = max(0, timestamp - base)
-            let state = chewingState(at: relativeTime)
-            let labelValue: String
-            switch state {
-            case .chewing:
-                labelValue = "true"
-                chewingRows += 1
-            case .notChewing:
-                labelValue = "false"
-                nonChewingRows += 1
+            if segment.end > start {
+                intervals.append(coarseInterval(start, segment.end, "chewing"))
+                cursor = segment.end
             }
-
-//            if rowIndex <= 5 {
-//                print("[VideoEditor] relabelCSV row \(rowIndex): timestamp=\(timestamp), base=\(base), relativeTime=\(relativeTime), state=\(state), labelValue=\(labelValue)")
-//            }
-
-            columns[labelIndex!] = labelValue
-            lines[rowIndex] = columns.joined(separator: ",")
         }
-
-        let updatedContent = lines.joined(separator: "\n")
-        try updatedContent.write(to: csvURL, atomically: true, encoding: .utf8)
-        try CanonicalBundleWriter.refreshCoarseLabels(csvURL: csvURL)
-
-       // print("[VideoEditor] relabelCSV finished: totalRows=\(totalRows), chewingRows=\(chewingRows), nonChewingRows=\(nonChewingRows), unparsableRows=\(unparsableRows)")
+        if cursor < videoEnd {
+            intervals.append(coarseInterval(cursor, videoEnd, "not_chewing"))
+        }
+        if intervals.isEmpty {
+            intervals.append(coarseInterval(0, videoEnd, "not_chewing"))
+        }
+        return intervals
     }
 
-    /// Helper that updates labels in the currently bound CSV, if any.
-    private func updateLabelsInBoundCSV() throws {
-        //print("[VideoEditor] updateLabelsInBoundCSV() called")
-        guard let url = boundCSVURL else {
-            //print("[VideoEditor] updateLabelsInBoundCSV: no bound CSV URL")
-            return
-        }
-       // print("[VideoEditor] updateLabelsInBoundCSV: bound URL = \(url.lastPathComponent)")
-        try relabelCSV(at: url)
+    private func coarseInterval(
+        _ start: Double,
+        _ end: Double,
+        _ label: String
+    ) -> [String: Any] {
+        [
+            "start_ts": start,
+            "end_ts": end,
+            "label": label,
+            "source": "human_coarse"
+        ]
     }
     
     // MARK: - Persistence
@@ -478,12 +387,6 @@ final class VideoEditorViewModel: ObservableObject {
         let dto = markers.map { MarkerDTO(id: $0.id, time: $0.time, kind: $0.kind) }
         if let data = try? JSONEncoder().encode(dto) {
             UserDefaults.standard.set(data, forKey: markerStorageKey)
-        }
-        // Whenever markers change, propagate the changes to the bound CSV (if any).
-        do {
-            try updateLabelsInBoundCSV()
-        } catch {
-            //print("[VideoEditor] saveMarkers() – updateLabelsInBoundCSV error: \(error)")
         }
     }
     

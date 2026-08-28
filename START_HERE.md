@@ -1,135 +1,106 @@
 # Start Here
 
-## Which App Do I Use?
+## The Three Apps
 
-1. **ChewSenseCollect** in `apps/collect-ios/`
-   Use this on iPhone when creating a new paired video and AirPods-motion
-   session. It owns recording, synchronization metadata, and coarse
-   chewing/not-chewing labels.
-2. **ChewSenseReview** in `apps/review-macos/`
-   Use this on Mac after the vision pipeline has generated candidates. It is
-   the only authoritative human-review app.
-3. **ChewSenseLive** in `apps/live-ios/`
-   Use this only for motion-only field testing with a promoted model. It does
-   not create ground truth.
+1. `apps/collect-ios`: paired video, AirPods motion, shared-clock metadata,
+   optional local review audio, and coarse chewing intervals.
+2. `apps/review-macos`: authoritative candidate decisions and the final
+   full-video pass.
+3. `apps/live-ios`: promoted motion-only inference and cadence coaching. It
+   does not create ground truth.
 
-Do not use anything under `archive/` as part of the active pipeline.
+Anything under `archive/` is recoverable history, not active source.
 
-## Pipeline
+## Bootstrap And Verify
 
-```text
-Collect
-  -> Vision prediction
-  -> Review chew clips and bite events
-  -> Final full-video pass
-  -> Finalize immutable annotation revision
-  -> CV training manifest + motion training manifest
-  -> Train and evaluate
-  -> Promote
-  -> Live
-```
-
-The two training manifests reference the same recording. Media is not
-duplicated.
-
-## Workspace
-
-The default local workspace is `<repo>/workspace`.
+ChewSense uses the checked-in Python 3.12 lock:
 
 ```bash
-export CHEWSENSE_WORKSPACE="/absolute/path/to/another/workspace"
+uv sync --locked
+./tools/verify fast
+./tools/verify fixture
 ```
 
-The override must be absolute. ChewSenseReview asks you to select the
-workspace directory, not the repository root.
-
-## Open The Apps
-
-```text
-apps/collect-ios/ChewSenseCollect.xcodeproj
-apps/review-macos/ChewSenseReview.xcodeproj
-apps/live-ios/ChewSenseLive.xcodeproj
-```
-
-Build schemes:
-
-```text
-ChewSenseCollect
-ChewSenseReview
-ChewSenseLive
-```
-
-## One-Session Smoke Test
-
-Install the local CLIs:
+Apple builds and tests are grouped under:
 
 ```bash
-python3 -m pip install -e pipelines/vision -e pipelines/motion
+./tools/verify apps
 ```
 
-For an existing session in `workspace/sessions/raw/<session_id>`:
+Run all checks with `./tools/verify all`. Physical AirPods behavior remains a
+recorded promotion check and cannot be replaced by CI.
+
+## One Session
+
+For a new Collect bundle at `workspace/sessions/raw/<session_id>`:
 
 ```bash
-chewsense-vision migrate-session \
+python pipelines/vision/run_on_sessions.py --only <session_id>
+chewsense-vision audit-session \
   workspace/sessions/raw/<session_id> \
-  --source-app collect
-
-python3 pipelines/vision/run_on_sessions.py --only <session_id>
+  --derived workspace/derived/vision/<session_id>
 ```
 
-Expected output:
+Vision writes immutable `candidates-vNNNN.json`. Open ChewSenseReview, select
+`workspace/`, decide every candidate, mark unobservable/uncertain events when
+needed, add missed events, and complete the final full-video pass. Review
+saves decisions only and refuses a stale candidate hash.
 
-```text
-workspace/derived/vision/<session_id>/
-  events.json
-  frame_predictions.csv
-  chew_cycles.json
-  motion_aligned_labels.csv
-```
-
-Open ChewSenseReview, select `workspace/`, assess every chew and bite, add
-missed events, complete the full-video pass, and save.
-
-Finalize:
+Then finalize and audit again:
 
 ```bash
 chewsense-vision finalize-session \
   workspace/sessions/raw/<session_id> \
   --derived workspace/derived/vision/<session_id>
+
+chewsense-vision audit-session \
+  workspace/sessions/raw/<session_id> \
+  --derived workspace/derived/vision/<session_id>
 ```
 
-Expected session outputs:
+The mutable `canonical_events.json` is only a pointer to immutable candidate,
+review, and materialized revisions; it records the selected candidate revision
+and hash, not a path to a mutable candidate copy. Motion-row targets are
+derived output.
 
-```text
-annotations/review-vNNNN.json
-annotations/canonical_events.json
-annotations/motion_labels.csv
-manifests/cv_training.json
-manifests/motion_training.json
-```
-
-Train the motion pipeline only from verified sessions:
+To check training lineage without fitting a model:
 
 ```bash
-chewsense-motion from-raw --no-wandb
+chewsense-motion materialize-temporal \
+  --input workspace/sessions/raw \
+  --output workspace/derived/motion/manual-temporal-check
 ```
 
-Inspect registry and promotion state:
+Training and locked registry evaluation begin only after the dataset gates in
+[docs/RUNBOOK.md](docs/RUNBOOK.md) are satisfied.
+
+## Legacy Recordings
+
+Never train individual chews from old event labels. Stage recoverable exact
+video/motion pairs non-destructively, then migrate explicitly:
 
 ```bash
-chewsense-motion registry --latest
-chewsense-motion status
+python tools/stage_legacy_pairs.py /path/to/legacy/media
+python tools/stage_legacy_pairs.py /path/to/legacy/media \
+  --destination workspace/sessions/raw --apply
+
+chewsense-vision migrate-session \
+  workspace/sessions/raw/<session_id> \
+  --source-app legacy_import
 ```
 
-## Before Using Live
+The wrapper remains unverified. Missing coarse labels require a full coarse
+review; an old all-false row label is the only case treated as explicit
+all-negative.
 
-Do not deploy a replacement model until it passes locked evaluation and the
-promotion requirements in [docs/ROADMAP.md](docs/ROADMAP.md). A development
-override is for non-production device testing only.
+## Before Live Promotion
 
-## What Needs Attention Next?
+The first release is personalized to one wearer. Do not deploy a temporal
+checkpoint until every initial chew gate in [docs/ROADMAP.md](docs/ROADMAP.md)
+passes on locked chronological sessions and a physical-AirPods smoke check is
+recorded.
 
-The ordered blockers are maintained in
-[docs/BLOCKERS.md](docs/BLOCKERS.md). Current operational truth is in
-[docs/STATUS.md](docs/STATUS.md); commands and troubleshooting are in
-[docs/RUNBOOK.md](docs/RUNBOOK.md).
+Live requires a meal texture (`soft`, `mixed`, `hard`, or `unknown`). It may
+show individual chews, cadence, coverage, and uncertain time only when the
+temporal chew capability is promoted. Bite and chews-per-bite UI remains
+hidden until the separately promoted food-entry capability passes.

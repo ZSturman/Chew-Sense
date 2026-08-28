@@ -18,17 +18,17 @@ struct HelpPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     section(title: "The basics") {
-                        Text("Each chew has three markers — Start, Peak, End. The Start is when the jaw begins to close, Peak is teeth fully closed, End is teeth fully open again.")
+                        Text("Each chew is one closed → open → closed cycle. Closed start is the rest position immediately before opening, Maximum open is the largest observable jaw opening, and Closed end is the return to rest. Closed end is also the counted chew-event timestamp.")
                     }
 
                     section(title: "Add a chew") {
-                        bullet("Drag horizontally on the chew strip below the video to define a Start → End range. Peak is auto-placed at the midpoint.")
-                        bullet("Or, with no chew selected, press 1 / 2 / 3 to drop Start / Peak / End markers at the playhead and create a chew.")
+                        bullet("Drag horizontally on the chew strip below the video to define a Closed start → Closed end range. Maximum open is initially placed at the midpoint.")
+                        bullet("Or, with no chew selected, press 1 / 2 / 3 to drop Closed start / Maximum open / Closed end markers at the playhead and create a chew.")
                     }
 
                     section(title: "Adjust an existing chew") {
                         bullet("Click a chew block to select and seek to it.")
-                        bullet("Drag a marker to fine-tune: green ▶ Start · yellow ◆ Peak · red ◀ End.")
+                        bullet("Drag a marker to fine-tune: green ▶ Closed start · yellow ◆ Maximum open · red ◀ Closed end.")
                         bullet("With a chew selected, press 1, 2, or 3 to snap that marker to the playhead.")
                         bullet("Hold ⌥ + ←/→ to nudge the last-touched marker by one frame.")
                     }
@@ -48,13 +48,13 @@ struct HelpPanel: View {
                     }
 
                     section(title: "Eating segments") {
-                        bullet("Blue bands behind the chew row are eating episodes. Drag either edge of a band to extend or trim it.")
-                        bullet("Edits persist as flipped_eating_spans in review_overrides.json.")
+                        bullet("Blue bands behind the chew row are synchronized coarse-label evidence. Event Review does not mutate them.")
+                        bullet("If coarse labels are missing, return to coarse review and rerun vision before verifying event candidates.")
                     }
 
-                    section(title: "Verify & advance") {
-                        bullet("Press V to mark the selected chew verified and jump to the next unverified one.")
-                        bullet("Shift+V toggles the verified state without advancing.")
+                    section(title: "Decide & advance") {
+                        bullet("Press V to accept the selected chew and jump to the next pending candidate.")
+                        bullet("Use Unobservable when the anchors cannot be seen, and Uncertain when the video is ambiguous. Both decisions exclude the cycle from phase supervision.")
                         bullet("Press M to open the Review Queue: a focused, looped per-chew review with progress.")
                     }
 
@@ -95,7 +95,7 @@ struct HelpPanel: View {
     private func hotkeyTable() -> some View {
         let rows: [(String, String)] = [
             ("Space", "Play / pause"),
-            ("1 / 2 / 3", "Set Start / Peak / End at playhead"),
+            ("1 / 2 / 3", "Set Closed start / Maximum open / Closed end"),
             ("Drag on strip", "Create new chew"),
             ("A", "Add chew at playhead (0.4 s wide)"),
             ("D / Delete", "Delete selected chew"),
@@ -105,16 +105,16 @@ struct HelpPanel: View {
             ("← / →", "Step ± one frame"),
             ("⇧ ← / ⇧ →", "Skip ± 0.25 s"),
             ("⌥ ← / ⌥ →", "Nudge last marker ± one frame"),
-            ("S+← / S+→", "Nudge Start ± 1 frame (⇧ for 5)"),
-            ("P+← / P+→", "Nudge Peak ± 1 frame (⇧ for 5)"),
-            ("E+← / E+→", "Nudge End ± 1 frame (⇧ for 5)"),
+            ("S+← / S+→", "Nudge Closed start ± 1 frame (⇧ for 5)"),
+            ("P+← / P+→", "Nudge Maximum open ± 1 frame (⇧ for 5)"),
+            ("E+← / E+→", "Nudge Closed end ± 1 frame (⇧ for 5)"),
             ("J / L", "−1 s / +1 s"),
             ("R", "Toggle loop on selected chew"),
             ("O", "Toggle Raw / Annotated reference video"),
             ("= / − / 0", "Zoom in / out / fit"),
             ("F", "Focus selected chew"),
-            ("V", "Verify selected chew & advance"),
-            ("⇧V", "Toggle verified (no advance)"),
+            ("V", "Accept selected chew & advance"),
+            ("⇧V", "Return decision to pending / accept"),
             ("M / ⌘M", "Open review queue"),
             ("⌘Z / ⇧⌘Z", "Undo / redo"),
             ("⌘S", "Save"),

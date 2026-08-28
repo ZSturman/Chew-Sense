@@ -20,6 +20,10 @@ final class DebugVideoRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private var stopCompletion: ((Result<URL, Error>) -> Void)?
 
     private(set) var outputURL: URL?
+    /// Host-monotonic timestamp captured by the delegate when the movie file
+    /// actually begins recording. Core Motion timestamps use the same uptime
+    /// domain, so this is the canonical video-clock origin for Live bundles.
+    private(set) var recordingStartHostTime: TimeInterval?
 
     var exposedSession: AVCaptureSession { session }
 
@@ -67,6 +71,7 @@ final class DebugVideoRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
 
             try? FileManager.default.removeItem(at: url)
             self.outputURL = url
+            self.recordingStartHostTime = nil
 
             if !self.session.isRunning {
                 self.session.startRunning()
@@ -114,6 +119,14 @@ final class DebugVideoRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             }
 
             self.stopCompletion = completion
+            // Refine the delegate-time estimate with the media duration at
+            // the exact host time stop was requested. Final session artifacts
+            // are written only after this value is frozen.
+            let recordedSeconds = self.movieOutput.recordedDuration.seconds
+            if recordedSeconds.isFinite, recordedSeconds > 0 {
+                self.recordingStartHostTime =
+                    ProcessInfo.processInfo.systemUptime - recordedSeconds
+            }
             self.movieOutput.stopRecording()
         }
     }
@@ -215,6 +228,7 @@ final class DebugVideoRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
         session.commitConfiguration()
         isConfigured = false
         outputURL = nil
+        recordingStartHostTime = nil
     }
 
     // MARK: - AVCaptureFileOutputRecordingDelegate
@@ -229,6 +243,7 @@ final class DebugVideoRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     ) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.recordingStartHostTime = ProcessInfo.processInfo.systemUptime
             let cb = self.startCompletion
             self.startCompletion = nil
             print("[DebugVideoRecorder] recording started → \(fileURL.lastPathComponent)")

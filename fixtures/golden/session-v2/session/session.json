@@ -1,0 +1,52 @@
+{
+  "active_model_ids": {
+    "food_entry_proposal": "golden-food-v1",
+    "vision_cycle": "golden-fused-v1"
+  },
+  "annotation_revision": 0,
+  "audio": {
+    "enabled": false,
+    "permission": "declined"
+  },
+  "capture": {
+    "duration_s": 3.2,
+    "fps": 30.0,
+    "interrupted": false,
+    "interruption_count": 0,
+    "largest_motion_sample_gap_s": 0.2,
+    "motion_sample_gap_count": 0,
+    "sensor_rate_hz": 5.0
+  },
+  "clock_sync": {
+    "confidence": "high",
+    "drift_status": "stable",
+    "estimated_drift_ppm": 0.0,
+    "first_motion_host_time_s": 100.2,
+    "method": "shared_host_clock",
+    "motion_to_video_offset_s": 0.2,
+    "time_domain": "host_monotonic",
+    "video_clock_origin_host_time_s": 100.0,
+    "video_start_host_time_s": 100.0
+  },
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "legacy_review_required": false,
+  "motion": {
+    "media_type": "motion_csv",
+    "path": "motion.csv",
+    "sha256": "f4390f92dcf7e6be8e0cb257e118d4cd0024deeb07ec49c3db359542f05cad40"
+  },
+  "quality": {
+    "motion_present": true,
+    "motion_samples": 16,
+    "notes": ["Privacy-safe synthetic golden session."],
+    "video_present": false
+  },
+  "schema_version": "2.0.0",
+  "session_id": "golden-session-v2",
+  "source_app": "collect",
+  "source_app_version": "golden",
+  "status": "in_review",
+  "updated_at": "2026-01-01T00:00:00+00:00",
+  "video": null,
+  "wearer_id": "golden-wearer"
+}

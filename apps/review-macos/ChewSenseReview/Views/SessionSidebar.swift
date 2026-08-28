@@ -64,17 +64,19 @@ struct SessionSidebar: View {
 
     private func statusLabel(_ s: Session.Status) -> String {
         switch s {
-        case .auto: "auto"
+        case .candidates: "candidates"
         case .inReview: "in review"
         case .verified: "verified"
+        case .migrationRequired: "migrate v1"
         }
     }
 
     private func statusColor(_ s: Session.Status) -> Color {
         switch s {
-        case .auto: .gray
+        case .candidates: .gray
         case .inReview: .yellow
         case .verified: .green
+        case .migrationRequired: .orange
         }
     }
 }

@@ -12,7 +12,7 @@ struct WorkspacePaths {
 }
 
 struct Session: Identifiable, Hashable {
-    enum Status: String { case auto, inReview = "in-review", verified }
+    enum Status: String { case candidates, inReview = "in-review", verified, migrationRequired = "migration-required" }
 
     let id: String
     let rawDir: URL
@@ -21,8 +21,8 @@ struct Session: Identifiable, Hashable {
     let annotatedVideoURL: URL?
     let framePredictionsCSV: URL?
     let motionCSV: URL?
-    let alignedCSV: URL
-    let chewCyclesJSON: URL
+    let alignedCSV: URL?
+    let candidatesJSON: URL?
     let overridesURL: URL
     let status: Status
 }

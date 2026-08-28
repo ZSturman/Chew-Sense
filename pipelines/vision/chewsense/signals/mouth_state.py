@@ -22,9 +22,8 @@ closed``. Each cycle is classified as one of:
 - ``ambiguous`` — neither test is decisive; still emitted but flagged.
 
 Cycles are rejected if a large fraction of their frames overlap with talking,
-occlusion, or unclassified pose. A small "ML refinement" hook
-(:mod:`models.cycle_classifier`) is consulted but currently echoes the
-heuristic — it is a drop-in seam for Phase 2 training.
+occlusion, or unclassified pose. Their kind is diagnostic telemetry only; the
+reviewed v2 anchors, not this heuristic class, are the supervision authority.
 """
 from __future__ import annotations
 
@@ -33,9 +32,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..events.schema import MouthCycle, MouthCycleKind, MouthState, MouthStateSegment
-from ..models.cycle_classifier import predict_kind
 from .head_pose import trust_channels
-from .jaw_signal import bandpass, build_jaw_proxy, smooth
+from .jaw_signal import bandpass, smooth
 from .mouth_calibration import CalibrationResult
 
 
@@ -259,7 +257,12 @@ def _detect_cycles(
     cfg: dict,
     bs_z: np.ndarray | None = None,
 ) -> list[MouthCycle]:
-    """Walk the FSM trace and emit one ``MouthCycle`` per closed->...->closed run."""
+    """Emit closed/rest -> maximum-open -> closed/rest cycles.
+
+    The start anchor is the closed frame immediately before opening, and the
+    end anchor is the first returned closed frame.  A following cycle may use
+    that same end frame as its start; no artificial one-frame gap is imposed.
+    """
     n = len(codes)
     if n == 0:
         return []
@@ -284,11 +287,12 @@ def _detect_cycles(
     cycle_id = 0
     i = 0
     while i < n:
-        # find an 'opening' that follows a 'closed' frame
-        if int(codes[i]) != opening_code or (i > 0 and int(codes[i - 1]) not in (closed_code, unknown_code)):
+        # Find an opening with an observable closed/rest anchor immediately
+        # before it. Unknown telemetry cannot be promoted to a closed anchor.
+        if i == 0 or int(codes[i]) != opening_code or int(codes[i - 1]) != closed_code:
             i += 1
             continue
-        start_idx = i
+        start_idx = i - 1
         # walk until we return to 'closed' or hit 'unknown' / EOF
         j = i + 1
         saw_open_or_closing = False
@@ -376,12 +380,6 @@ def _detect_cycles(
             "pose_other_overlap": pose_other_overlap,
             "heuristic_kind": kind,
         }
-
-        # ML refinement hook (stub today)
-        refined_kind, refined_conf = predict_kind(evidence, cfg)
-        if refined_kind is not None:
-            kind = refined_kind
-            confidence = refined_conf if refined_conf is not None else confidence
 
         cycle_id += 1
         cycles.append(MouthCycle(

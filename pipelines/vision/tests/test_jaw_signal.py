@@ -1,10 +1,10 @@
-"""Synthetic-signal sanity checks for the chew detector."""
+"""Synthetic-signal sanity checks for jaw debug telemetry."""
 from __future__ import annotations
 
 import numpy as np
 
 from chewsense.config import load_config
-from chewsense.signals.jaw_signal import bandpass, detect_chews, smooth
+from chewsense.signals.jaw_signal import bandpass, smooth
 
 
 def _make_chew_signal(fps: float, n_cycles: int, freq_hz: float = 1.5,
@@ -18,15 +18,15 @@ def _make_chew_signal(fps: float, n_cycles: int, freq_hz: float = 1.5,
     return sig.astype(np.float32), t
 
 
-def test_detect_chews_matches_cycle_count():
+def test_smoothing_and_bandpass_preserve_debug_signal_shape():
     cfg = load_config()
     fps = 30.0
     n_cycles = 8
     sig, _ = _make_chew_signal(fps, n_cycles)
     s = smooth(sig, cfg)
     bp = bandpass(s, fps, cfg)
-    cands = detect_chews(s, bp, fps, cfg)
-    # Bandpass edges trim a couple of cycles; allow ±3
-    assert n_cycles - 3 <= len(cands) <= n_cycles + 1, len(cands)
-    # Amplitudes should all be positive
-    assert all(c.amplitude > 0 for c in cands)
+    assert s.shape == sig.shape
+    assert bp.shape == sig.shape
+    assert np.isfinite(s).all()
+    assert np.isfinite(bp).all()
+    assert float(np.max(np.abs(bp))) > 0.001

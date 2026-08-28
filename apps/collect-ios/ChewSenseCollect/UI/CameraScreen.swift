@@ -32,6 +32,9 @@ struct CameraScreen: View {
             VStack {
                 Spacer()
                 statusBar
+                CollectGuidanceView(
+                    stage: .capture(motionAvailable: controller.isMotionAvailable)
+                )
                 controls
             }
             .padding(.bottom, 24)
@@ -94,6 +97,7 @@ struct CameraScreen: View {
                                 .foregroundColor(.white)
                                 .clipShape(Capsule())
                         }
+                        .accessibilityIdentifier("stopRecordingButton")
                     } else if controller.isPaused {
                         Button(action: { controller.cancelPausedRecording() }) {
                             Text("Cancel")
@@ -114,6 +118,7 @@ struct CameraScreen: View {
                                 .foregroundColor(.white)
                                 .clipShape(Capsule())
                         }
+                        .accessibilityIdentifier("resumeRecordingButton")
                         .disabled(!controller.canResumeRecording)
                     } else {
                         Button(action: { controller.start(withLabel: true) }) {
@@ -156,4 +161,3 @@ struct CameraScreen: View {
         }
     }
 }
-

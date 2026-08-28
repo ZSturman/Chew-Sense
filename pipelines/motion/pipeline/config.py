@@ -6,10 +6,9 @@ Loads defaults from config/defaults.yaml and allows CLI/programmatic overrides.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -39,7 +38,9 @@ class TrainingConfig:
     focal_alpha: float = 0.25
     focal_gamma: float = 2.0
     # Architecture
-    arch: str = "mlp"            # "mlp" | "cnn"
+    # ``mlp`` is retained only for legacy binary eating checkpoints.  New
+    # individual-chew training uses ``causal_tcn`` with raw temporal windows.
+    arch: str = "causal_tcn"     # "causal_tcn" | "mlp" (legacy)
     # Split policy
     allow_unsplit: bool = False  # If True, fall back to session-aware random split
     # Feature-level augmentation (cheap noise on the 12-dim vector)
@@ -52,26 +53,23 @@ class TrainingConfig:
 class FeaturesConfig:
     window_sec: float = 0.75
     step_sec: float = 0.10
-    # Phase 5: when True and chew_phase_sin/cos columns are present in the
-    # transformed CSV, the feature extractor emits an extra 2-D regression
-    # target (per-window mean sin / cos), enabling a two-head ChewNet.
-    extended_chew_phase: bool = False
 
 
 @dataclass
-class ChewPhaseHeadConfig:
-    """Two-head ChewNet configuration (Phase 5).
+class TemporalModelConfig:
+    """CoreML-compatible v2 causal TCN and supervision weights."""
 
-    The chew-phase head is a 2-D regression target ``[sinθ, cosθ]`` aggregated
-    over each feature window. It is jointly trained with the existing eating
-    head via a composite loss ``α · BCE + β · MSE``.
-    """
-    enabled: bool = False
-    eating_weight: float = 1.0   # α — weight on the BCE eating head
-    phase_weight: float = 0.5    # β — weight on the MSE chew-phase head
-    # Only count phase loss on windows where the labeller marks eating
-    # (so silent windows don't drag the regression toward zero).
-    mask_when_not_eating: bool = True
+    enabled: bool = True
+    sample_rate_hz: int = 50
+    context_sec: float = 3.0
+    inference_step_sec: float = 0.10
+    channels: list[int] = field(default_factory=lambda: [24, 24, 32, 32])
+    kernel_size: int = 5
+    dropout: float = 0.10
+    eating_weight: float = 1.0
+    event_weight: float = 2.0
+    phase_weight: float = 0.5
+    confidence_weight: float = 0.25
 
 
 @dataclass
@@ -96,12 +94,15 @@ class RuntimeConfig:
     min_start_windows: int = 3
     min_end_windows: int = 2
 
-    # Chew-stroke / bite segmentation (mirrors BiteDetectorConfig defaults).
-    min_chew_period_sec: float = 0.35  # min seconds between two chew strokes
-    min_gap_sec: float = 1.5           # gap below which two episodes merge
-    min_bite_duration_sec: float = 1.0 # drop episodes shorter than this
-    rushed_chews_per_bite: int = 5     # below this, bite is "rushed"
-    bite_rate_window_sec: float = 300.0  # 5-min rolling window
+    # Temporal event-head decoder. Phase never drives counting.
+    chew_event_threshold: float = 0.5
+    min_gap_coverage: float = 0.8
+    event_refractory_sec: float = 0.25
+    confident_event_threshold: float = 0.5
+
+    # Diagnostic eating-bout telemetry. These values never define food entry.
+    bout_merge_gap_sec: float = 1.5
+    min_bout_duration_sec: float = 1.0
 
 
 @dataclass
@@ -128,19 +129,6 @@ class CollectionConfig:
 
 
 @dataclass
-class MouthShapeConfig:
-    """Configuration for mouth shape regression mode."""
-    enabled: bool = False
-    parameters: list[str] = field(default_factory=lambda: [
-        "mouth_openness", "mouth_width", "jaw_displacement", "lip_compression"
-    ])
-    num_outputs: int = 4
-    video_fps: float = 30.0
-    interpolation: str = "linear"
-    temporal_smooth_sigma: float = 0.0
-
-
-@dataclass
 class WandbConfig:
     project: str = "chewsense"
     entity: Optional[str] = None
@@ -156,8 +144,7 @@ class PipelineConfig:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     collection: CollectionConfig = field(default_factory=CollectionConfig)
-    mouth_shape: MouthShapeConfig = field(default_factory=MouthShapeConfig)
-    chew_phase_head: ChewPhaseHeadConfig = field(default_factory=ChewPhaseHeadConfig)
+    temporal_model: TemporalModelConfig = field(default_factory=TemporalModelConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     
     # Paths (set at runtime)
@@ -194,7 +181,6 @@ class PipelineConfig:
             "features": {
                 "window_sec": self.features.window_sec,
                 "step_sec": self.features.step_sec,
-                "extended_chew_phase": self.features.extended_chew_phase,
             },
             "soft_labels": {
                 "transition_sec": self.soft_labels.transition_sec,
@@ -211,6 +197,12 @@ class PipelineConfig:
                 "low_threshold": self.runtime.low_threshold,
                 "min_start_windows": self.runtime.min_start_windows,
                 "min_end_windows": self.runtime.min_end_windows,
+                "chew_event_threshold": self.runtime.chew_event_threshold,
+                "min_gap_coverage": self.runtime.min_gap_coverage,
+                "event_refractory_sec": self.runtime.event_refractory_sec,
+                "confident_event_threshold": self.runtime.confident_event_threshold,
+                "bout_merge_gap_sec": self.runtime.bout_merge_gap_sec,
+                "min_bout_duration_sec": self.runtime.min_bout_duration_sec,
             },
             "collection": {
                 "max_recommendations": self.collection.max_recommendations,
@@ -231,19 +223,18 @@ class PipelineConfig:
                     for target in self.collection.targets
                 ],
             },
-            "mouth_shape": {
-                "enabled": self.mouth_shape.enabled,
-                "parameters": self.mouth_shape.parameters,
-                "num_outputs": self.mouth_shape.num_outputs,
-                "video_fps": self.mouth_shape.video_fps,
-                "interpolation": self.mouth_shape.interpolation,
-                "temporal_smooth_sigma": self.mouth_shape.temporal_smooth_sigma,
-            },
-            "chew_phase_head": {
-                "enabled": self.chew_phase_head.enabled,
-                "eating_weight": self.chew_phase_head.eating_weight,
-                "phase_weight": self.chew_phase_head.phase_weight,
-                "mask_when_not_eating": self.chew_phase_head.mask_when_not_eating,
+            "temporal_model": {
+                "enabled": self.temporal_model.enabled,
+                "sample_rate_hz": self.temporal_model.sample_rate_hz,
+                "context_sec": self.temporal_model.context_sec,
+                "inference_step_sec": self.temporal_model.inference_step_sec,
+                "channels": self.temporal_model.channels,
+                "kernel_size": self.temporal_model.kernel_size,
+                "dropout": self.temporal_model.dropout,
+                "eating_weight": self.temporal_model.eating_weight,
+                "event_weight": self.temporal_model.event_weight,
+                "phase_weight": self.temporal_model.phase_weight,
+                "confidence_weight": self.temporal_model.confidence_weight,
             },
         }
 
@@ -295,29 +286,7 @@ def load_config(config_path: Optional[Path] = None) -> PipelineConfig:
     collection.targets = collection_targets
     wandb = WandbConfig(**data.get("wandb", {}))
 
-    ms_data = data.get("mouth_shape", {})
-    default_mouth_params = [
-        "mouth_openness",
-        "mouth_width",
-        "jaw_displacement",
-        "lip_compression",
-    ]
-    mouth_shape = MouthShapeConfig(
-        enabled=ms_data.get("enabled", False),
-        parameters=ms_data.get("parameters", default_mouth_params),
-        num_outputs=ms_data.get("num_outputs", 4),
-        video_fps=ms_data.get("video_fps", 30.0),
-        interpolation=ms_data.get("interpolation", "linear"),
-        temporal_smooth_sigma=ms_data.get("temporal_smooth_sigma", 0.0),
-    )
-
-    cph_data = data.get("chew_phase_head", {})
-    chew_phase_head = ChewPhaseHeadConfig(
-        enabled=cph_data.get("enabled", False),
-        eating_weight=cph_data.get("eating_weight", 1.0),
-        phase_weight=cph_data.get("phase_weight", 0.5),
-        mask_when_not_eating=cph_data.get("mask_when_not_eating", True),
-    )
+    temporal_model = TemporalModelConfig(**data.get("temporal_model", {}))
 
     return PipelineConfig(
         training=training,
@@ -326,8 +295,7 @@ def load_config(config_path: Optional[Path] = None) -> PipelineConfig:
         evaluation=evaluation,
         runtime=runtime,
         collection=collection,
-        mouth_shape=mouth_shape,
-        chew_phase_head=chew_phase_head,
+        temporal_model=temporal_model,
         wandb=wandb,
     )
 

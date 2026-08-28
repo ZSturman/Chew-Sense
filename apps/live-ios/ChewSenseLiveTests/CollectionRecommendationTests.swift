@@ -8,6 +8,12 @@ import XCTest
 
 @MainActor
 final class CollectionRecommendationTests: XCTestCase {
+    func testGuidanceKeepsGroundTruthOutOfLiveCapture() {
+        XCTAssertEqual(LiveGuidanceStage.prepare.title, "Prepare a field test")
+        XCTAssertTrue(LiveGuidanceStage.record.nextStep.contains("does not create ground truth"))
+        XCTAssertTrue(LiveGuidanceStage.export.doneWhen.contains("Mac pipeline"))
+    }
+
     override func setUp() {
         super.setUp()
         clearConfigurationDefaults()

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 struct CaptureTimingSnapshot {
@@ -6,11 +7,18 @@ struct CaptureTimingSnapshot {
     var firstMotionHostTime: Double?
     var lastMotionHostTime: Double?
     var motionSampleCount: Int
+    var motionSampleGapCount: Int
+    var largestMotionSampleGap: Double?
+    var interrupted: Bool
+    var interruptionCount: Int
+    var reviewAudioEnabled: Bool
+    var reviewAudioPermission: String
+    var reviewAudioPath: String?
 }
 
 enum CanonicalBundleWriter {
-    private static let bundleSchemaVersion = "1.0.0"
-    private static let annotationSchemaVersion = "1.0.0"
+    private static let bundleSchemaVersion = CanonicalCaptureContract.schemaVersion
+    private static let annotationSchemaVersion = CanonicalCaptureContract.schemaVersion
 
     static func writeInitialBundle(
         videoURL: URL,
@@ -26,7 +34,7 @@ enum CanonicalBundleWriter {
             ?? 0
         let method = timing.videoStartHostTime != nil
             ? "shared_host_clock"
-            : "legacy_first_motion_fallback"
+            : "capture_clock_fallback"
         let confidence = timing.videoStartHostTime != nil ? "high" : "low"
         let motionDuration: Double? = {
             let first = timing.firstMotionHostTime
@@ -34,61 +42,102 @@ enum CanonicalBundleWriter {
             guard let first, let last else { return nil }
             return max(0, last - first)
         }()
+        let motionExtentFromVideoOrigin: Double? = timing.lastMotionHostTime.map {
+            max(0, $0 - videoOrigin)
+        }
         let sensorRate: Double? = {
             guard let duration = motionDuration, duration > 0 else { return nil }
             return Double(max(0, timing.motionSampleCount - 1)) / duration
         }()
+        let videoDuration: Double? = {
+            let seconds = CMTimeGetSeconds(AVURLAsset(url: videoURL).duration)
+            return seconds.isFinite && seconds > 0
+                ? seconds
+                : motionExtentFromVideoOrigin
+        }()
+        let audioURL = timing.reviewAudioPath.map { folder.appendingPathComponent($0) }
+        let audioHash = try audioURL.map { try CanonicalCaptureContract.sha256(of: $0) }
         let appVersion = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "unknown"
 
-        let manifest: [String: Any] = [
-            "schema_version": bundleSchemaVersion,
-            "session_id": folder.lastPathComponent,
-            "wearer_id": "local-user",
-            "source_app": "collect",
-            "source_app_version": appVersion,
-            "activity": isEating == true ? "eating" : isEating == false ? "not_eating" : "unknown",
-            "status": isEating == false ? "coarse_labeled" : "collected",
-            "created_at": now,
-            "updated_at": now,
-            "video": [
-                "path": videoURL.lastPathComponent,
-                "media_type": "video"
-            ],
-            "motion": [
-                "path": motionURL.lastPathComponent,
-                "media_type": "motion_csv"
-            ],
-            "clock_sync": compact([
-                "time_domain": "host_monotonic",
-                "video_start_host_time_s": timing.videoStartHostTime,
-                "first_video_frame_host_time_s": timing.firstVideoFrameHostTime,
-                "first_motion_host_time_s": timing.firstMotionHostTime,
-                "motion_to_video_offset_s": videoOrigin,
-                "estimated_drift_ppm": 0.0,
-                "method": method,
-                "confidence": confidence
+        let manifest = CanonicalCaptureContract.manifest(
+            sessionID: folder.lastPathComponent,
+            sourceApp: "collect",
+            sourceAppVersion: appVersion,
+            activity: isEating == true ? "eating" : isEating == false ? "not_eating" : "unknown",
+            status: isEating == false ? "coarse_labeled" : "collected",
+            createdAt: now,
+            video: try CanonicalCaptureContract.mediaReference(
+                url: videoURL,
+                mediaType: "video",
+                includeHash: true
+            ),
+            motion: try CanonicalCaptureContract.mediaReference(
+                url: motionURL,
+                mediaType: "motion_csv",
+                includeHash: true
+            ),
+            audio: CanonicalCaptureContract.compact([
+                "path": timing.reviewAudioPath,
+                "media_type": timing.reviewAudioEnabled ? "audio_m4a" : nil,
+                "purpose": timing.reviewAudioEnabled ? "vad_and_human_review_only" : nil,
+                "shipping_model_eligible": false,
+                "safe_to_delete_after_finalization": true,
+                "sha256": audioHash,
+                "enabled": timing.reviewAudioEnabled,
+                "permission": timing.reviewAudioPermission
             ]),
-            "capture": compact([
-                "fps": 30.0,
-                "sensor_rate_hz": sensorRate,
-                "duration_s": motionDuration,
-                "interrupted": false
-            ]),
-            "quality": [
+            clockSync: CanonicalCaptureContract.clockSync(
+                videoOriginHostTime: videoOrigin,
+                videoStartHostTime: timing.videoStartHostTime,
+                firstVideoFrameHostTime: timing.firstVideoFrameHostTime,
+                firstMotionHostTime: timing.firstMotionHostTime,
+                method: method,
+                confidence: confidence
+            ),
+            capture: CanonicalCaptureContract.capture(
+                fps: 30.0,
+                sensorRateHz: sensorRate,
+                durationSeconds: videoDuration,
+                interrupted: timing.interrupted,
+                interruptionCount: timing.interruptionCount,
+                motionSampleGapCount: timing.motionSampleGapCount,
+                largestMotionSampleGapSeconds: timing.largestMotionSampleGap
+            ),
+            quality: [
                 "video_present": FileManager.default.fileExists(atPath: videoURL.path),
                 "motion_present": FileManager.default.fileExists(atPath: motionURL.path),
+                "review_audio_present": timing.reviewAudioPath != nil,
                 "motion_samples": timing.motionSampleCount,
                 "notes": timing.videoStartHostTime == nil
-                    ? ["Shared host-clock origin was unavailable; verify alignment."]
+                    ? ["Writer start was unavailable; first frame supplied the video-clock origin. Audit before review."]
                     : []
-            ],
-            "active_model_ids": [:],
-            "annotation_revision": 0
-        ]
-        try writeJSON(manifest, to: folder.appendingPathComponent("session.json"))
-        try refreshCoarseLabels(csvURL: motionURL)
+            ]
+        )
+        try CanonicalCaptureContract.writeJSON(
+            manifest,
+            to: folder.appendingPathComponent("session.json")
+        )
+        if isEating == false {
+            // The capture choice is an explicit human all-negative decision.
+            // Keep the acquired motion file immutable and materialize that
+            // decision directly in video-relative time.
+            try writeCoarseLabels(
+                intervals: [[
+                    "start_ts": 0.0,
+                    "end_ts": videoDuration ?? 0.0,
+                    "label": "not_chewing",
+                    "source": "human_coarse"
+                ]],
+                forMotionCSV: motionURL
+            )
+        } else {
+            // Compatibility path for an explicitly pre-labelled CSV. New
+            // positive/unknown captures have no label column and remain
+            // `collected` until the wearer completes coarse review.
+            try refreshCoarseLabels(csvURL: motionURL)
+        }
     }
 
     static func refreshCoarseLabels(csvURL: URL) throws {
@@ -122,12 +171,8 @@ enum CanonicalBundleWriter {
                 ["1", "true", "yes", "chewing", "chew"].contains(value)
             ))
         }
-        let manifestURL = csvURL.deletingLastPathComponent()
-            .appendingPathComponent("session.json")
-        let manifest = try? readJSON(manifestURL)
-        let clockSync = manifest?["clock_sync"] as? [String: Any]
-        let measuredOrigin = clockSync?["motion_to_video_offset_s"] as? Double
-        guard let origin = measuredOrigin ?? samples.first?.time else { return }
+        guard !samples.isEmpty else { return }
+        let origin = try videoClockOrigin(for: csvURL)
 
         var intervals: [[String: Any]] = []
         var start = 0
@@ -140,12 +185,23 @@ enum CanonicalBundleWriter {
                 "start_ts": max(0, samples[start].time - origin),
                 "end_ts": max(0, samples[index - 1].time - origin),
                 "label": samples[start].chewing ? "chewing" : "not_chewing",
-                "source": "human"
+                "source": "human_coarse"
             ])
             start = index
         }
 
+        try writeCoarseLabels(intervals: intervals, forMotionCSV: csvURL)
+    }
+
+    /// Writes human coarse decisions without changing the captured motion
+    /// bytes. Interval timestamps are video-relative by contract.
+    static func writeCoarseLabels(
+        intervals: [[String: Any]],
+        forMotionCSV csvURL: URL
+    ) throws {
+        _ = try videoClockOrigin(for: csvURL)
         let folder = csvURL.deletingLastPathComponent()
+        let manifestURL = folder.appendingPathComponent("session.json")
         let annotations = folder.appendingPathComponent(
             "annotations",
             isDirectory: true
@@ -154,23 +210,36 @@ enum CanonicalBundleWriter {
             at: annotations,
             withIntermediateDirectories: true
         )
-        try writeJSON([
+        try CanonicalCaptureContract.writeJSON([
             "schema_version": annotationSchemaVersion,
+            "artifact_type": "coarse_labels",
             "session_id": folder.lastPathComponent,
             "intervals": intervals
         ], to: annotations.appendingPathComponent("coarse_labels.json"))
 
         if var manifest = try? readJSON(manifestURL) {
-            manifest["status"] = "coarse_labeled"
+            manifest["status"] = "coarse_reviewed"
             manifest["updated_at"] = ISO8601DateFormatter().string(from: Date())
-            try writeJSON(manifest, to: manifestURL)
+            try CanonicalCaptureContract.writeJSON(manifest, to: manifestURL)
         }
     }
 
-    private static func compact(_ dictionary: [String: Any?]) -> [String: Any] {
-        dictionary.reduce(into: [:]) { result, item in
-            if let value = item.value { result[item.key] = value }
+    /// Returns video-relative time zero for absolute host-clock motion rows.
+    /// Version 2 never infers this value from the first motion sample because a
+    /// delayed AirPods sample would shift every human coarse label.
+    static func videoClockOrigin(for csvURL: URL) throws -> Double {
+        let manifestURL = csvURL.deletingLastPathComponent().appendingPathComponent("session.json")
+        let manifest = try readJSON(manifestURL)
+        let schemaVersion = manifest["schema_version"] as? String ?? ""
+        guard schemaVersion == bundleSchemaVersion else {
+            throw BundleError.unsupportedSchema(schemaVersion.isEmpty ? "missing" : schemaVersion)
         }
+        guard let clockSync = manifest["clock_sync"] as? [String: Any],
+              let origin = clockSync["video_clock_origin_host_time_s"] as? Double,
+              origin.isFinite else {
+            throw BundleError.missingVideoClockOrigin
+        }
+        return origin
     }
 
     private static func readJSON(_ url: URL) throws -> [String: Any] {
@@ -178,11 +247,21 @@ enum CanonicalBundleWriter {
         return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
     }
 
-    private static func writeJSON(_ value: Any, to url: URL) throws {
-        let data = try JSONSerialization.data(
-            withJSONObject: value,
-            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        )
-        try data.write(to: url, options: .atomic)
+}
+
+enum BundleError: LocalizedError {
+    case unsupportedSchema(String)
+    case missingVideoClockOrigin
+    case invalidVideoDuration
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedSchema(let version):
+            return "Session schema \(version) is not writable as 2.0.0. Run the explicit migration first."
+        case .missingVideoClockOrigin:
+            return "session.json is missing clock_sync.video_clock_origin_host_time_s; coarse labels were not changed."
+        case .invalidVideoDuration:
+            return "The video duration is unavailable; coarse labels were not saved."
+        }
     }
 }

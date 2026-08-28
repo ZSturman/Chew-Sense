@@ -7,14 +7,14 @@
 //  Operates on the 1–3 Hz acceleration bandpower scalar (feature index 7
 //  in `FeatureExtractor.featureNames` — `chew_bandpower_1_3hz`). Strokes
 //  are emitted at local maxima that exceed a quantile-based threshold
-//  AND are spaced at least `RuntimeConfig.minChewPeriodSec` apart.
+//  AND are spaced at least the legacy heuristic refractory period apart.
 //
 //  This is intentionally light-weight: a small ring buffer of recent
 //  bandpower samples is kept (default 4 s @ 10 Hz feature-step rate ≈
 //  40 samples) and the threshold is `max(meanThresh, qtl(0.6))`.
 //
-//  Outputs are runtime-only `ChewStroke`s with `.heuristic` source —
-//  the BiteReviewView lets the user upgrade them to `.confirmed` later.
+//  Outputs are diagnostic-only `ChewStroke`s with `.heuristic` source. They
+//  never drive coaching or acquire human-reviewed provenance.
 
 import Foundation
 
@@ -36,7 +36,7 @@ final class ChewStrokeCounter {
     private var lastEmitTime: Double = -.infinity
 
     init(
-        minChewPeriodSec: Double = RuntimeConfig.minChewPeriodSec,
+        minChewPeriodSec: Double = RuntimeConfig.legacyHeuristicMinChewPeriodSec,
         bufferCapacity: Int = 60,
         thresholdQuantile: Double = 0.6
     ) {

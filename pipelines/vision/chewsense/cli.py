@@ -7,8 +7,13 @@ from pathlib import Path
 import click
 
 from .config import load_config
-from .pipeline import run as run_pipeline
-from .session_bundle import finalize_session, migrate_legacy_session, migrate_tree
+from .session_bundle import (
+    audit_session,
+    create_candidates_from_events,
+    finalize_session,
+    migrate_legacy_session,
+    migrate_tree,
+)
 
 
 @click.group()
@@ -22,24 +27,15 @@ def cli():
               help="Output directory.")
 @click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None, help="Optional config YAML to override defaults.")
-@click.option("--user", "user_id", type=str, default=None,
-              help="User id for per-user baselines (default: from config).")
-def run(video: Path, out_dir: Path, config_path: Path | None, user_id: str | None):
+def run(video: Path, out_dir: Path, config_path: Path | None):
     """Run the pipeline on VIDEO and write outputs to --out."""
+    from .pipeline import run as run_pipeline
+
     cfg = load_config(config_path)
     out_dir.mkdir(parents=True, exist_ok=True)
-    events = run_pipeline(video, out_dir, cfg, user_id=user_id)
-    q = events.quality
-    line = (f"done: {len(events.episodes)} episodes, "
-            f"{sum(e.chew_count for e in events.episodes)} chews, "
-            f"{sum(e.bite_count for e in events.episodes)} bites")
-    if q is not None:
-        cpb = q.session.mean_chews_per_bite
-        rate = q.session.mean_chew_rate_hz
-        line += f" | mean_cpb={cpb:.1f}" if cpb is not None else ""
-        line += f" | mean_rate={rate:.2f}Hz" if rate is not None else ""
-        if q.session.flags:
-            line += f" | flags={','.join(q.session.flags)}"
+    events = run_pipeline(video, out_dir, cfg)
+    line = (f"done: {len(events.mouth_cycles)} chew-cycle proposals, "
+            f"{len(events.food_entry_proposals)} food-entry proposals")
     click.echo(f"{line} -> {out_dir}")
 
 
@@ -55,51 +51,6 @@ def extract_features_cmd(video: Path, out_path: Path, config_path: Path | None):
     cfg = load_config(config_path)
     p = write_features(video, out_path, cfg)
     click.echo(f"features -> {p}")
-
-
-@cli.command("pseudolabel")
-@click.argument("run_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option("--out", "out_path", type=click.Path(path_type=Path), required=True,
-              help="Output labels.parquet path.")
-@click.option(
-    "--annotations",
-    "annotations_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Verified canonical_events.json; uses human review instead of pseudo-labels.",
-)
-def pseudolabel_cmd(run_dir: Path, out_path: Path, annotations_path: Path | None):
-    """Build per-frame labels from a run, preferring verified review JSON."""
-    from .training.pseudolabel import write_labels
-    p = write_labels(run_dir, out_path, annotations_path=annotations_path)
-    click.echo(f"labels -> {p}")
-
-
-@cli.command("train-chew-head")
-@click.option("--pair", "pairs", multiple=True, required=True,
-              help="features.parquet:labels.parquet (repeatable).")
-@click.option("--out", "out_path", type=click.Path(path_type=Path), required=True,
-              help="Where to write the .pt checkpoint.")
-@click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None)
-@click.option("--epochs", type=int, default=20)
-@click.option("--batch-size", type=int, default=256)
-@click.option("--lr", type=float, default=3e-3)
-def train_chew_head_cmd(pairs, out_path: Path, config_path: Path | None,
-                        epochs: int, batch_size: int, lr: float):
-    """Train the chew-head classifier on (features, pseudo-labels) pairs."""
-    from .training.train import train as train_fn
-    cfg = load_config(config_path)
-    parsed: list[tuple[Path, Path]] = []
-    for p in pairs:
-        if ":" not in p:
-            raise click.BadParameter(f"bad --pair: {p} (expected features:labels)")
-        f, l = p.split(":", 1)
-        parsed.append((Path(f), Path(l)))
-    summary = train_fn(parsed, Path(out_path), cfg,
-                       epochs=epochs, batch_size=batch_size, lr=lr)
-    click.echo(f"trained on {summary['n_train']} windows, "
-               f"final val_acc={summary['history'][-1]['val_acc']:.3f} -> {summary['out_path']}")
 
 
 @cli.command("migrate-session")
@@ -141,19 +92,58 @@ def migrate_tree_cmd(input_root: Path, wearer_id: str, force: bool):
 @click.argument("session_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--derived", "derived_dir",
               type=click.Path(exists=True, file_okay=False, path_type=Path), required=True)
-@click.option("--allow-incomplete", is_flag=True,
-              help="Materialize an in-review revision without admitting it to training.")
-def finalize_session_cmd(session_dir: Path, derived_dir: Path, allow_incomplete: bool):
+def finalize_session_cmd(session_dir: Path, derived_dir: Path):
     """Create an immutable reviewed revision and both training manifests."""
     annotations = finalize_session(
         session_dir,
         derived_dir,
-        require_verified=not allow_incomplete,
     )
     click.echo(
-        f"finalized {annotations.session_id} revision={annotations.revision} "
+        f"finalized {annotations.session_id} revision={annotations.review_revision} "
         f"verified={annotations.verified}"
     )
+
+
+@cli.command("generate-candidates")
+@click.argument("session_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--derived",
+    "derived_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+)
+def generate_candidates_cmd(session_dir: Path, derived_dir: Path):
+    """Create an immutable candidate revision from automatic telemetry."""
+    from .integrations.export_to_pipeline import load_events_json
+
+    events = load_events_json(derived_dir / "events.json")
+    path, artifact = create_candidates_from_events(session_dir, derived_dir, events)
+    click.echo(
+        f"candidates {artifact.session_id} revision={artifact.candidate_revision} "
+        f"sha256={artifact.content_sha256} -> {path}"
+    )
+
+
+@cli.command("audit-session")
+@click.argument("session_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--derived",
+    "derived_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="Vision output directory containing immutable candidates.",
+)
+def audit_session_cmd(session_dir: Path, derived_dir: Path | None):
+    """Read-only validation of a session's clocks, hashes, IDs, and lineage."""
+    if derived_dir is None:
+        from .paths import derived_vision_root
+
+        inferred = derived_vision_root() / session_dir.name
+        derived_dir = inferred if inferred.exists() else None
+    report = audit_session(session_dir, derived_dir)
+    click.echo(json.dumps(report.model_dump(mode="json"), indent=2))
+    if not report.ok:
+        raise click.ClickException("session audit failed")
 
 
 if __name__ == "__main__":

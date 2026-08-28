@@ -41,50 +41,50 @@ def write_outputs(
     if config["export"].get("write_plots", True):
         (out_dir / "plots").mkdir(exist_ok=True)
 
+    # A rerun must not leave obsolete episode/bite truth-looking files beside
+    # the fused telemetry contract.
+    for legacy_name in (
+        "episodes.csv",
+        "chews.csv",
+        "bites.csv",
+        "motion_aligned_labels.csv",
+        "plots/episode_amplitudes.png",
+    ):
+        (out_dir / legacy_name).unlink(missing_ok=True)
+
     # events.json
     with open(out_dir / "events.json", "w") as f:
         json.dump(events.model_dump(), f, indent=2)
 
     # flat events.csv
     rows = []
-    for ep in events.episodes:
+    for cycle in events.mouth_cycles:
         rows.append({
-            "kind": "episode", "id": ep.id, "start_ts": ep.start_ts, "end_ts": ep.end_ts,
-            "confidence": ep.confidence, "extra": json.dumps({
-                "start_reason": ep.start_reason, "end_reason": ep.end_reason,
-                "chew_count": ep.chew_count, "bite_count": ep.bite_count,
-            })
+            "kind": "chew_cycle_proposal",
+            "id": cycle.id,
+            "start_ts": cycle.start_ts,
+            "end_ts": cycle.end_ts,
+            "confidence": cycle.confidence,
+            "extra": json.dumps({
+                "open_peak_ts": cycle.peak_ts,
+                "cycle_kind": cycle.kind,
+                "peak_magnitude": cycle.peak_magnitude,
+                "pose_class": cycle.pose_class,
+            }),
         })
-        for b in ep.bites:
-            rows.append({"kind": "bite", "id": b.id, "start_ts": b.ts, "end_ts": b.ts,
-                         "confidence": b.confidence, "extra": json.dumps({"episode": ep.id})})
-        for c in ep.chews:
-            rows.append({"kind": "chew", "id": c.id, "start_ts": c.start_ts, "end_ts": c.end_ts,
-                         "confidence": c.confidence, "extra": json.dumps({
-                             "episode": ep.id, "peak_ts": c.peak_ts,
-                             "amplitude": c.amplitude, "relative_amplitude": c.relative_amplitude,
-                         })})
-    pd.DataFrame(rows).to_csv(out_dir / "events.csv", index=False)
-
-    # per-table CSVs
-    pd.DataFrame([{
-        "id": ep.id, "start_ts": ep.start_ts, "end_ts": ep.end_ts,
-        "duration_s": ep.duration_s, "start_reason": ep.start_reason,
-        "end_reason": ep.end_reason, "confidence": ep.confidence,
-        "chew_count": ep.chew_count, "bite_count": ep.bite_count,
-    } for ep in events.episodes]).to_csv(out_dir / "episodes.csv", index=False)
-
-    pd.DataFrame([{
-        "id": c.id, "episode": ep.id,
-        "start_ts": c.start_ts, "peak_ts": c.peak_ts, "end_ts": c.end_ts,
-        "duration_s": c.duration_s,
-        "amplitude": c.amplitude, "relative_amplitude": c.relative_amplitude,
-        "confidence": c.confidence,
-    } for ep in events.episodes for c in ep.chews]).to_csv(out_dir / "chews.csv", index=False)
-
-    pd.DataFrame([{
-        "id": b.id, "episode": ep.id, "ts": b.ts, "confidence": b.confidence,
-    } for ep in events.episodes for b in ep.bites]).to_csv(out_dir / "bites.csv", index=False)
+    for proposal in events.food_entry_proposals:
+        rows.append({
+            "kind": "food_entry_proposal",
+            "id": proposal.id,
+            "start_ts": proposal.food_entry_ts,
+            "end_ts": proposal.food_entry_ts,
+            "confidence": proposal.confidence,
+            "extra": json.dumps(proposal.evidence),
+        })
+    pd.DataFrame(
+        rows,
+        columns=["kind", "id", "start_ts", "end_ts", "confidence", "extra"],
+    ).to_csv(out_dir / "events.csv", index=False)
 
     # Phase 1: mouth-state segments + cycles + counts
     pd.DataFrame([{
@@ -112,10 +112,17 @@ def write_outputs(
     with open(out_dir / "cycle_counts.json", "w") as f:
         json.dump(events.cycle_counts.model_dump(), f, indent=2)
 
+    food_entry_rows = [proposal.model_dump() for proposal in events.food_entry_proposals]
+    pd.DataFrame(
+        food_entry_rows,
+        columns=["id", "food_entry_ts", "confidence", "evidence"],
+    ).to_csv(out_dir / "food_entry_proposals.csv", index=False)
+    with open(out_dir / "food_entry_proposals.json", "w") as f:
+        json.dump(food_entry_rows, f, indent=2)
+
     # frame_predictions
-    # Always write CSV (consumed by the Swift CycleReviewer, which has no
-    # parquet reader). Parquet is written too when enabled, for downstream
-    # Python tooling.
+    # CSV remains the portable synchronized evidence stream for review.
+    # Parquet is also written when enabled for downstream Python tooling.
     fr_df = pd.DataFrame([r.model_dump() for r in frame_records])
     fr_df.to_csv(out_dir / "frame_predictions.csv", index=False)
     if config["export"].get("write_parquet", True):
@@ -145,9 +152,8 @@ def write_outputs(
         "video_meta": video_meta,
         "config": config,
         "n_frames_recorded": len(frame_records),
-        "n_episodes": len(events.episodes),
-        "n_chews": sum(ep.chew_count for ep in events.episodes),
-        "n_bites": sum(ep.bite_count for ep in events.episodes),
+        "n_chew_cycle_proposals": len(events.mouth_cycles),
+        "n_food_entry_proposals": len(events.food_entry_proposals),
     }
     with open(out_dir / "debug" / "manifest.json", "w") as f:
         json.dump(manifest, f, indent=2, default=str)
@@ -158,12 +164,12 @@ def write_outputs(
         "video_id": events.video_id,
         "duration_s": events.duration_s,
         "fps": events.fps,
-        "episodes": events.model_dump()["episodes"],
         "non_eating_mouth_spans": events.model_dump()["non_eating_mouth_spans"],
         "occlusion_spans": events.model_dump()["occlusion_spans"],
         "drinking_spans": events.model_dump()["drinking_spans"],
         "mouth_state_segments": events.model_dump()["mouth_state_segments"],
         "mouth_cycles": events.model_dump()["mouth_cycles"],
+        "food_entry_proposals": events.model_dump()["food_entry_proposals"],
         "cycle_counts": events.model_dump()["cycle_counts"],
         "signal_quality": events.signal_quality.model_dump() if events.signal_quality else None,
     }
@@ -181,28 +187,19 @@ def _write_plots(plot_dir: Path, signals: dict, events: VideoEvents) -> None:
         ax.plot(signals["ts"], signals["jaw_open_smooth"], label="jaw_open_smooth", lw=0.8)
         if "jaw_open_bp" in signals:
             ax.plot(signals["ts"], signals["jaw_open_bp"], label="jaw_open_bp", lw=0.6, alpha=0.7)
-        for ep in events.episodes:
-            ax.axvspan(ep.start_ts, ep.end_ts, alpha=0.15, color="green")
-            for c in ep.chews:
-                ax.axvline(c.peak_ts, color="orange", lw=0.5, alpha=0.5)
-            for b in ep.bites:
-                ax.axvline(b.ts, color="purple", lw=1.0, alpha=0.7)
+        for cycle in events.mouth_cycles:
+            ax.axvspan(cycle.start_ts, cycle.end_ts, alpha=0.08, color="green")
+            ax.axvline(cycle.peak_ts, color="orange", lw=0.5, alpha=0.5)
+        for proposal in events.food_entry_proposals:
+            ax.axvline(
+                proposal.food_entry_ts,
+                color="purple",
+                lw=1.0,
+                alpha=0.7,
+            )
         ax.set_xlabel("time (s)")
         ax.set_ylabel("jaw open (norm)")
         ax.legend(loc="upper right", fontsize=8)
         fig.tight_layout()
         fig.savefig(plot_dir / "jaw_signal.png", dpi=120)
-        plt.close(fig)
-
-    # episode amplitudes
-    if events.episodes:
-        fig, ax = plt.subplots(figsize=(10, 3))
-        for ep in events.episodes:
-            amps = [c.amplitude for c in ep.chews]
-            ax.plot(range(len(amps)), amps, marker="o", label=ep.id, ms=3, lw=0.8)
-        ax.set_xlabel("chew index in episode")
-        ax.set_ylabel("amplitude (norm)")
-        ax.legend(fontsize=7)
-        fig.tight_layout()
-        fig.savefig(plot_dir / "episode_amplitudes.png", dpi=120)
         plt.close(fig)

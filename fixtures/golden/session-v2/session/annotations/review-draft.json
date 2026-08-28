@@ -1,0 +1,54 @@
+{
+  "added_chews": [
+    {
+      "confidence": 1.0,
+      "disposition": "added",
+      "end_closed_ts": 3.0,
+      "id": "manual-ch-0001",
+      "note": "Missed by proposal generator",
+      "open_peak_ts": 2.8,
+      "start_closed_ts": 2.6
+    }
+  ],
+  "added_food_entries": [
+    {
+      "confidence": 1.0,
+      "disposition": "added",
+      "food_entry_ts": 2.58,
+      "id": "manual-fe-0001",
+      "note": "Visible food entry"
+    }
+  ],
+  "artifact_type": "review_draft",
+  "candidate_revision": 1,
+  "candidate_sha256": "458b0545db2646bccdd2f5b9e3e09d8c2d93371f1a4ab5e82c9cbc4873195e11",
+  "chew_decisions": [
+    {"candidate_id": "ch_0000", "disposition": "accepted"},
+    {
+      "candidate_id": "ch_0001",
+      "disposition": "edited",
+      "end_closed_ts": 1.02,
+      "open_peak_ts": 0.82,
+      "start_closed_ts": 0.6
+    },
+    {"candidate_id": "ch_0002", "disposition": "rejected"},
+    {"candidate_id": "ch_0003", "disposition": "unobservable"},
+    {"candidate_id": "ch_0004", "disposition": "uncertain"}
+  ],
+  "food_entry_decisions": [
+    {"candidate_id": "fe_0000", "disposition": "accepted"},
+    {
+      "candidate_id": "fe_0001",
+      "disposition": "edited",
+      "food_entry_ts": 1.52
+    },
+    {"candidate_id": "fe_0002", "disposition": "rejected"}
+  ],
+  "full_video_pass_completed": true,
+  "notes": "Exercises accepted, edited, rejected, added, unobservable, and uncertain decisions.",
+  "reviewer": "golden-reviewer",
+  "schema_version": "2.0.0",
+  "session_id": "golden-session-v2",
+  "updated_at": "2026-01-01T00:00:02+00:00",
+  "verified": true
+}

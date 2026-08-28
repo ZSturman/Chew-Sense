@@ -30,6 +30,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000001 /* SharedCapture */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "../shared-capture";
+			sourceTree = "<group>";
+		};
 		EF53B5482EC6B8CC0074ECBB /* ChewSenseCollect */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = ChewSenseCollect;
@@ -75,6 +80,7 @@
 		EF53B53D2EC6B8CC0074ECBB = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000001 /* SharedCapture */,
 				EF53B5482EC6B8CC0074ECBB /* ChewSenseCollect */,
 				EF53B5562EC6B8D00074ECBB /* ChewSenseCollectTests */,
 				EF53B5602EC6B8D00074ECBB /* ChewSenseCollectUITests */,
@@ -108,6 +114,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				A10000000000000000000001 /* SharedCapture */,
 				EF53B5482EC6B8CC0074ECBB /* ChewSenseCollect */,
 			);
 			name = ChewSenseCollect;
@@ -404,6 +411,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Optional microphone access records local review audio for voice-activity filtering and human review. Audio is not used by the shipping motion model.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Motion access is required to capture AirPods motion data for training analysis. This data is stored locally as a .csv file and never leaves your device unless you choose to share it through the share sheet.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -441,6 +449,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Optional microphone access records local review audio for voice-activity filtering and human review. Audio is not used by the shipping motion model.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Motion access is required to capture AirPods motion data for training analysis. This data is stored locally as a .csv file and never leaves your device unless you choose to share it through the share sheet.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

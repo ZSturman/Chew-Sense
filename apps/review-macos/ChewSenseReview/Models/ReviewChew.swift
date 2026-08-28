@@ -9,16 +9,16 @@ enum ChewMarker: String, CaseIterable, Identifiable, Hashable {
 
     var displayName: String {
         switch self {
-        case .start: "Start"
-        case .peak: "Peak"
-        case .end: "End"
+        case .start: "Closed start"
+        case .peak: "Maximum open"
+        case .end: "Closed end"
         }
     }
 }
 
 struct ReviewChew: Identifiable, Hashable {
     enum Source: String, Hashable {
-        case auto
+        case candidate
         case added
         case edited
     }
@@ -29,6 +29,7 @@ struct ReviewChew: Identifiable, Hashable {
     var endTS: Double
     var confidence: Double
     var source: Source
+    var disposition: ReviewDisposition?
 
     var duration: Double { max(0, endTS - startTS) }
 
@@ -39,16 +40,6 @@ struct ReviewChew: Identifiable, Hashable {
     func distance(to videoTime: Double) -> Double {
         if contains(videoTime) { return 0 }
         return min(abs(videoTime - startTS), abs(videoTime - endTS))
-    }
-
-    func asChewEdit(confidence overrideConfidence: Double? = nil) -> ReviewOverrides.ChewEdit {
-        ReviewOverrides.ChewEdit(
-            id: id,
-            startTS: startTS,
-            peakTS: peakTS,
-            endTS: endTS,
-            confidence: overrideConfidence ?? confidence
-        )
     }
 
     func timestamp(for marker: ChewMarker) -> Double {

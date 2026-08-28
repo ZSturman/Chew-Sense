@@ -8,6 +8,10 @@
 import Foundation
 import Combine
 
+private struct LegacyReviewSegmentSummary {
+    let endTime: Double
+}
+
 struct ReviewSessionSummary: Identifiable, Hashable {
     let id: URL
     let sessionURL: URL
@@ -186,7 +190,7 @@ final class SessionLibraryViewModel: ObservableObject {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             return readPredictionSpansFromMotion(url.deletingLastPathComponent().appendingPathComponent("motion.csv"))
         }
-        let table = ReviewCSV.parse(text)
+        let table = SessionCSV.parse(text)
         guard let startIndex = table.header.firstIndex(of: "window_start"),
               let endIndex = table.header.firstIndex(of: "window_end"),
               let stateIndex = table.header.firstIndex(of: "state") else {
@@ -206,7 +210,11 @@ final class SessionLibraryViewModel: ObservableObject {
             return PredictionSpan(
                 startTime: max(0, start - base),
                 endTime: max(0, end - base),
-                isChewing: row[stateIndex].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "chewing"
+                isChewing: ["chewing", "true", "1"].contains(
+                    row[stateIndex]
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                )
             )
         }
 
@@ -216,13 +224,13 @@ final class SessionLibraryViewModel: ObservableObject {
         return spans
     }
 
-    /// Fallback path: synthesize spans from the per-row `label` column on
-    /// `motion.csv` (added at session finalize time).
+    /// Fallback path: synthesize display-only spans from the derived
+    /// `predicted_eating` telemetry column. This is never ground truth.
     private func readPredictionSpansFromMotion(_ motionURL: URL) -> [PredictionSpan] {
         guard let text = try? String(contentsOf: motionURL, encoding: .utf8) else { return [] }
-        let table = ReviewCSV.parse(text)
+        let table = SessionCSV.parse(text)
         guard let timestampIndex = table.header.firstIndex(of: "timestamp"),
-              let labelIndex = table.header.firstIndex(of: "label") else {
+              let labelIndex = table.header.firstIndex(of: "predicted_eating") else {
             return []
         }
         let base = table.rows.compactMap { row -> Double? in
@@ -267,17 +275,24 @@ final class SessionLibraryViewModel: ObservableObject {
         return spans
     }
 
-    private func readReviewSegments(_ url: URL) -> [ReviewSegment] {
+    /// Legacy review files remain visible as migration warnings, but Live no
+    /// longer decodes or edits their label semantics.
+    private func readReviewSegments(_ url: URL) -> [LegacyReviewSegmentSummary] {
         guard let data = try? Data(contentsOf: url),
-              let segments = try? JSONDecoder().decode([ReviewSegment].self, from: data) else {
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return []
         }
-        return segments
+        return rows.compactMap { row in
+            guard let end = row["endTime"] as? Double ?? row["end_time"] as? Double else {
+                return nil
+            }
+            return LegacyReviewSegmentSummary(endTime: end)
+        }
     }
 
     private func readMotionDuration(_ url: URL) -> Double {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
-        let table = ReviewCSV.parse(text)
+        let table = SessionCSV.parse(text)
         guard let timestampIndex = table.header.firstIndex(of: "timestamp") else { return 0 }
         let timestamps = table.rows.compactMap { row -> Double? in
             guard timestampIndex < row.count else { return nil }

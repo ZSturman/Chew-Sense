@@ -184,7 +184,7 @@ struct ChewStripView: View {
             let xp = xFor(chew.peakTS, range: range, span: span, width: width)
             let isSelected = state.selectedChewID == chew.id
             let isVerified = state.isVerified(id: chew.id)
-            let color = sourceColor(chew.source)
+            let color = reviewColor(chew)
 
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 4)
@@ -203,9 +203,9 @@ struct ChewStripView: View {
 
                 // Verified check
                 if isVerified {
-                    Image(systemName: "checkmark.seal.fill")
+                    Image(systemName: decisionSymbol(chew.disposition))
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.green)
+                        .foregroundStyle(decisionColor(chew.disposition))
                         .background(Circle().fill(Color.black.opacity(0.7)).frame(width: 16, height: 16))
                         .offset(x: (x0 + x1) / 2 - 8, y: 0)
                 }
@@ -253,14 +253,14 @@ struct ChewStripView: View {
         state.chews.first { $0.contains(t) }
     }
 
-    private func bite(near t: Double) -> ReviewBite? {
+    private func bite(near t: Double) -> ReviewFoodEntry? {
         state.bites.min(by: { abs($0.ts - t) < abs($1.ts - t) }).flatMap {
             abs($0.ts - t) <= 0.10 ? $0 : nil
         }
     }
 
     private func biteMarker(
-        _ bite: ReviewBite,
+        _ bite: ReviewFoodEntry,
         range: ClosedRange<Double>,
         span: Double,
         width: CGFloat
@@ -269,13 +269,22 @@ struct ChewStripView: View {
         let selected = state.selectedBiteID == bite.id
         return VStack(spacing: 0) {
             Circle()
-                .fill(state.isBiteVerified(id: bite.id) ? Color.green : Color.purple)
+                .fill(foodEntryColor(state.foodEntryDisposition(for: bite.id)))
                 .frame(width: selected ? 10 : 7, height: selected ? 10 : 7)
             Rectangle()
                 .fill(Color.purple)
                 .frame(width: selected ? 2 : 1, height: 55)
         }
         .offset(x: x - 4, y: 2)
+    }
+
+    private func foodEntryColor(_ disposition: ReviewDisposition?) -> Color {
+        switch disposition {
+        case .accepted, .edited, .added: .green
+        case .rejected: .red
+        case .unobservable, .uncertain: .purple
+        case .none: .gray
+        }
     }
 
     // MARK: - Tap
@@ -356,44 +365,66 @@ struct ChewStripView: View {
             }
     }
 
-    private func sourceColor(_ source: ReviewChew.Source) -> Color {
-        switch source {
-        case .auto: .gray
-        case .added: .blue
-        case .edited: .orange
+    private func reviewColor(_ chew: ReviewChew) -> Color {
+        switch chew.disposition {
+        case .rejected: return .red
+        case .unobservable, .uncertain: return .purple
+        default: break
+        }
+        switch chew.source {
+        case .candidate: return .gray
+        case .added: return .blue
+        case .edited: return .orange
+        }
+    }
+
+    private func decisionSymbol(_ disposition: ReviewDisposition?) -> String {
+        switch disposition {
+        case .rejected: "xmark.circle.fill"
+        case .unobservable: "eye.slash.fill"
+        case .uncertain: "questionmark.diamond.fill"
+        default: "checkmark.seal.fill"
+        }
+    }
+
+    private func decisionColor(_ disposition: ReviewDisposition?) -> Color {
+        switch disposition {
+        case .rejected: .red
+        case .unobservable, .uncertain: .purple
+        default: .green
         }
     }
 }
 
 // MARK: - Marker shapes
 
-/// Green right-pointing chevron — Start.
+/// Green right-pointing chevron — closed start.
 struct StartMarker: View {
     var body: some View {
         Triangle(direction: .right)
             .fill(Color.green)
             .overlay(Triangle(direction: .right).stroke(Color.white, lineWidth: 1))
-            .help("Start (green)")
+            .help("Closed start (green)")
     }
 }
 
-/// Yellow diamond — Peak.
+/// Yellow diamond — maximum open.
 struct PeakMarker: View {
     var body: some View {
         Diamond()
             .fill(Color.yellow)
             .overlay(Diamond().stroke(Color.black, lineWidth: 1))
-            .help("Peak (yellow)")
+            .help("Maximum open (yellow)")
     }
 }
 
-/// Red left-pointing chevron — End.
+/// Red left-pointing chevron — closed end / chew event.
 struct EndMarker: View {
     var body: some View {
         Triangle(direction: .left)
             .fill(Color.red)
             .overlay(Triangle(direction: .left).stroke(Color.white, lineWidth: 1))
-            .help("End (red)")
+            .help("Closed end / chew event (red)")
     }
 }
 

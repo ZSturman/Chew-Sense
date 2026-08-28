@@ -3,51 +3,37 @@
 //  ChewSenseLive
 //
 //  CoreML model wrapper for ChewNet inference.
-//  Supports both binary chewing detection and mouth shape estimation.
+//  Supports legacy binary eating detection and the v2 temporal chew model.
 //
 
 import Foundation
 import CoreML
 
-/// Mouth shape state estimated from AirPod motion data.
-/// Values are normalized 0.0–1.0 relative to face dimensions.
-struct MouthShapeState {
-    let mouthOpenness: Double
-    let mouthWidth: Double
-    let jawDisplacement: Double
-    let lipCompression: Double
-    
-    static let neutral = MouthShapeState(
-        mouthOpenness: 0.0,
-        mouthWidth: 0.5,
-        jawDisplacement: 0.0,
-        lipCompression: 0.0
-    )
-}
-
 struct ChewPrediction {
+    let eatingLogit: Double
     let eatingProbability: Double
+    let chewEventLogit: Double?
+    let chewEventProbability: Double?
     let phaseSin: Double?
     let phaseCos: Double?
+    let phaseConfidence: Double?
+    let gapCoverage: Double
 }
 
 /// Wrapper for the ChewNet CoreML model.
 final class ChewModel {
-    
+
     /// Shared singleton instance
     static let shared = ChewModel()
     
     /// The CoreML model
     private let model: ChewNet
     
-    /// Whether this model outputs mouth shape (multi-output) or binary
-    var isMouthShapeMode: Bool {
-        return NormalizationConstants.MODE == "mouth_shape"
+    var isTemporalMode: Bool {
+        NormalizationConstants.MODE == "temporal_tcn"
     }
 
-    var isTwoHeadMode: Bool {
-        return NormalizationConstants.MODE == "two_head"
-    }
+    var capabilities: ModelCapabilities { .bundled }
     
     private init() {
         let config = MLModelConfiguration()
@@ -77,49 +63,88 @@ final class ChewModel {
     /// Run one model invocation and expose the optional reviewed chew-phase
     /// output used to derive individual motion chews.
     func predict(features: [Double]) -> ChewPrediction {
-        guard let inputArray = try? MLMultiArray(shape: [1, NSNumber(value: features.count)], dataType: .float32) else {
-            print("Failed to create MLMultiArray")
-            return ChewPrediction(eatingProbability: 0, phaseSin: nil, phaseCos: nil)
+        predictArray(values: features, shape: [1, NSNumber(value: features.count)])
+    }
+
+    /// Run the v2 raw temporal model. The validity mask is carried through
+    /// normalization unchanged and its coverage is logged with every output.
+    func predictTemporal(window: TemporalModelWindow) -> ChewPrediction {
+        guard isTemporalMode else { return emptyPrediction() }
+        let normalized = NormalizationConstants.normalizeTemporal(window.values)
+        return predictArray(
+            values: normalized,
+            shape: [1, 7, NSNumber(value: TemporalModelWindow.sampleCount)],
+            gapCoverage: window.gapCoverage
+        )
+    }
+
+    private func sigmoid(_ x: Double) -> Double {
+        return 1.0 / (1.0 + exp(-x))
+    }
+
+    private func predictArray(
+        values: [Double],
+        shape: [NSNumber],
+        gapCoverage: Double = 1.0
+    ) -> ChewPrediction {
+        guard let inputArray = try? MLMultiArray(shape: shape, dataType: .float32) else {
+            return emptyPrediction(gapCoverage: gapCoverage)
         }
-        
-        for (i, v) in features.enumerated() {
-            inputArray[i] = NSNumber(value: Float(v))
+        for (index, value) in values.enumerated() {
+            inputArray[index] = NSNumber(value: Float(value))
         }
-        
+
         do {
-            let input = ChewNetInput(input: inputArray)
-            let output = try model.prediction(input: input)
-            let logitArray = output.logit
-            let logit = logitArray[0].doubleValue
-            let phaseSin = isTwoHeadMode && logitArray.count >= 3
-                ? logitArray[1].doubleValue
-                : nil
-            let phaseCos = isTwoHeadMode && logitArray.count >= 3
-                ? logitArray[2].doubleValue
-                : nil
+            let provider = try MLDictionaryFeatureProvider(
+                dictionary: ["input": MLFeatureValue(multiArray: inputArray)]
+            )
+            let result = try model.model.prediction(from: provider)
+            let output = result.featureValue(for: "output")?.multiArrayValue
+                ?? result.featureValue(for: "logit")?.multiArrayValue
+            guard let output, output.count >= 1 else {
+                return emptyPrediction(gapCoverage: gapCoverage)
+            }
+            let eatingLogit = output[0].doubleValue
+            if isTemporalMode, output.count >= 5 {
+                let eventLogit = output[1].doubleValue
+                return ChewPrediction(
+                    eatingLogit: eatingLogit,
+                    eatingProbability: sigmoid(eatingLogit),
+                    chewEventLogit: eventLogit,
+                    chewEventProbability: sigmoid(eventLogit),
+                    phaseSin: output[2].doubleValue,
+                    phaseCos: output[3].doubleValue,
+                    phaseConfidence: output[4].doubleValue,
+                    gapCoverage: gapCoverage
+                )
+            }
             return ChewPrediction(
-                eatingProbability: sigmoid(logit),
-                phaseSin: phaseSin,
-                phaseCos: phaseCos
+                eatingLogit: eatingLogit,
+                eatingProbability: sigmoid(eatingLogit),
+                chewEventLogit: nil,
+                chewEventProbability: nil,
+                phaseSin: nil,
+                phaseCos: nil,
+                phaseConfidence: nil,
+                gapCoverage: gapCoverage
             )
         } catch {
             print("Prediction failed: \(error)")
-            return ChewPrediction(eatingProbability: 0, phaseSin: nil, phaseCos: nil)
+            return emptyPrediction(gapCoverage: gapCoverage)
         }
     }
-    
-    /// Predict mouth shape from normalized features (multi-output mode).
-    ///
-    /// - Parameter features: Normalized feature vector
-    /// - Returns: MouthShapeState with estimated parameters
-    func predictMouthShape(features: [Double]) -> MouthShapeState {
-        // The checked-in ChewNet model is binary. Future mouth-shape models
-        // should add a generated output accessor here once that model is active.
-        return .neutral
-    }
-    
-    private func sigmoid(_ x: Double) -> Double {
-        return 1.0 / (1.0 + exp(-x))
+
+    private func emptyPrediction(gapCoverage: Double = 0) -> ChewPrediction {
+        ChewPrediction(
+            eatingLogit: -.infinity,
+            eatingProbability: 0,
+            chewEventLogit: nil,
+            chewEventProbability: nil,
+            phaseSin: nil,
+            phaseCos: nil,
+            phaseConfidence: nil,
+            gapCoverage: gapCoverage
+        )
     }
     
 }

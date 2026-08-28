@@ -31,6 +31,13 @@ struct ContentView: View {
             RecordingsListView(controller: controller, selectedFolder: $selectedFolder)
                 .navigationTitle("Recordings")
                 .toolbar {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Toggle(
+                            "Local Review Audio",
+                            isOn: $controller.captureReviewAudio
+                        )
+                        .help("Optional audio is stored locally for VAD and human review. It is never a shipping-model input.")
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         NavigationLink(destination: CameraScreen(controller: controller)) {
                             HStack {
@@ -49,8 +56,13 @@ struct ContentView: View {
                 if let folder = selectedFolder {
                     RecordingDetailView(folder: folder)
                 } else {
-                    Text("Select or create a recording")
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 16) {
+                        Text("Select or create a recording")
+                            .foregroundStyle(.secondary)
+                        CollectGuidanceView(stage: .library)
+                            .frame(maxWidth: 440)
+                    }
+                    .padding()
                 }
             }
         }

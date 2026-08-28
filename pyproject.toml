@@ -1,0 +1,28 @@
+[project]
+name = "chewsense-dev"
+version = "0.2.0"
+description = "Locked development and verification environment for the ChewSense monorepo."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "chewsense-motion",
+    "chewsense-vision",
+    "coremltools==9.0",
+    "scikit-learn==1.7.2",
+    "torch==2.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "ruff==0.14.10",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+chewsense-motion = { workspace = true }
+chewsense-vision = { workspace = true }
+
+[tool.uv.workspace]
+members = ["pipelines/motion", "pipelines/vision"]
