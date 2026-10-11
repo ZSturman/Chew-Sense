@@ -1,5 +1,49 @@
 # ChewSense Review
 
+<!-- WORKSPACE-VERIFICATION:START -->
+## Current state and getting started
+
+Updated 2026-10-05. Component of **Chew Sense**. ChewSenseReview is the sole authoritative human-review surface.
+
+### Startup state
+
+| App | Platform | Result |
+|---|---|---|
+| ChewSenseReview | mac | opened |
+
+These are startup observations; simulated flows and production acceptance remain unverified.
+
+### Install and start
+
+#### ChewSenseReview — mac
+
+Purpose: ChewSenseReview is the sole authoritative human-review surface.
+
+Requirements: Xcode and the deployment version declared in the Xcode target. Physical Apple devices need Developer Mode, trust/pairing, a signing team and the required capabilities.
+
+Open the project:
+
+```sh
+open ChewSenseReview.xcodeproj
+```
+
+Select scheme **ChewSenseReview**, choose My Mac, and choose Product → Run. Xcode builds, installs and opens the app; a successful device installation remains available for later testing.
+
+Retained local audit build: [open the saved application bundle](</Users/zacharysturman/Library/Logs/BetterWorkspace/AppLaunchAudit/2026-10-05/derived/15e02c3a5bc5/Build/Products/Debug/ChewSenseReview.app>). Rebuild from Xcode for distributable signing.
+
+### ChewSenseReview / mac screenshot
+
+![ChewSenseReview startup](docs/images/startup-15e02c3a5bc5.png)
+
+### Next steps
+
+See [the parent project README](<../../../README.md>) for canonical Better Workspace task IDs and the matched Notion row.
+
+- **ChewSenseReview / mac:** Turn this candidate into a fixture-backed simulated flow with explicit assertions and capture its result.
+
+Detailed continuation: [next steps](<docs/NEXT_STEPS.md>). No archive or release operation was performed.
+<!-- WORKSPACE-VERIFICATION:END -->
+
 ChewSenseReview is the sole authoritative human-review surface.
 
 For every proposed chew it loops a closed-to-open-to-closed clip with at least
