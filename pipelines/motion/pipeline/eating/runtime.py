@@ -166,6 +166,7 @@ def export_spec(run_dir: Path, *, model: str | None = None) -> dict[str, Any]:
             "model_artifact_sha256": _sha256_bytes(model_bytes),
             "sklearn_version": sklearn.__version__,
             "selection_rule": metrics.get("selection_rule"),
+            "run_selected_model": metrics.get("selected_model"),
             "threshold_rule": "F1-optimal on development out-of-fold predictions",
             "participants": (metrics.get("counts") or {}).get("participants"),
         },
@@ -214,9 +215,15 @@ def export_spec(run_dir: Path, *, model: str | None = None) -> dict[str, Any]:
             "note": "Pilot estimates from one wearer; the test interval is wide.",
         },
     }
-    body = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
-    spec["model_id"] = f"eating-{name}-{metrics['run_id'].removeprefix('eating-')}-{_sha256_bytes(body)[:8]}"
+    spec["model_id"] = f"eating-{name}-{metrics['run_id'].removeprefix('eating-')}-{decision_hash(spec)[:8]}"
     return spec
+
+
+def decision_hash(spec: Mapping[str, Any]) -> str:
+    """SHA-256 of everything that affects a decision (not provenance or notes)."""
+
+    body = {key: spec[key] for key in ("input", "features", "model", "decision")}
+    return _sha256_bytes(json.dumps(body, sort_keys=True, separators=(",", ":")).encode())
 
 
 def write_spec(spec: Mapping[str, Any], path: Path) -> str:

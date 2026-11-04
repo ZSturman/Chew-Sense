@@ -163,8 +163,49 @@ def evaluate_behavior(
         "bout_timing": bout_timing(by_id, predictions, threshold),
         "cadence": cadence_against_video(video_sessions, vision_dirs),
         "video_cycle_confidence": cycle_context.evaluate(cycle_rows),
+        "video_motion_alignment": alignment_check(video_sessions, vision_dirs),
         "test_split_recordings_used_for_sensor_comparisons": sorted(
             s.session_id for s in video_sessions if s.session_id in test_split_ids),
         "test_split_note": "motion and video only; no detector output from the locked test is read, and nothing "
                            "is tuned on these recordings except the cycle-confidence table (leave-one-recording-out)",
     }
+
+
+def alignment_check(sessions: Sequence[EatingSession], vision_dirs: Mapping[str, Path],
+                    *, max_lag_s: float = 1.5, min_span_s: float = 8.0) -> list[dict[str, Any]]:
+    """Video-to-motion lag that best aligns jaw opening with head rotation in chewing spans.
+
+    Both signals are band-passed to 0.8-3 Hz and cross-correlated.  Chewing is
+    periodic, so a lag is only determined up to one chewing period; consistent
+    lags across spans of one recording are what matter.  Negative means the
+    motion timeline runs ahead of the video timeline.
+    """
+
+    from scipy.signal import butter, filtfilt
+
+    b, a = butter(2, [0.8 / 25, 3.0 / 25], btype="band")
+    results = []
+    for session in sessions:
+        folder = vision_dirs.get(session.session_id)
+        if folder is None or not session.has_chewing or not (Path(folder) / "signals" / "ts.npy").exists():
+            continue
+        ts = np.load(Path(folder) / "signals" / "ts.npy").astype(float)
+        jaw = np.nan_to_num(np.load(Path(folder) / "signals" / "jaw_open_bs_z.npy").astype(float))
+        grid = np.arange(0.0, min(ts[-1], session.motion_t[-1]), 0.02)
+        video = filtfilt(b, a, np.interp(grid, ts, jaw))
+        motion = filtfilt(b, a, np.interp(grid, session.motion_t, np.linalg.norm(session.imu[:, 3:6], axis=1)))
+        spans = []
+        for start, end, label, _ in _label_runs(session.intervals):
+            if label != CHEWING or end - start < min_span_s:
+                continue
+            mask = (grid >= start + 1) & (grid <= end - 1)
+            x = (video[mask] - video[mask].mean()) / (video[mask].std() + 1e-9)
+            y = (motion[mask] - motion[mask].mean()) / (motion[mask].std() + 1e-9)
+            lags = np.arange(-int(max_lag_s / 0.02), int(max_lag_s / 0.02) + 1)
+            scores = [float(np.mean(x[max(0, -k):len(x) - max(0, k)] * y[max(0, k):len(y) - max(0, -k)])) for k in lags]
+            best = int(np.argmax(scores))
+            spans.append({"start": round(start, 1), "end": round(end, 1), "lag_s": round(float(lags[best]) * 0.02, 2),
+                          "correlation": round(scores[best], 2)})
+        if spans:
+            results.append({"session_id": session.session_id, "clock": session.clock, "spans": spans})
+    return results

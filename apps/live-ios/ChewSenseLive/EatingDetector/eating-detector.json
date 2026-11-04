@@ -47476,7 +47476,7 @@
    }
   ]
  },
- "model_id": "eating-hgb-20261104-015911-2e8f13fa",
+ "model_id": "eating-hgb-20261104-015911-7a28dd15",
  "provenance": {
   "dataset_fingerprint": "39a79251308951daa3674f63a52d1cf05a93f4e2b492924307c9466ba61b02f8",
   "git_commit": "7fc06fd5ec897f4d6d315014bc5381c3acbe9a54",
@@ -47484,6 +47484,7 @@
   "model_artifact_sha256": "916e4af09e9841175de7f78853bbdd98bdb5d90f55213d0160101b52b835750f",
   "participants": 1,
   "run_id": "eating-20261104-015911",
+  "run_selected_model": "hgb",
   "selection_rule": "highest development out-of-fold AUC-PR, prior excluded",
   "sklearn_version": "1.7.2",
   "threshold_rule": "F1-optimal on development out-of-fold predictions"
