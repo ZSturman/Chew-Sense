@@ -1,6 +1,7 @@
 """Evidence-derived next actions shared by Collect and the Mac dashboard."""
 from __future__ import annotations
 
+from .eating_detector import eating_detector_stage
 from .experiments import ExperimentDefinition
 
 
@@ -37,7 +38,7 @@ def timing_check_definition(version: int = 1) -> ExperimentDefinition:
         evaluation_purpose=["synchronization"], tags=dict(activity=["synchronization"])))
 
 
-def build_requirements(records, dataset, evaluation, sync, readiness, history, tasks, config):
+def build_requirements(records, dataset, evaluation, sync, readiness, history, tasks, config, eating=None):
     training = dataset["training"]
     complete = sum(bool(r.get("device_validation_complete")) for r in records)
     incomplete = sum(bool(r.get("guided") and not r.get("device_validation_complete")) for r in records)
@@ -93,6 +94,9 @@ def build_requirements(records, dataset, evaluation, sync, readiness, history, t
         dict(id="repeat", title="Request the next data", state="ready",
              detail="Requests update from reviewed evidence and locked-test errors; nothing is auto-promoted"),
     ]
+    if eating is not None:
+        # Coarse chewing-span detector trained from existing human labels; descriptive only.
+        stages.insert(5, eating_detector_stage(eating))
     return dict(goals=goals, stages=stages, actions=actions, review_tasks=len(reviewable),
                 received_sessions=len(records), complete_sessions=complete, incomplete_sessions=incomplete,
                 training_state="running" if active else "completed" if finished else "blocked")

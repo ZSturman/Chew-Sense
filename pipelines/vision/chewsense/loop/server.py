@@ -215,7 +215,8 @@ class LoopService:
             # Refresh the action list without rerunning inference/evaluation.
             requirements = build_requirements(
                 self.controller.records(), report["dataset"], report["evaluation"],
-                report["synchronization"], readiness, report["training"]["history"], tasks, self.config)
+                report["synchronization"], readiness, report["training"]["history"], tasks, self.config,
+                eating=report.get("eating_detector"))
         actions = requirements.get("actions", [])
         # Send only wearer-facing status, never local paths, tokens or raw reviews.
         pipeline = {

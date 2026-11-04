@@ -38,6 +38,7 @@ from .guided import write_json_atomic
 from .lmstudio import LMStudio
 from .requirements import build_requirements, timing_check_definition
 from .store import LoopPaths, read_json, write_once
+from .eating_detector import eating_detector_summary
 from .training import readiness
 
 NEGATIVE_KINDS = ("rest", "talk", "drink", "walk", "head_movement", "stop_chewing")
@@ -764,9 +765,11 @@ class LoopController:
             "lmstudio": lm,
             "lmstudio_evidence": {"sha256": evidence_sha, "evidence": evidence},
         }
+        report["eating_detector"] = eating_detector_summary(self.paths.root.parent / "experiments")
         report["requirements"] = build_requirements(
             records, dataset, evaluation, sync, gate, history,
-            (read_json(self.paths.review_tasks, {}) or {}).get("tasks", []), self.config)
+            (read_json(self.paths.review_tasks, {}) or {}).get("tasks", []), self.config,
+            eating=report["eating_detector"])
         write_json_atomic(self.paths.reports / "loop" / "latest.json", report)
         return report
 

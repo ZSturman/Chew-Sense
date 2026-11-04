@@ -24,6 +24,7 @@ struct PipelineView: View {
                         evaluationSection
                         weaknessesSection
                         trainingSection
+                        eatingDetectorSection
                     }
                     .padding(20)
                 }
@@ -243,6 +244,58 @@ struct PipelineView: View {
                 ForEach(stopping["notes"] as? [String] ?? [], id: \.self) { Text($0).font(.caption2).foregroundStyle(.secondary) }
             }
         } label: { Label("Training and evaluation readiness", systemImage: "lock.shield") }
+    }
+
+    // MARK: Chewing-bout detector
+
+    /// Experimental motion-only detector trained on human coarse chewing spans by
+    /// `chewsense-motion eating-experiment`. Descriptive only; it gates nothing.
+    private var eatingDetectorSection: some View {
+        let eating = store.report["eating_detector"] as? [String: Any] ?? [:]
+        let test = eating["test"] as? [String: Any]
+        let dev = eating["development"] as? [String: Any]
+        let counts = eating["counts"] as? [String: Any] ?? [:]
+        let weakest = eating["weakest_contexts"] as? [[String: Any]] ?? []
+        let recommendations = eating["recommendations"] as? [[String: Any]] ?? []
+        return GroupBox {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(eating["status"] as? String ?? "Run Analyze to load the latest chewing-bout experiment.")
+                if eating["available"] as? Bool == true {
+                    Text("Labels: human coarse chewing spans, not individual chews or bites. Run \(eating["run_id"] as? String ?? "—"), \(counts["sessions"] as? Int ?? 0) recordings, one wearer.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let test {
+                        Text("Locked test · precision \(Self.score(test["precision"])) · recall \(Self.score(test["recall"])) · false-positive rate \(Self.percent(test["false_positive_rate"])) · bouts \(test["bouts_detected"] as? Int ?? 0)/\(test["bouts_reference"] as? Int ?? 0)")
+                            .font(.caption.monospacedDigit())
+                    }
+                    if let dev {
+                        Text("Development (out-of-fold) · F1 \(Self.score(dev["f1"])) · recall \(Self.score(dev["recall"])) · false-positive rate \(Self.percent(dev["false_positive_rate"]))")
+                            .font(.caption.monospacedDigit())
+                    }
+                    ForEach(Array(weakest.prefix(3).enumerated()), id: \.offset) { _, item in
+                        Label("\(item["context"] as? String ?? "") · \(Self.percent(item["false_positive_rate"])) false positives (\(item["split"] as? String ?? ""))",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                    }
+                    if !recommendations.isEmpty {
+                        Text("Record next").font(.caption.weight(.semibold)).padding(.top, 4)
+                        ForEach(Array(recommendations.prefix(3).enumerated()), id: \.offset) { _, item in
+                            Text("• \(item["title"] as? String ?? "") — \(item["reason"] as? String ?? "")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    if let path = eating["report_path"] as? String {
+                        Button("Open experiment report") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                            .padding(.top, 4)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: { Label("AirPods chewing detector (experimental)", systemImage: "waveform.path.ecg") }
+    }
+
+    static func score(_ value: Any?) -> String {
+        guard let number = value as? Double else { return "—" }
+        return String(format: "%.2f", number)
     }
 
     static func percent(_ value: Any?) -> String {
