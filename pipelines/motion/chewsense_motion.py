@@ -799,6 +799,7 @@ def cmd_materialize_temporal(args: argparse.Namespace) -> int:
             output_dir,
             inference_step_seconds=args.inference_step_sec,
             max_gap_seconds=args.max_gap_sec,
+            skip_invalid=args.skip_invalid,
         )
         split_path = None
         if args.split_manifest:
@@ -808,6 +809,9 @@ def cmd_materialize_temporal(args: argparse.Namespace) -> int:
         print(f"❌ Temporal materialization failed: {exc}")
         return 1
     print(f"Materialized {result.rows} windows from {len(result.sessions)} sessions")
+    rejected = json.loads(result.manifest_path.read_text()).get("rejected_sessions", [])
+    for item in rejected:
+        print(f"   excluded {item['session_dir']}: {item['reason']}")
     print(f"Dataset: {result.output_dir}")
     print(f"Dataset SHA-256: {result.dataset_hash}")
     if split_path is not None:
@@ -1357,6 +1361,65 @@ def cmd_registry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eating_experiment(args: argparse.Namespace) -> int:
+    """Train/evaluate motion-only chewing-bout detectors on human coarse labels."""
+
+    from pipeline.eating.experiment import ExperimentConfig, run_experiment
+    from pipeline.eating.models import MODEL_NAMES
+
+    models = tuple(m.strip() for m in args.models.split(",") if m.strip())
+    unknown = sorted(set(models) - set(MODEL_NAMES))
+    if unknown:
+        print(f"Unknown models {unknown}; choose from {', '.join(MODEL_NAMES)}")
+        return 2
+    config = ExperimentConfig(
+        window_s=args.window_s,
+        stride_s=args.stride_s,
+        guard_s=args.guard_s,
+        folds=args.folds,
+        models=models,
+        tcn_epochs=args.tcn_epochs,
+        seed=args.seed,
+        evaluate_test=not args.dev_only,
+        note=args.note or "",
+    )
+    try:
+        run_dir = run_experiment(
+            workspace=get_workspace_root(),
+            config=config,
+            repo_root=get_repo_root(),
+            output_root=Path(args.output) if args.output else None,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(f"Eating experiment failed: {exc}")
+        return 1
+    print(f"Report: {run_dir / 'report.html'}")
+    return 0
+
+
+def cmd_eating_report(args: argparse.Namespace) -> int:
+    """Regenerate an eating experiment report without retraining."""
+
+    from pipeline.eating.experiment import rebuild_report
+
+    root = Path(args.output) if args.output else get_workspace_root() / "experiments" / "eating"
+    if args.run:
+        run_dir = root / "runs" / args.run
+    else:
+        latest = root / "latest.json"
+        if not latest.exists():
+            print(f"No eating experiment has been run yet ({latest} is missing).")
+            return 1
+        run_dir = Path(json.loads(latest.read_text())["run_dir"])
+    try:
+        path = rebuild_report(run_dir, workspace=get_workspace_root())
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Report rebuild failed: {exc}")
+        return 1
+    print(f"Report: {path}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Print dataset balance + split sizes + last gold metrics."""
     pipeline_root = get_workspace_root()
@@ -1443,6 +1506,7 @@ Examples:
   chewsense-motion from-field-test
   chewsense-motion evaluate
   chewsense-motion registry --latest
+  chewsense-motion eating-experiment
   chewsense-motion deploy --force
         """,
     )
@@ -1505,6 +1569,10 @@ Examples:
     p_temporal.add_argument(
         "--max-gap-sec", type=float, default=0.08,
         help="Largest interpolated IMU gap considered valid (default: 0.08)",
+    )
+    p_temporal.add_argument(
+        "--skip-invalid", action="store_true",
+        help="Exclude invalid sessions (recorded in the manifest) instead of aborting",
     )
     p_temporal.set_defaults(func=cmd_materialize_temporal)
     
@@ -1646,6 +1714,33 @@ Examples:
     p_clean.set_defaults(func=cmd_clean)
 
     # status command
+    p_eating = subparsers.add_parser(
+        "eating-experiment",
+        help="Train and evaluate motion-only chewing-bout detectors on human coarse labels",
+    )
+    p_eating.add_argument("--window-s", type=float, default=3.0, help="Causal window length (TCN requires 3)")
+    p_eating.add_argument("--stride-s", type=float, default=0.5, help="Window spacing in seconds")
+    p_eating.add_argument("--guard-s", type=float, default=1.0,
+                          help="Seconds around label transitions excluded from scoring/training")
+    p_eating.add_argument("--folds", type=int, default=5, help="Grouped development folds")
+    p_eating.add_argument("--models", default="prior,motion_energy,logreg,hgb,tcn",
+                          help="Comma-separated candidates")
+    p_eating.add_argument("--tcn-epochs", type=int, default=12, help="Fixed TCN training epochs")
+    p_eating.add_argument("--seed", type=int, default=0)
+    p_eating.add_argument("--note", help="Free-text note stored in the run index")
+    p_eating.add_argument("--dev-only", action="store_true",
+                          help="Exploratory run: development cross-validation only; the locked test set is not touched")
+    p_eating.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
+    p_eating.set_defaults(func=cmd_eating_experiment)
+
+    p_eating_report = subparsers.add_parser(
+        "eating-report",
+        help="Rebuild the HTML report of an eating experiment (default: latest)",
+    )
+    p_eating_report.add_argument("--run", help="Run ID under <root>/runs/")
+    p_eating_report.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
+    p_eating_report.set_defaults(func=cmd_eating_report)
+
     p_status = subparsers.add_parser(
         "status",
         help="Print dataset balance, split sizes, last metrics for the latest model",

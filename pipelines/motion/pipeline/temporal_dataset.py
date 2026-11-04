@@ -583,12 +583,20 @@ def materialize_temporal_dataset(
     *,
     inference_step_seconds: float = INFERENCE_STEP_SECONDS,
     max_gap_seconds: float = 0.08,
+    skip_invalid: bool = False,
 ) -> TemporalDatasetResult:
-    """Write one deterministic temporal dataset from canonical sessions."""
+    """Write one deterministic temporal dataset from canonical sessions.
+
+    By default any invalid session aborts the dataset, which is what the
+    guided loop wants for its pre-screened training set.  ``skip_invalid``
+    instead excludes each invalid session, records why in the manifest's
+    ``rejected_sessions`` and fails only if nothing usable remains.
+    """
 
     session_dirs = [Path(path) for path in sessions]
     if not session_dirs:
         raise TemporalDatasetError("no schema-v2 sessions were supplied")
+    rejected: list[dict[str, str]] = []
     all_windows: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
     all_timestamps: list[np.ndarray] = []
@@ -597,11 +605,20 @@ def materialize_temporal_dataset(
     records: list[SessionMaterialization] = []
     seen_ids: set[str] = set()
     for session_dir in session_dirs:
-        windows, targets, timestamps, hard_negative, record = _materialize_one(
-            session_dir,
-            inference_step_seconds=inference_step_seconds,
-            max_gap_seconds=max_gap_seconds,
-        )
+        try:
+            windows, targets, timestamps, hard_negative, record = _materialize_one(
+                session_dir,
+                inference_step_seconds=inference_step_seconds,
+                max_gap_seconds=max_gap_seconds,
+            )
+        except TemporalDatasetError as exc:
+            if not skip_invalid:
+                raise TemporalDatasetError(
+                    f"{exc} (in {session_dir}; use skip_invalid / --skip-invalid to exclude "
+                    "invalid sessions and list them in the manifest)"
+                ) from exc
+            rejected.append({"session_dir": str(session_dir), "reason": str(exc)})
+            continue
         if record.session_id in seen_ids:
             raise TemporalDatasetError(f"duplicate session_id: {record.session_id}")
         seen_ids.add(record.session_id)
@@ -612,6 +629,11 @@ def materialize_temporal_dataset(
         all_hard_negative.append(hard_negative)
         records.append(record)
 
+    if not all_windows:
+        raise TemporalDatasetError(
+            "no valid schema-v2 sessions remain: "
+            + "; ".join(f"{item['session_dir']}: {item['reason']}" for item in rejected)
+        )
     X = np.concatenate(all_windows).astype(np.float32, copy=False)
     y = np.concatenate(all_targets).astype(np.float32, copy=False)
     timestamps = np.concatenate(all_timestamps).astype(np.float64, copy=False)
@@ -667,6 +689,7 @@ def materialize_temporal_dataset(
             name: {"sha256": _file_sha256(output / name)} for name in array_files
         },
         "sessions": [asdict(record) for record in records],
+        "rejected_sessions": rejected,
     }
     manifest_path = output / "dataset_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
