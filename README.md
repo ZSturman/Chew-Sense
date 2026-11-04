@@ -33,6 +33,32 @@ evaluated the first motion-only chewing-bout detectors on real recordings:
 in `workspace/experiments/eating/`. These are pilot results; nothing was
 promoted or deployed.
 
+Phase 2 (November 3, [report](docs/PHASE2_2026-11-03.md)) added assisted
+labeling, an on-device version of the selected detector and a training
+dashboard:
+
+- **Assisted labeling.** After Vision runs, the Mac proposes chewing spans
+  where video and AirPods motion agree. Review → **Chewing spans** lets you
+  accept agreements together and decide only the rest. Proposals are never
+  labels; saved decisions keep their origin and are used for training only.
+- **On-device detector.** The selected gradient-boosting model is exported as
+  `apps/live-ios/ChewSenseLive/EatingDetector/eating-detector.json`. Live's
+  Swift runtime matches the Python reference exactly on all recorded sessions.
+  It runs in shadow by default; Settings can make it drive Live
+  (experimental, not yet tested on a physical device).
+- **Training and Evaluation window** in Review (⇧⌘T): recordings, checks,
+  labels, splits, model, metrics, prediction timelines, errors and what to
+  record next, from `workspace/experiments/eating/pipeline_status.json`.
+
+```sh
+.venv/bin/chewsense-motion pipeline-status        # refresh what Review shows
+.venv/bin/chewsense-motion eating-experiment --dev-only   # retrain/check; locked test untouched
+.venv/bin/chewsense-motion assist-propose --loop   # chewing-span proposals for loop recordings
+.venv/bin/chewsense-motion assist-eval             # proposal accuracy against human labels
+.venv/bin/chewsense-motion behavior-eval           # bout, pause, cadence and alignment checks
+.venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
+```
+
 Start with [START_HERE.md](START_HERE.md) for the broader repository.
 
 ## Main Products
@@ -40,8 +66,8 @@ Start with [START_HERE.md](START_HERE.md) for the broader repository.
 | Product | Path | Purpose |
 | --- | --- | --- |
 | Collect | `apps/collect-ios/` | Record video, AirPods motion, metadata, synchronization, and coarse chewing labels |
-| Review | `apps/review-macos/` | Verify closed/open/closed chew anchors, food-entry events, missed events, and the final full-video pass |
-| Live | `apps/live-ios/` | Run promoted motion-only models during field testing |
+| Review | `apps/review-macos/` | Verify chew anchors, food entries and the final full-video pass; review proposed chewing spans; see training and evaluation status |
+| Live | `apps/live-ios/` | Run motion-only detectors during field testing (bundled ChewNet; exported detector in shadow or experimental mode) |
 
 ## Active Pipelines
 

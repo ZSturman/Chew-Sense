@@ -15,7 +15,7 @@ final class ReviewSnapshotTests: XCTestCase {
     }
 
     private func render<V: View>(_ view: V, size: CGSize, to url: URL) throws {
-        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .top))
         host.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
@@ -51,6 +51,6 @@ final class ReviewSnapshotTests: XCTestCase {
         XCTAssertNotNil(training.status, training.loadError ?? "")
         try render(TrainingStatusContent(store: training, initialSelection: "Not-eating-20251212-175356")
                     .padding(20).background(Color(nsColor: .windowBackgroundColor)),
-                   size: CGSize(width: 1100, height: 2250), to: output.appending(path: "review-training-status.png"))
+                   size: CGSize(width: 1100, height: 2700), to: output.appending(path: "review-training-status.png"))
     }
 }

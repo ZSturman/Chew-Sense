@@ -224,7 +224,7 @@ struct TrainingStatusContent: View {
                 .width(min: 200, ideal: 250)
                 TableColumn("Split") { row in Text(row.split ?? "—") }.width(70)
                 TableColumn("Clock / sync") { row in
-                    Text(row.usable ? "\(row.sync?.clock == "shared_host_clock" ? "shared" : "unverified") · \(row.sync?.syncCheck ?? "—")" : "—")
+                    Text(row.usable ? (row.sync?.clock == "shared_host_clock" ? "shared clock · " : "") + (row.sync?.syncCheck ?? "—") : "—")
                         .help(row.sync?.syncCheck ?? "")
                 }
                 .width(min: 120, ideal: 170)

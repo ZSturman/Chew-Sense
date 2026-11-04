@@ -1,3 +1,53 @@
+# Phase 2 checkpoint — November 3, 2026
+
+Details: [PHASE2_2026-11-03.md](PHASE2_2026-11-03.md). Branch
+`claude/phase2-2026-11` (from `claude/audit-2026-11`). All work is committed.
+
+**Completed and verified (do not redo):**
+- On-device detector: `eating-export` spec `eating-hgb-20261104-015911-7a28dd15`
+  bundled in Live (shadow by default, experimental mode in Settings). Swift
+  vs Python parity passes on 32/32 recordings (bit-identical features,
+  probability difference 0). Live simulator tests 33/33.
+- Assisted labeling: `assist-propose` (also a loop step after Vision),
+  Review → Chewing spans panel, `coarse-review-vNNNN.json` saved revisions,
+  training-only tiers. `assist-eval`: 374/374 agreement windows correct,
+  59% coverage of 637 labelled windows. Proposals exist for the two loop
+  recordings (`loop/assisted/derived/assist/*/coarse-proposals-v0002.json`).
+- Transparency: `pipeline-status` plus Review's Training and Evaluation
+  window (⇧⌘T). Review tests: 25 passed, 1 opt-in skip.
+- Behaviour foundation: `pipeline/behavior/`, `behavior-eval`. Vision chew
+  confidence is now rhythm-calibrated (AUC 0.93 vs 0.69).
+- Natural Meal seed protocol; Collect bundled catalog regenerated (Collect
+  29/29).
+- Python 207 passed. The development-only rerun reproduces the reference
+  development metrics exactly.
+
+**Not done / outstanding:**
+- No physical-device test of the exported detector, and no measured
+  assisted-review time.
+- The loop service still runs pre-Phase-2 code (no restart was made). A
+  restart publishes Natural Meal to Collect and enables automatic proposals.
+- MediaPipe attempted "clearcut" usage logging during a Vision run.
+  Investigate and disable it before processing more face video.
+- Not implemented: a chewing-pace target or metronome (needs a Collect build
+  plus an explicit v2 publish) and a drinking "no chewing" attestation.
+- Branch not merged or pushed.
+
+**Next steps (in order):**
+1. Human: review the two proposal sets in Review → Chewing spans, open on
+   `workspace/loop/assisted` (your blind review stays on `loop/blind`), and
+   save. This gives the first real review-time measurement.
+2. Human: decide whether to restart the service:
+   `tools/loop-service uninstall && tools/loop-service install`.
+3. Human: in Live, record a short session in shadow mode with AirPods, then
+   compare `eating_detector.csv` with ChewNet's `predictions.csv`.
+4. Record Natural Meal, talking, head-movement, drinking and gum sessions,
+   and label them with assisted review.
+5. Agent: `chewsense-motion eating-experiment --dev-only`, then
+   `pipeline-status`. Run the locked-test experiment only to confirm.
+
+---
+
 # Audit continuation — November 3, 2026
 
 Details: [AUDIT_2026-11-03.md](AUDIT_2026-11-03.md). Branch
