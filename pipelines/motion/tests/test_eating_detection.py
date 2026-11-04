@@ -285,6 +285,8 @@ def test_end_to_end_smoke(tmp_path):
     assert json.loads((exploratory / "metrics.json").read_text())["results"]["logreg"]["test"] is None
     index = json.loads((workspace / "experiments" / "eating" / "index.json").read_text())
     assert index["test_consultations"] == 2 and len(index["runs"]) == 3
+    latest = json.loads((workspace / "experiments" / "eating" / "latest.json").read_text())
+    assert latest["run_id"] == second.name  # exploratory runs never become the current model
 
 
 def test_temporal_materializer_can_skip_invalid_sessions(tmp_path):

@@ -1420,6 +1420,50 @@ def cmd_eating_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_video_teacher(args: argparse.Namespace) -> int:
+    """Measure how well ungated Vision output recovers human coarse chewing spans."""
+
+    from pipeline.eating.video_teacher import evaluate_video_teacher
+
+    workspace = get_workspace_root()
+    eating_root = workspace / "experiments" / "eating"
+    run_dir = eating_root / "runs" / args.run if args.run else None
+    if run_dir is None and (eating_root / "latest.json").exists():
+        run_dir = Path(json.loads((eating_root / "latest.json").read_text())["run_dir"])
+    predictions = run_dir / "predictions.csv.gz" if run_dir else None
+    threshold = 0.5
+    if run_dir and (run_dir / "metrics.json").exists():
+        metrics = json.loads((run_dir / "metrics.json").read_text())
+        selected = metrics.get("selected_model") or "hgb"
+        threshold = metrics["results"][selected]["threshold"]
+        column = f"p_{selected}"
+    else:
+        column = "p_hgb"
+    try:
+        result = evaluate_video_teacher(
+            workspace=workspace,
+            vision_root=Path(args.vision_root),
+            predictions_path=predictions,
+            motion_column=column,
+            motion_threshold=threshold,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Video-teacher evaluation failed: {exc}")
+        return 1
+    result["motion_run"] = run_dir.name if run_dir else None
+    out = Path(args.output) if args.output else Path(args.vision_root).parent / "video_teacher.json"
+    out.write_text(json.dumps(result, indent=2, sort_keys=True, default=float) + "\n")
+    video = result["video_cycle_rate"]
+    print(f"Recordings: {len(result['recordings'])}")
+    print(f"Video chew-cycle rate vs human spans: AUC-ROC {video['auc_roc']}, AUC-PR {video['auc_pr']}")
+    agreement = result.get("motion_agreement")
+    if agreement:
+        print(f"Video and motion agree on {agreement['agree_fraction']:.0%} of windows; "
+              f"accuracy when they agree {agreement['accuracy_when_agree']:.0%}")
+    print(f"Wrote {out}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Print dataset balance + split sizes + last gold metrics."""
     pipeline_root = get_workspace_root()
@@ -1740,6 +1784,16 @@ Examples:
     p_eating_report.add_argument("--run", help="Run ID under <root>/runs/")
     p_eating_report.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
     p_eating_report.set_defaults(func=cmd_eating_report)
+
+    p_video_teacher = subparsers.add_parser(
+        "video-teacher-eval",
+        help="Compare ungated Vision chew proposals and the motion detector with human coarse spans",
+    )
+    p_video_teacher.add_argument("--vision-root", required=True,
+                                 help="Folder of `chewsense-vision run` outputs named by session ID")
+    p_video_teacher.add_argument("--run", help="Eating experiment run ID for motion predictions (default: latest)")
+    p_video_teacher.add_argument("--output", help="JSON output path (default: next to --vision-root)")
+    p_video_teacher.set_defaults(func=cmd_video_teacher)
 
     p_status = subparsers.add_parser(
         "status",

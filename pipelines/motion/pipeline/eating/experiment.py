@@ -413,9 +413,12 @@ def run_experiment(
     index["runs"].append(row)
     index["test_consultations"] = sum(1 for run in index["runs"] if run.get("test_evaluated", True))
     _write_json(index_path, index)
-    _write_json(output_root / "latest.json", {
-        **row, "run_dir": str(run_dir), "report_path": str(run_dir / "report.html"),
-    })
+    if config.evaluate_test:
+        # The dashboards' "current model" is the latest run with a locked-test result;
+        # exploratory --dev-only runs are listed in the index only.
+        _write_json(output_root / "latest.json", {
+            **row, "run_dir": str(run_dir), "report_path": str(run_dir / "report.html"),
+        })
 
     from .report import write_report
 
