@@ -8,6 +8,7 @@ it never gates training, promotion or the collection plan.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +119,10 @@ def eating_detector_stage(summary: dict[str, Any]) -> dict[str, str]:
     if summary.get("weakest_contexts"):
         worst = summary["weakest_contexts"][0]
         detail += f" Most false alarms: {worst['context']} ({worst['false_positive_rate']:.0%})."
-    finished = (summary.get("finished_at") or "")[:10]
+    try:
+        finished = datetime.fromisoformat(summary.get("finished_at") or "").astimezone().strftime("%b %-d, %Y")
+    except ValueError:
+        finished = ""
     if finished:
         detail += f" Trained {finished}."
     return dict(id="eating-detector", title="AirPods chewing detector (experimental)", state="complete",
