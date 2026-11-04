@@ -1675,6 +1675,78 @@ def cmd_pipeline_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_behavior_eval(args: argparse.Namespace) -> int:
+    """Validate chewing-behaviour measurements against independent references (development data)."""
+
+    import pandas as pd
+
+    from pipeline.behavior.measures import registry, session_behavior
+    from pipeline.behavior.validate import evaluate_behavior
+    from pipeline.eating.dataset import discover_sessions
+    from pipeline.eating.runtime import load_spec
+
+    workspace = get_workspace_root()
+    root = workspace / "experiments" / "eating"
+    try:
+        run_dir = _eating_run_dir(root, args.run)
+    except FileNotFoundError as exc:
+        print(exc)
+        return 1
+    metrics = json.loads((run_dir / "metrics.json").read_text())
+    selected = metrics.get("selected_model") or "hgb"
+    predictions = pd.read_csv(run_dir / "predictions.csv.gz").rename(columns={f"p_{selected}": "probability"})
+    sessions, _ = discover_sessions(
+        canonical_roots=[workspace / "sessions" / "raw", workspace / "loop" / "assisted" / "sessions" / "raw"],
+        field_test_roots=[workspace / "sessions" / "field-tests"],
+        loop_root=workspace / "loop",
+    )
+    vision_roots = [workspace / "loop" / "assisted" / "derived" / "vision", workspace / "derived" / "vision",
+                    workspace / "experiments" / "video-teacher-20261103" / "vision"]
+    vision = {}
+    for session in sessions:
+        for vroot in vision_roots:
+            if (vroot / session.session_id / "signals" / "ts.npy").exists():
+                vision[session.session_id] = vroot / session.session_id
+                break
+    splits = json.loads((root / "splits.json").read_text())["assignments"]
+    result = evaluate_behavior(
+        sessions=sessions, vision_dirs=vision, predictions=predictions,
+        threshold=float(metrics["results"][selected]["threshold"]),
+        test_split_ids={k for k, v in splits.items() if v["split"] == "test"},
+    )
+    spec = load_spec(get_repo_root() / LIVE_EATING_SPEC)
+    examples = {}
+    for session in sessions:
+        if session.activity == "meal_legacy" and splits.get(session.session_id, {}).get("split") == "dev" and len(examples) < 3:
+            examples[session.session_id] = session_behavior(spec, session.motion_t, session.imu, session.duration_s)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    result.update({
+        "evaluation_id": f"behavior-{stamp}",
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "motion_run": run_dir.name,
+        "registry": registry(),
+        "example_meals": examples,
+        "example_note": "development meals scored by the exported final model, which trained on them; "
+                        "illustrates the output format only",
+    })
+    out = get_workspace_root() / "experiments" / "behavior"
+    out.mkdir(parents=True, exist_ok=True)
+    for name in (f"behavior-{stamp}.json", "latest.json"):
+        (out / name).write_text(json.dumps(result, indent=2, default=float) + "\n")
+    timing, cadence, cycles = result["bout_timing"], result["cadence"], result["video_cycle_confidence"]
+    print(f"Bout timing (development, out-of-fold): {timing['matched_bouts']}/{timing['reference_bouts']} human bouts found; "
+          f"median |onset error| {timing['median_abs_onset_error_s']} s, |offset error| {timing['median_abs_offset_error_s']} s; "
+          f"pauses detected {timing['pauses_detected']}/{timing['reference_pauses']}, median |pause error| {timing['median_abs_pause_error_s']} s")
+    if cadence.get("windows"):
+        print(f"Cadence vs video: {cadence['windows']} windows, median |difference| {cadence['median_abs_difference_hz']} Hz, "
+              f"{cadence['within_0_2_hz']:.0%} within 0.2 Hz; video range {cadence['video_hz_range']} Hz")
+    if cycles.get("cycles"):
+        print(f"Video cycle confidence: {cycles['cycles']} cycles; leave-one-recording-out AUC "
+              f"{cycles['leave_one_recording_out']['auc_roc']:.2f} vs {cycles['fixed_constants']['auc_roc']:.2f} for the former constants")
+    print(f"Wrote {out / f'behavior-{stamp}.json'}")
+    return 0
+
+
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
@@ -2091,6 +2163,13 @@ Examples:
     )
     p_status_file.add_argument("--output", help="Default: <workspace>/experiments/eating/pipeline_status.json")
     p_status_file.set_defaults(func=cmd_pipeline_status)
+
+    p_behavior = subparsers.add_parser(
+        "behavior-eval",
+        help="Validate bout timing, pauses, cadence and video cycle confidence (development data)",
+    )
+    p_behavior.add_argument("--run", help="Eating run for out-of-fold predictions (default: latest)")
+    p_behavior.set_defaults(func=cmd_behavior_eval)
 
     p_video_teacher = subparsers.add_parser(
         "video-teacher-eval",

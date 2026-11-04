@@ -371,6 +371,33 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         "false_negative_windows", "review_windows", "video_unavailable_windows", "effort_model",
     )} if assist else None
 
+    behavior_latest = _read(workspace / "experiments" / "behavior" / "latest.json")
+    if behavior_latest:
+        timing = behavior_latest.get("bout_timing") or {}
+        cadence = behavior_latest.get("cadence") or {}
+        cycles = behavior_latest.get("video_cycle_confidence") or {}
+        behavior = {
+            "evaluation_id": behavior_latest.get("evaluation_id"),
+            "registry": behavior_latest.get("registry"),
+            "bout_timing": {k: timing.get(k) for k in (
+                "split", "reference_bouts", "matched_bouts", "median_onset_error_s", "median_abs_offset_error_s",
+                "median_abs_duration_error_s", "reference_pauses", "pauses_detected", "median_abs_pause_error_s")},
+            "cadence": {k: cadence.get(k) for k in (
+                "windows", "median_abs_difference_hz", "within_0_2_hz", "video_hz_range", "confidence_by_peak_share",
+                "chew_count", "caveat")},
+            "video_cycle_confidence": {
+                "cycles": cycles.get("cycles"),
+                "loro_auc": (cycles.get("leave_one_recording_out") or {}).get("auc_roc"),
+                "fixed_constants_auc": (cycles.get("fixed_constants") or {}).get("auc_roc"),
+                "table": cycles.get("table_all_data"),
+                "meaning": cycles.get("meaning"),
+            },
+        }
+    else:
+        from ..behavior.measures import registry
+
+        behavior = {"evaluation_id": None, "registry": registry()}
+
     history = [
         {
             "run_id": run.get("run_id"),
@@ -409,6 +436,7 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         "data": data,
         "model": model,
         "assisted_labeling": evaluation,
+        "behavior": behavior,
         "history": history,
         "next": next_steps,
         "commands": {
@@ -419,6 +447,7 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
             "parity": "chewsense-motion eating-parity",
             "proposals": "chewsense-motion assist-propose --loop",
             "assist_evaluation": "chewsense-motion assist-eval",
+            "behavior_evaluation": "chewsense-motion behavior-eval",
         },
         "limitations": [
             "One wearer: no cross-person result exists.",

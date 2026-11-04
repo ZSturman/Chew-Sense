@@ -219,11 +219,61 @@ struct PipelineStatus: Decodable {
         var id: String { (title ?? "") + (reason ?? "") }
     }
 
+    struct Measurement: Decodable, Identifiable {
+        let name: String
+        let unit: String
+        let observability: String
+        let method: String
+        let reference: String
+        let status: String
+        let needed: String
+        var id: String { name }
+    }
+
+    struct BoutTiming: Decodable {
+        let referenceBouts: Int?
+        let matchedBouts: Int?
+        let medianOnsetErrorS: Double?
+        let medianAbsOffsetErrorS: Double?
+        let medianAbsDurationErrorS: Double?
+        let referencePauses: Int?
+        let pausesDetected: Int?
+        let medianAbsPauseErrorS: Double?
+    }
+
+    struct Cadence: Decodable {
+        let windows: Int?
+        let medianAbsDifferenceHz: Double?
+        let withinRange02Hz: Double?
+        let videoHzRange: [Double]?
+        let caveat: String?
+
+        enum CodingKeys: String, CodingKey {
+            case windows, medianAbsDifferenceHz, videoHzRange, caveat
+            case withinRange02Hz = "within02Hz"
+        }
+    }
+
+    struct CycleConfidence: Decodable {
+        let cycles: Int?
+        let loroAuc: Double?
+        let fixedConstantsAuc: Double?
+    }
+
+    struct Behavior: Decodable {
+        let evaluationId: String?
+        let registry: [Measurement]?
+        let boutTiming: BoutTiming?
+        let cadence: Cadence?
+        let videoCycleConfidence: CycleConfidence?
+    }
+
     let generatedAt: String
     let recordings: [Recording]
     let data: DataSummary
     let model: Model
     let assistedLabeling: Assist?
+    let behavior: Behavior?
     let history: [Run]
     let next: [Next]
     let commands: [String: String]

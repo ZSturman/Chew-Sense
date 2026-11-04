@@ -1,19 +1,8 @@
 {
  "artifact_type": "eating_pipeline_status",
- "generated_at": "2026-11-04T02:53:43.862716+00:00",
+ "generated_at": "2026-11-04T03:02:24.886580+00:00",
  "workspace": "/synthetic/workspace",
  "recordings": [
-  {
-   "session_id": "Broken-1",
-   "recorded_at": null,
-   "source": "workspace",
-   "usable": false,
-   "reason": "no schema-v2 session.json (unmigrated or corrupt capture)",
-   "role": null,
-   "split": null,
-   "proposals": null,
-   "attention": null
-  },
   {
    "session_id": "Guided-s0-20261100-100000-AAAA",
    "recorded_at": "2026-11-00T10:00:00",
@@ -24,7 +13,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -59,7 +48,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -94,7 +83,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -129,7 +118,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -164,7 +153,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -199,7 +188,7 @@
    "role": null,
    "sync": {
     "clock": "shared_host_clock",
-    "sync_check": "shared host clock (not marker-verified)",
+    "sync_check": "not marker-checked",
     "sync_detail": null,
     "sensor_coverage": null,
     "motion_gaps": null,
@@ -221,6 +210,17 @@
    },
    "split": "test",
    "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Broken-1",
+   "recorded_at": null,
+   "source": "workspace",
+   "usable": false,
+   "reason": "no schema-v2 session.json (unmigrated or corrupt capture)",
+   "role": null,
+   "split": null,
    "proposals": null,
    "attention": null
   }
@@ -264,13 +264,13 @@
     "mode_in_live": "shadow by default (logged to eating_detector.csv); drives Live only when the experimental mode is chosen in Settings"
    },
    "chewnet": {
-    "model_id": null,
+    "model_id": "chewnet-20260503-134131-816cea53",
     "role": "drives Live by default; trained May 2026 on 6 field tests; test F1 0.50 in the November audit"
    },
    "physical_device_validation": "none recorded"
   },
-  "run_id": "eating-20261104-025343",
-  "finished_at": "2026-11-04T02:53:43.820170+00:00",
+  "run_id": "eating-20261104-030224",
+  "finished_at": "2026-11-04T03:02:24.841598+00:00",
   "git_commit": null,
   "selected_model": "logreg",
   "selection_rule": "highest development out-of-fold AUC-PR, prior excluded",
@@ -338,7 +338,7 @@
    }
   ],
   "test_consultations": 1,
-  "report_path": "/synthetic/workspace/experiments/eating/runs/eating-20261104-025343/report.html",
+  "report_path": "/synthetic/workspace/experiments/eating/runs/eating-20261104-030224/report.html",
   "errors_by_recording": [
    {
     "session_id": "Guided-s0-20261100-100000-AAAA",
@@ -908,10 +908,132 @@
   "parity": null
  },
  "assisted_labeling": null,
+ "behavior": {
+  "evaluation_id": null,
+  "registry": [
+   {
+    "name": "chewing_bout",
+    "unit": "start/end s",
+    "observability": "inferred",
+    "method": "exported motion detector, EMA + hysteresis decoder",
+    "reference": "human coarse chewing spans",
+    "status": "pilot-validated at bout level (one wearer)",
+    "needed": "more wearers; natural meals"
+   },
+   {
+    "name": "chewing_duration",
+    "unit": "s",
+    "observability": "inferred",
+    "method": "sum of decoded bout lengths",
+    "reference": "human coarse chewing spans",
+    "status": "pilot-validated (development out-of-fold timing error)",
+    "needed": "natural meals with long bouts"
+   },
+   {
+    "name": "pause_between_bouts",
+    "unit": "s",
+    "observability": "inferred",
+    "method": "gaps between decoded bouts",
+    "reference": "gaps between human chewing spans",
+    "status": "pilot: few human-marked pauses exist",
+    "needed": "natural meals; guided stop/start pauses"
+   },
+   {
+    "name": "chewing_cadence",
+    "unit": "Hz",
+    "observability": "inferred",
+    "method": "dominant gyro frequency (0.5-3.0 Hz) in 6 s windows inside bouts; peak share as quality",
+    "reference": "video jaw-opening frequency (independent sensor)",
+    "status": "agrees with video at one self-selected pace; tracking of pace changes untested",
+    "needed": "the chewing-pace guided experiment (slow/normal/fast)"
+   },
+   {
+    "name": "cadence_variability",
+    "unit": "coefficient of variation",
+    "observability": "inferred",
+    "method": "spread of window cadences within a meal",
+    "reference": "none yet",
+    "status": "unvalidated (descriptive only)",
+    "needed": "repeated meals; pace-change recordings"
+   },
+   {
+    "name": "chew_count_estimate",
+    "unit": "chews",
+    "observability": "inferred",
+    "method": "cadence x bout duration",
+    "reference": "video chew-cycle proposals (not human-verified)",
+    "status": "exploratory; no individually verified chews exist (0 of 300 needed)",
+    "needed": "independent annotation of individual chews"
+   },
+   {
+    "name": "individual_chew_events",
+    "unit": "timestamps",
+    "observability": "not_measurable",
+    "method": "the TCN event head is untrained",
+    "reference": "verified chew cycles",
+    "status": "not measurable yet",
+    "needed": ">= 300 independently annotated chews"
+   },
+   {
+    "name": "bite_events",
+    "unit": "timestamps",
+    "observability": "not_measurable",
+    "method": "no food-entry model; video hand-to-mouth proposals are unverified",
+    "reference": "verified food entries",
+    "status": "not measurable yet",
+    "needed": "food-entry annotation; a longer-context motion model"
+   },
+   {
+    "name": "time_between_bites",
+    "unit": "s",
+    "observability": "not_measurable",
+    "method": "depends on bite events",
+    "reference": "verified food entries",
+    "status": "not measurable yet",
+    "needed": "bite events first"
+   },
+   {
+    "name": "eating_vs_talking",
+    "unit": "class",
+    "observability": "inferred",
+    "method": "the eating detector's false-positive rate on talking",
+    "reference": "guided talking with human labels",
+    "status": "10 labelled windows (20% flagged) - too few",
+    "needed": "talking and talking-while-eating recordings"
+   },
+   {
+    "name": "eating_vs_drinking",
+    "unit": "class",
+    "observability": "not_measurable",
+    "method": "no drinking data",
+    "reference": "guided drinking",
+    "status": "not measurable yet",
+    "needed": "drinking recordings"
+   },
+   {
+    "name": "eating_vs_gum",
+    "unit": "class",
+    "observability": "not_measurable",
+    "method": "no gum data",
+    "reference": "guided gum chewing",
+    "status": "not measurable yet (gum is chewing without eating; motion alone may not separate it)",
+    "needed": "gum-chewing recordings"
+   },
+   {
+    "name": "head_movement_rejection",
+    "unit": "class",
+    "observability": "inferred",
+    "method": "the eating detector's false-positive rate on nodding / shaking",
+    "reference": "guided head movement",
+    "status": "nodding 17% of 72 windows flagged; shaking 0%",
+    "needed": "more head-movement recordings"
+   }
+  ]
+ },
  "history": [
   {
-   "run_id": "eating-20261104-025343",
-   "finished_at": "2026-11-04T02:53:43.820170+00:00",
+   "run_id": "eating-20261104-030224",
+   "finished_at": "2026-11-04T03:02:24.841598+00:00",
    "test_evaluated": true,
    "selected_model": "logreg",
    "dataset_fingerprint": "f8961fc848be",
@@ -980,7 +1102,8 @@
   "export": "chewsense-motion eating-export --install-live",
   "parity": "chewsense-motion eating-parity",
   "proposals": "chewsense-motion assist-propose --loop",
-  "assist_evaluation": "chewsense-motion assist-eval"
+  "assist_evaluation": "chewsense-motion assist-eval",
+  "behavior_evaluation": "chewsense-motion behavior-eval"
  },
  "limitations": [
   "One wearer: no cross-person result exists.",

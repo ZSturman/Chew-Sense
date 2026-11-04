@@ -52,6 +52,7 @@ struct TrainingStatusContent: View {
                 recordingsSection(status)
                 errorsSection(status)
                 assistSection(status)
+                behaviorSection(status)
                 nextSection(status)
                 historySection(status)
             } else if let error = store.loadError {
@@ -312,6 +313,41 @@ struct TrainingStatusContent: View {
                 Text("Not evaluated yet: chewsense-motion assist-eval").font(.caption)
             }
         } label: { Label("Assisted labeling", systemImage: "wand.and.stars") }
+    }
+
+    // MARK: Behaviour foundation
+
+    private func behaviorSection(_ status: PipelineStatus) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                if let timing = status.behavior?.boutTiming {
+                    Text("Bouts (development, out-of-fold): \(timing.matchedBouts ?? 0)/\(timing.referenceBouts ?? 0) found · start \(TrainingStatusContent.score(timing.medianOnsetErrorS)) s late (median) · end error \(TrainingStatusContent.score(timing.medianAbsOffsetErrorS)) s · pauses \(timing.pausesDetected ?? 0)/\(timing.referencePauses ?? 0), error \(TrainingStatusContent.score(timing.medianAbsPauseErrorS)) s")
+                        .font(.caption.monospacedDigit())
+                }
+                if let cadence = status.behavior?.cadence, (cadence.windows ?? 0) > 0 {
+                    Text("Cadence vs video: \(cadence.windows ?? 0) windows, median difference \(TrainingStatusContent.score(cadence.medianAbsDifferenceHz)) Hz, \(TrainingStatusContent.percent(cadence.withinRange02Hz)) within 0.2 Hz. \(cadence.caveat ?? "")")
+                        .font(.caption)
+                }
+                if let cycles = status.behavior?.videoCycleConfidence, let auc = cycles.loroAuc {
+                    Text("Video chew-cycle confidence: rhythm-calibrated, AUC \(TrainingStatusContent.score(auc)) vs \(TrainingStatusContent.score(cycles.fixedConstantsAuc)) for the former constants (\(cycles.cycles ?? 0) cycles).")
+                        .font(.caption)
+                }
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                    GridRow { ForEach(["Measurement", "Kind", "Status", "Needed"], id: \.self) { Text($0).font(.caption.weight(.semibold)) } }
+                    ForEach(status.behavior?.registry ?? []) { item in
+                        GridRow {
+                            Text(item.name.replacingOccurrences(of: "_", with: " "))
+                            Text(item.observability.replacingOccurrences(of: "_", with: " "))
+                                .foregroundStyle(item.observability == "not_measurable" ? .secondary : .primary)
+                            Text(item.status).lineLimit(2)
+                            Text(item.needed).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: { Label("Chewing behaviour (foundation; not health advice)", systemImage: "waveform") }
     }
 
     // MARK: 10 Next, history

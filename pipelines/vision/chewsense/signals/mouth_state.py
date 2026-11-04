@@ -398,6 +398,38 @@ def _detect_cycles(
     return cycles
 
 
+# Probability that a proposed cycle lies inside a span the wearer marked as
+# chewing, by how many *other* proposed cycles end 0.3-1.5 s from it (0, 1,
+# 2+). Measured 2026-11-03 on 93 cycles in 8 recordings of one wearer
+# (`chewsense-motion behavior-eval`): leave-one-recording-out AUC 0.93 and
+# Brier 0.090, versus 0.69 and 0.151 for the former per-kind constants. It is
+# not the probability of an individually verified chew.
+CONTEXT_CONFIDENCE_VERSION = "rhythm-context-v1"
+CONTEXT_CONFIDENCE_BY_NEIGHBORS = (0.15, 0.5, 0.985)
+RHYTHM_NEIGHBOR_WINDOW_S = (0.3, 1.5)
+
+
+def calibrate_cycle_confidence(cycles: list[MouthCycle]) -> list[MouthCycle]:
+    """Replace heuristic constants with the measured chewing-context probability.
+
+    The former constant stays in ``evidence["heuristic_confidence"]``.
+    """
+    ends = np.array([c.end_ts for c in cycles], dtype=float)
+    calibrated = []
+    for cycle in cycles:
+        gaps = np.abs(ends - cycle.end_ts)
+        neighbors = int(((gaps >= RHYTHM_NEIGHBOR_WINDOW_S[0]) & (gaps <= RHYTHM_NEIGHBOR_WINDOW_S[1])).sum())
+        evidence = {
+            **cycle.evidence,
+            "heuristic_confidence": cycle.confidence,
+            "rhythm_neighbors": neighbors,
+            "confidence_basis": CONTEXT_CONFIDENCE_VERSION,
+        }
+        confidence = CONTEXT_CONFIDENCE_BY_NEIGHBORS[min(neighbors, len(CONTEXT_CONFIDENCE_BY_NEIGHBORS) - 1)]
+        calibrated.append(cycle.model_copy(update={"confidence": confidence, "evidence": evidence}))
+    return calibrated
+
+
 def detect_mouth_states(
     *,
     fps: float,
@@ -550,6 +582,7 @@ def detect_mouth_states(
         cfg=cfg,
         bs_z=bs_z,
     )
+    cycles = calibrate_cycle_confidence(cycles)
 
     return MouthStateOutputs(
         state_per_frame=codes,
