@@ -1,0 +1,105 @@
+{
+  "schema_version": "guided-experiment/1",
+  "version": 1,
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "experiment_id": "talking-while-eating",
+  "title": "Talking While Eating",
+  "summary": "Chew and talk in the same take, as happens at real meals.",
+  "purpose": "Collect chewing mixed with speech and speech without chewing so the motion detector learns to separate them.",
+  "request": {
+    "source": "seed",
+    "summary": "Talking and chewing move the jaw together at meals; no recording contains both."
+  },
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Prepare a few bites of an easy-to-chew food. Speak at a normal volume about anything."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand"
+  ],
+  "food": {
+    "kind": "food",
+    "recommended": "Bread, pasta or similar",
+    "category": "mixed"
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "chew-1",
+      "kind": "chew",
+      "instruction": "Take a bite and chew without talking",
+      "duration_s": 20,
+      "expected_behavior": "Chewing only, mouth visible",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "chew-talk",
+      "kind": "chew",
+      "instruction": "Keep chewing and talk between chews",
+      "duration_s": 25,
+      "expected_behavior": "Chewing interleaved with short phrases",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "talk-1",
+      "kind": "talk",
+      "instruction": "Swallow, then keep talking without chewing",
+      "duration_s": 20,
+      "expected_behavior": "Speech only, no food in mouth",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "chew-2",
+      "kind": "chew",
+      "instruction": "Take another bite and chew while listening",
+      "duration_s": 20,
+      "expected_behavior": "Chewing only",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "evaluation",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "chewing",
+      "talking"
+    ],
+    "food_category": [
+      "mixed"
+    ]
+  },
+  "estimated_minutes": 2.1
+}

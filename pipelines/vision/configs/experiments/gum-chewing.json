@@ -1,0 +1,103 @@
+{
+  "schema_version": "guided-experiment/1",
+  "version": 1,
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "experiment_id": "gum-chewing",
+  "title": "Chewing Gum",
+  "summary": "Chew gum, which moves the jaw like eating without a meal.",
+  "purpose": "Measure whether AirPods motion can tell gum chewing from eating; labels stay 'chewing', the gum context is recorded separately.",
+  "request": {
+    "source": "seed",
+    "summary": "Gum produces sustained chewing without eating and is a known false-alarm source."
+  },
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Have one piece of gum ready. Do not swallow it."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand"
+  ],
+  "food": {
+    "kind": "food",
+    "recommended": "One piece of chewing gum",
+    "category": "gum"
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "still-1",
+      "kind": "rest",
+      "instruction": "Sit still without chewing",
+      "duration_s": 10,
+      "expected_behavior": "Seated, jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "gum-1",
+      "kind": "chew",
+      "instruction": "Start chewing the gum normally",
+      "duration_s": 30,
+      "expected_behavior": "Steady gum chewing",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "pause-1",
+      "kind": "stop_chewing",
+      "instruction": "Hold the gum still in your cheek",
+      "duration_s": 10,
+      "expected_behavior": "Jaw still, gum parked",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "gum-2",
+      "kind": "chew",
+      "instruction": "Chew the gum again",
+      "duration_s": 30,
+      "expected_behavior": "Steady gum chewing",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "chewing"
+    ],
+    "food_category": [
+      "gum"
+    ]
+  },
+  "estimated_minutes": 2.0
+}

@@ -738,7 +738,8 @@ def test_end_to_end_pair_upload_resume_and_process(tmp_path, video):
         assert paired["server_proof"] == server_proof(code, "phone-1", fingerprint, paired["device_token"])
         client = _Client(device.server_address[1], fingerprint, paired["device_token"])
         catalog = client("GET", "/v1/catalog")[1]
-        assert catalog["schema_version"] == "guided-catalog/1" and len(catalog["experiments"]) == 8
+        assert catalog["schema_version"] == "guided-catalog/1"
+        assert len(catalog["experiments"]) == len(list(ex.SEED_DIR.glob("*.json")))
         assert client("GET", f"/v1/catalog?since={catalog['catalog_version']}")[1]["unchanged"]
 
         folder = make_session(tmp_path / "phone", "up1", video=video)

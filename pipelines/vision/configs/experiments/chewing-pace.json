@@ -1,0 +1,111 @@
+{
+  "schema_version": "guided-experiment/1",
+  "version": 1,
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "experiment_id": "chewing-pace",
+  "title": "Slow and Fast Chewing",
+  "summary": "Chew one bite slowly and another quickly.",
+  "purpose": "Cover the range of chewing speeds needed to study cadence; pace instructions are intended behaviour, never a measured rate.",
+  "request": {
+    "source": "seed",
+    "summary": "All chewing so far is at one self-selected pace; cadence estimates need a range."
+  },
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Prepare two similar bites of a food you can chew for 20 seconds."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand"
+  ],
+  "food": {
+    "kind": "food",
+    "recommended": "Apple slices, crackers or similar",
+    "category": "mixed"
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "still-1",
+      "kind": "rest",
+      "instruction": "Sit still without chewing",
+      "duration_s": 10,
+      "expected_behavior": "Seated, jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "chew-slow",
+      "kind": "chew",
+      "instruction": "Take a bite and chew slowly and deliberately",
+      "duration_s": 20,
+      "expected_behavior": "Slow, even chewing",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "stop-1",
+      "kind": "stop_chewing",
+      "instruction": "Swallow and stop chewing",
+      "duration_s": 10,
+      "expected_behavior": "Jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "chew-fast",
+      "kind": "chew",
+      "instruction": "Take another bite and chew quickly",
+      "duration_s": 20,
+      "expected_behavior": "Fast chewing",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "stop-2",
+      "kind": "stop_chewing",
+      "instruction": "Swallow and stop chewing",
+      "duration_s": 10,
+      "expected_behavior": "Jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "evaluation"
+  ],
+  "tags": {
+    "activity": [
+      "chewing"
+    ],
+    "food_category": [
+      "mixed"
+    ]
+  },
+  "estimated_minutes": 1.9
+}

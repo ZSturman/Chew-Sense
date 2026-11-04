@@ -242,6 +242,184 @@
             "sync_marker": false
           },
           {
+            "duration_s": 20.0,
+            "expected_behavior": "Slow, even chewing",
+            "id": "chew-slow",
+            "instruction": "Take a bite and chew slowly and deliberately",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Jaw still",
+            "id": "stop-1",
+            "instruction": "Swallow and stop chewing",
+            "intended_label": "not_chewing",
+            "kind": "stop_chewing",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 20.0,
+            "expected_behavior": "Fast chewing",
+            "id": "chew-fast",
+            "instruction": "Take another bite and chew quickly",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Jaw still",
+            "id": "stop-2",
+            "instruction": "Swallow and stop chewing",
+            "intended_label": "not_chewing",
+            "kind": "stop_chewing",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-end",
+            "instruction": "Perform a final nod",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          }
+        ],
+        "airpods": {
+          "configuration": "both_in_ear",
+          "required": true
+        },
+        "camera": {
+          "face_required": true,
+          "jaw_required": true,
+          "max_phone_motion_g": 0.25,
+          "min_brightness": 0.15,
+          "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+        },
+        "completion": {
+          "min_activity_valid_fraction": 0.8,
+          "min_face_visible_fraction": 0.8,
+          "min_motion_coverage": 0.9,
+          "required_sync_markers": 2
+        },
+        "equipment": [
+          "AirPods",
+          "iPhone stand"
+        ],
+        "estimated_minutes": 1.9,
+        "evaluation_purpose": [
+          "training",
+          "evaluation"
+        ],
+        "experiment_id": "chewing-pace",
+        "food": {
+          "category": "mixed",
+          "kind": "food",
+          "recommended": "Apple slices, crackers or similar"
+        },
+        "labeling": {
+          "blind_evaluation_eligible": true,
+          "coarse_review_required": true,
+          "event_review_required": true,
+          "wearer_no_food_attestation": false
+        },
+        "lead_in_s": 3.0,
+        "preparation": [
+          "Wear both AirPods and confirm they are connected to this iPhone.",
+          "Prop the iPhone so your face and jaw are visible.",
+          "Use steady, even lighting on your face.",
+          "Stay within the camera view for the whole recording.",
+          "Prepare two similar bites of a food you can chew for 20 seconds."
+        ],
+        "priority": "medium",
+        "purpose": "Cover the range of chewing speeds needed to study cadence; pace instructions are intended behaviour, never a measured rate.",
+        "request": {
+          "evidence": {},
+          "source": "seed",
+          "summary": "All chewing so far is at one self-selected pace; cadence estimates need a range."
+        },
+        "required": false,
+        "safety_notes": [],
+        "schema_version": "guided-experiment/1",
+        "summary": "Chew one bite slowly and another quickly.",
+        "tags": {
+          "activity": [
+            "chewing"
+          ],
+          "food_category": [
+            "mixed"
+          ]
+        },
+        "target_recordings": 3,
+        "title": "Slow and Fast Chewing",
+        "version": 1
+      },
+      "definition_sha256": "c69a29ecbe574c099c3954b42a8a6e6a220a8fb791810a4c400b8725c1a54f12",
+      "progress": {
+        "completed_valid": 0,
+        "remaining": 3,
+        "target": 3
+      }
+    },
+    {
+      "definition": {
+        "activities": [
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-start",
+            "instruction": "Look at the camera and nod distinctly",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Seated, jaw still",
+            "id": "still-1",
+            "instruction": "Sit still without chewing",
+            "intended_label": "not_chewing",
+            "kind": "rest",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
             "duration_s": 25.0,
             "expected_behavior": "Crunchy-food chewing, mouth visible",
             "id": "chew-1",
@@ -532,6 +710,329 @@
         "version": 1
       },
       "definition_sha256": "324eeae9080a01c499b10a9067b16f1793e6357dd7fd0d730cee995438010e5e",
+      "progress": {
+        "completed_valid": 0,
+        "remaining": 3,
+        "target": 3
+      }
+    },
+    {
+      "definition": {
+        "activities": [
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-start",
+            "instruction": "Look at the camera and nod distinctly",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          },
+          {
+            "duration_s": 15.0,
+            "expected_behavior": "Smiles, no chewing",
+            "id": "smile",
+            "instruction": "Smile and relax a few times",
+            "intended_label": "not_chewing",
+            "kind": "other",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 15.0,
+            "expected_behavior": "Wide mouth openings, no chewing",
+            "id": "yawn",
+            "instruction": "Yawn or open your mouth wide a few times",
+            "intended_label": "not_chewing",
+            "kind": "other",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 15.0,
+            "expected_behavior": "Lip movements, no chewing",
+            "id": "lips",
+            "instruction": "Purse and press your lips, then relax",
+            "intended_label": "not_chewing",
+            "kind": "other",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Seated, jaw still",
+            "id": "still-1",
+            "instruction": "Sit still with your mouth relaxed",
+            "intended_label": "not_chewing",
+            "kind": "rest",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-end",
+            "instruction": "Perform a final nod",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          }
+        ],
+        "airpods": {
+          "configuration": "both_in_ear",
+          "required": true
+        },
+        "camera": {
+          "face_required": true,
+          "jaw_required": true,
+          "max_phone_motion_g": 0.25,
+          "min_brightness": 0.15,
+          "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+        },
+        "completion": {
+          "min_activity_valid_fraction": 0.8,
+          "min_face_visible_fraction": 0.8,
+          "min_motion_coverage": 0.9,
+          "required_sync_markers": 2
+        },
+        "equipment": [
+          "AirPods",
+          "iPhone stand"
+        ],
+        "estimated_minutes": 1.6,
+        "evaluation_purpose": [
+          "training",
+          "confound_negative"
+        ],
+        "experiment_id": "facial-expressions",
+        "food": {
+          "kind": "none"
+        },
+        "labeling": {
+          "blind_evaluation_eligible": true,
+          "coarse_review_required": true,
+          "event_review_required": true,
+          "wearer_no_food_attestation": true
+        },
+        "lead_in_s": 3.0,
+        "preparation": [
+          "Wear both AirPods and confirm they are connected to this iPhone.",
+          "Prop the iPhone so your face and jaw are visible.",
+          "Use steady, even lighting on your face.",
+          "Stay within the camera view for the whole recording.",
+          "Do not eat, drink or chew gum during this recording."
+        ],
+        "priority": "medium",
+        "purpose": "Collect mouth and jaw movements unrelated to eating as hard negatives for both the video labeller and the motion detector.",
+        "request": {
+          "evidence": {},
+          "source": "seed",
+          "summary": "Smiling, yawning and mouth movements can look like chewing to video and motion."
+        },
+        "required": false,
+        "safety_notes": [],
+        "schema_version": "guided-experiment/1",
+        "summary": "Make everyday facial movements without eating.",
+        "tags": {
+          "activity": [
+            "facial_expression"
+          ]
+        },
+        "target_recordings": 3,
+        "title": "Smiling, Yawning and Expressions",
+        "version": 1
+      },
+      "definition_sha256": "7e286c3c85f74f21c5e7c979ecd209757eb7d8c8df363b667b9e4634f212f837",
+      "progress": {
+        "completed_valid": 0,
+        "remaining": 3,
+        "target": 3
+      }
+    },
+    {
+      "definition": {
+        "activities": [
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-start",
+            "instruction": "Look at the camera and nod distinctly",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Seated, jaw still",
+            "id": "still-1",
+            "instruction": "Sit still without chewing",
+            "intended_label": "not_chewing",
+            "kind": "rest",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 30.0,
+            "expected_behavior": "Steady gum chewing",
+            "id": "gum-1",
+            "instruction": "Start chewing the gum normally",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 10.0,
+            "expected_behavior": "Jaw still, gum parked",
+            "id": "pause-1",
+            "instruction": "Hold the gum still in your cheek",
+            "intended_label": "not_chewing",
+            "kind": "stop_chewing",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 30.0,
+            "expected_behavior": "Steady gum chewing",
+            "id": "gum-2",
+            "instruction": "Chew the gum again",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-end",
+            "instruction": "Perform a final nod",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          }
+        ],
+        "airpods": {
+          "configuration": "both_in_ear",
+          "required": true
+        },
+        "camera": {
+          "face_required": true,
+          "jaw_required": true,
+          "max_phone_motion_g": 0.25,
+          "min_brightness": 0.15,
+          "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+        },
+        "completion": {
+          "min_activity_valid_fraction": 0.8,
+          "min_face_visible_fraction": 0.8,
+          "min_motion_coverage": 0.9,
+          "required_sync_markers": 2
+        },
+        "equipment": [
+          "AirPods",
+          "iPhone stand"
+        ],
+        "estimated_minutes": 2.0,
+        "evaluation_purpose": [
+          "training",
+          "confound_negative"
+        ],
+        "experiment_id": "gum-chewing",
+        "food": {
+          "category": "gum",
+          "kind": "food",
+          "recommended": "One piece of chewing gum"
+        },
+        "labeling": {
+          "blind_evaluation_eligible": true,
+          "coarse_review_required": true,
+          "event_review_required": true,
+          "wearer_no_food_attestation": false
+        },
+        "lead_in_s": 3.0,
+        "preparation": [
+          "Wear both AirPods and confirm they are connected to this iPhone.",
+          "Prop the iPhone so your face and jaw are visible.",
+          "Use steady, even lighting on your face.",
+          "Stay within the camera view for the whole recording.",
+          "Have one piece of gum ready. Do not swallow it."
+        ],
+        "priority": "medium",
+        "purpose": "Measure whether AirPods motion can tell gum chewing from eating; labels stay 'chewing', the gum context is recorded separately.",
+        "request": {
+          "evidence": {},
+          "source": "seed",
+          "summary": "Gum produces sustained chewing without eating and is a known false-alarm source."
+        },
+        "required": false,
+        "safety_notes": [],
+        "schema_version": "guided-experiment/1",
+        "summary": "Chew gum, which moves the jaw like eating without a meal.",
+        "tags": {
+          "activity": [
+            "chewing"
+          ],
+          "food_category": [
+            "gum"
+          ]
+        },
+        "target_recordings": 3,
+        "title": "Chewing Gum",
+        "version": 1
+      },
+      "definition_sha256": "b4a4c432bc667b37d00ad0a7f64ffc3c234cb65ab3414f43ac66131635403fb0",
       "progress": {
         "completed_valid": 0,
         "remaining": 3,
@@ -1127,6 +1628,172 @@
         "version": 1
       },
       "definition_sha256": "af787224a5620c90b321b447cb73eed47b5bdab77dd1d4be021c67f3cba051e9",
+      "progress": {
+        "completed_valid": 0,
+        "remaining": 3,
+        "target": 3
+      }
+    },
+    {
+      "definition": {
+        "activities": [
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-start",
+            "instruction": "Look at the camera and nod distinctly",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          },
+          {
+            "duration_s": 20.0,
+            "expected_behavior": "Chewing only, mouth visible",
+            "id": "chew-1",
+            "instruction": "Take a bite and chew without talking",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 25.0,
+            "expected_behavior": "Chewing interleaved with short phrases",
+            "id": "chew-talk",
+            "instruction": "Keep chewing and talk between chews",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 20.0,
+            "expected_behavior": "Speech only, no food in mouth",
+            "id": "talk-1",
+            "instruction": "Swallow, then keep talking without chewing",
+            "intended_label": "not_chewing",
+            "kind": "talk",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 20.0,
+            "expected_behavior": "Chewing only",
+            "id": "chew-2",
+            "instruction": "Take another bite and chew while listening",
+            "intended_label": "chewing",
+            "kind": "chew",
+            "min_valid_fraction": 0.8,
+            "on_quality_loss": "pause",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-end",
+            "instruction": "Perform a final nod",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          }
+        ],
+        "airpods": {
+          "configuration": "both_in_ear",
+          "required": true
+        },
+        "camera": {
+          "face_required": true,
+          "jaw_required": true,
+          "max_phone_motion_g": 0.25,
+          "min_brightness": 0.15,
+          "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+        },
+        "completion": {
+          "min_activity_valid_fraction": 0.8,
+          "min_face_visible_fraction": 0.8,
+          "min_motion_coverage": 0.9,
+          "required_sync_markers": 2
+        },
+        "equipment": [
+          "AirPods",
+          "iPhone stand"
+        ],
+        "estimated_minutes": 2.1,
+        "evaluation_purpose": [
+          "training",
+          "evaluation",
+          "confound_negative"
+        ],
+        "experiment_id": "talking-while-eating",
+        "food": {
+          "category": "mixed",
+          "kind": "food",
+          "recommended": "Bread, pasta or similar"
+        },
+        "labeling": {
+          "blind_evaluation_eligible": true,
+          "coarse_review_required": true,
+          "event_review_required": true,
+          "wearer_no_food_attestation": false
+        },
+        "lead_in_s": 3.0,
+        "preparation": [
+          "Wear both AirPods and confirm they are connected to this iPhone.",
+          "Prop the iPhone so your face and jaw are visible.",
+          "Use steady, even lighting on your face.",
+          "Stay within the camera view for the whole recording.",
+          "Prepare a few bites of an easy-to-chew food. Speak at a normal volume about anything."
+        ],
+        "priority": "medium",
+        "purpose": "Collect chewing mixed with speech and speech without chewing so the motion detector learns to separate them.",
+        "request": {
+          "evidence": {},
+          "source": "seed",
+          "summary": "Talking and chewing move the jaw together at meals; no recording contains both."
+        },
+        "required": false,
+        "safety_notes": [],
+        "schema_version": "guided-experiment/1",
+        "summary": "Chew and talk in the same take, as happens at real meals.",
+        "tags": {
+          "activity": [
+            "chewing",
+            "talking"
+          ],
+          "food_category": [
+            "mixed"
+          ]
+        },
+        "target_recordings": 3,
+        "title": "Talking While Eating",
+        "version": 1
+      },
+      "definition_sha256": "f3d434975af96e086a1ddc4d71ab6f7a9ce9831256a602fba8f445a86b5f1b9c",
       "progress": {
         "completed_valid": 0,
         "remaining": 3,

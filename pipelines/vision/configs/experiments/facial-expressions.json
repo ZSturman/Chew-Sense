@@ -1,0 +1,101 @@
+{
+  "schema_version": "guided-experiment/1",
+  "version": 1,
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "experiment_id": "facial-expressions",
+  "title": "Smiling, Yawning and Expressions",
+  "summary": "Make everyday facial movements without eating.",
+  "purpose": "Collect mouth and jaw movements unrelated to eating as hard negatives for both the video labeller and the motion detector.",
+  "request": {
+    "source": "seed",
+    "summary": "Smiling, yawning and mouth movements can look like chewing to video and motion."
+  },
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Do not eat, drink or chew gum during this recording."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand"
+  ],
+  "food": {
+    "kind": "none"
+  },
+  "labeling": {
+    "wearer_no_food_attestation": true
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "smile",
+      "kind": "other",
+      "instruction": "Smile and relax a few times",
+      "duration_s": 15,
+      "expected_behavior": "Smiles, no chewing",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "yawn",
+      "kind": "other",
+      "instruction": "Yawn or open your mouth wide a few times",
+      "duration_s": 15,
+      "expected_behavior": "Wide mouth openings, no chewing",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "lips",
+      "kind": "other",
+      "instruction": "Purse and press your lips, then relax",
+      "duration_s": 15,
+      "expected_behavior": "Lip movements, no chewing",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "still-1",
+      "kind": "rest",
+      "instruction": "Sit still with your mouth relaxed",
+      "duration_s": 10,
+      "expected_behavior": "Seated, jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "facial_expression"
+    ]
+  },
+  "estimated_minutes": 1.6
+}
