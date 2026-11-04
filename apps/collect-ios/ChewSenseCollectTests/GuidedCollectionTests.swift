@@ -115,6 +115,12 @@ struct GuidedCollectionTests {
     private static let seedURL = repo.appendingPathComponent(
         "apps/collect-ios/ChewSenseCollect/Resources/SeedExperimentCatalog.json")
 
+    /// Rows in the bundled catalog, counted without the parser under test.
+    private static var seedExperimentCount: Int {
+        let root = (try? JSONSerialization.jsonObject(with: Data(contentsOf: seedURL))) as? [String: Any]
+        return (root?["experiments"] as? [Any])?.count ?? -1
+    }
+
     private func catalog() throws -> ExperimentCatalog {
         try ExperimentCatalog.parse(Data(contentsOf: Self.seedURL))
     }
@@ -137,7 +143,8 @@ struct GuidedCollectionTests {
 
     @Test func seedCatalogParsesAllExperiments() throws {
         let parsed = try catalog()
-        #expect(parsed.entries.count == 8)
+        #expect(Self.seedExperimentCount >= 12)
+        #expect(parsed.entries.count == Self.seedExperimentCount)
         let baseline = try entry("baseline-90s").definition
         #expect(baseline.activities.map(\.durationS) == [5, 15, 20, 10, 5, 15, 10, 5, 5])
         #expect(baseline.totalSeconds == 90)
@@ -153,7 +160,7 @@ struct GuidedCollectionTests {
         rows[0]["definition"] = definition
         root["experiments"] = rows
         let parsed = try ExperimentCatalog.parse(JSONSerialization.data(withJSONObject: root))
-        #expect(parsed.entries.count == 8)
+        #expect(parsed.entries.count == Self.seedExperimentCount)
         // The verbatim definition, including unknown fields, travels with the recording.
         let raw = try #require(try JSONSerialization.jsonObject(with: parsed.entries[0].rawDefinition) as? [String: Any])
         #expect(raw["future_field"] != nil)
@@ -169,9 +176,9 @@ struct GuidedCollectionTests {
         let store = ExperimentCatalogStore(directory: directory)
         try store.apply(Data(contentsOf: Self.seedURL))
         #expect(throws: (any Error).self) { try store.apply(Data("{\"schema_version\":1}".utf8)) }
-        #expect(store.catalog.entries.count == 8)
+        #expect(store.catalog.entries.count == Self.seedExperimentCount)
         let reopened = ExperimentCatalogStore(directory: directory)
-        #expect(reopened.catalog.entries.count == 8)
+        #expect(reopened.catalog.entries.count == Self.seedExperimentCount)
         #expect(reopened.source != .bundledSeed)
     }
 
