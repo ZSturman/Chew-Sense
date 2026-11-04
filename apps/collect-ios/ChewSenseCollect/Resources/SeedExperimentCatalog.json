@@ -228,6 +228,155 @@
             "sync_marker": true
           },
           {
+            "detail": "Chew, pause, talk or drink whenever you like. Nothing here is a label; chewing is marked afterwards.",
+            "duration_s": 180.0,
+            "expected_behavior": "Natural eating with pauses; any mix of chewing, talking, drinking and rest",
+            "id": "meal-1",
+            "instruction": "Eat your meal as you normally would",
+            "intended_label": "unknown",
+            "kind": "other",
+            "min_valid_fraction": 0.6,
+            "on_quality_loss": "mark",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 180.0,
+            "expected_behavior": "Natural eating with pauses; any mix of chewing, talking, drinking and rest",
+            "id": "meal-2",
+            "instruction": "Keep eating naturally",
+            "intended_label": "unknown",
+            "kind": "other",
+            "min_valid_fraction": 0.6,
+            "on_quality_loss": "mark",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 180.0,
+            "expected_behavior": "Natural eating, finishing, or resting after the meal",
+            "id": "meal-3",
+            "instruction": "Keep eating naturally, or sit and relax if you are done",
+            "intended_label": "unknown",
+            "kind": "other",
+            "min_valid_fraction": 0.6,
+            "on_quality_loss": "mark",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": false
+          },
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-end",
+            "instruction": "Perform a final nod",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          }
+        ],
+        "airpods": {
+          "configuration": "both_in_ear",
+          "required": true
+        },
+        "camera": {
+          "face_required": true,
+          "jaw_required": true,
+          "max_phone_motion_g": 0.25,
+          "min_brightness": 0.15,
+          "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+        },
+        "completion": {
+          "min_activity_valid_fraction": 0.6,
+          "min_face_visible_fraction": 0.8,
+          "min_motion_coverage": 0.9,
+          "required_sync_markers": 2
+        },
+        "equipment": [
+          "AirPods",
+          "iPhone stand"
+        ],
+        "estimated_minutes": 9.5,
+        "evaluation_purpose": [
+          "training",
+          "evaluation",
+          "confound_negative"
+        ],
+        "experiment_id": "natural-meal",
+        "food": {
+          "category": "meal",
+          "kind": "food_or_beverage",
+          "recommended": "Your usual meal"
+        },
+        "labeling": {
+          "blind_evaluation_eligible": true,
+          "coarse_review_required": true,
+          "event_review_required": false,
+          "wearer_no_food_attestation": false
+        },
+        "lead_in_s": 3.0,
+        "preparation": [
+          "Wear both AirPods and confirm they are connected to this iPhone.",
+          "Prop the iPhone so your face and jaw stay visible while you eat.",
+          "Use steady, even lighting on your face.",
+          "Serve a normal meal; talking, pausing and drinking are all fine.",
+          "If the meal ends early, keep sitting until the recording finishes."
+        ],
+        "priority": "high",
+        "purpose": "Capture real bout lengths, pauses, talking and drinking during a meal. Periods are not instructions about chewing; every chewing span is labelled afterwards from video and motion proposals.",
+        "request": {
+          "evidence": {},
+          "source": "seed",
+          "summary": "No natural, uninstructed meal exists; guided takes cannot show real pauses, conversation or pace changes."
+        },
+        "required": false,
+        "safety_notes": [],
+        "schema_version": "guided-experiment/1",
+        "summary": "Eat a real meal your own way for about nine minutes.",
+        "tags": {
+          "activity": [
+            "natural_meal"
+          ]
+        },
+        "target_recordings": 3,
+        "title": "Natural Meal",
+        "version": 1
+      },
+      "definition_sha256": "1facdf747a35d23f1489b2b2e8ea2c403032ff7f9fd3bb017fa23cfa3a744452",
+      "progress": {
+        "completed_valid": 0,
+        "remaining": 3,
+        "target": 3
+      }
+    },
+    {
+      "definition": {
+        "activities": [
+          {
+            "duration_s": 5.0,
+            "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+            "id": "nod-start",
+            "instruction": "Look at the camera and nod distinctly",
+            "intended_label": "not_chewing",
+            "kind": "sync_marker",
+            "min_valid_fraction": 0.9,
+            "on_quality_loss": "repeat",
+            "repeatable": true,
+            "requires_face": true,
+            "requires_motion": true,
+            "sync_marker": true
+          },
+          {
             "duration_s": 10.0,
             "expected_behavior": "Seated, jaw still",
             "id": "still-1",

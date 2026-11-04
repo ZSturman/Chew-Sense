@@ -303,3 +303,15 @@ def test_temporal_materializer_can_skip_invalid_sessions(tmp_path):
     assert manifest["rejected_sessions"][0]["session_dir"].endswith("S-20260102-000000")
     with pytest.raises(TemporalDatasetError, match="no valid schema-v2 sessions remain"):
         materialize_temporal_dataset([bad], tmp_path / "none", skip_invalid=True)
+
+
+def test_guided_contexts_keep_confounds_apart():
+    from pipeline.eating.dataset import guided_context_name
+
+    assert guided_context_name("chew", "chew-1", "mixed", "baseline-90s") == "guided:chew"
+    assert guided_context_name("chew", "gum-1", "gum", "gum-chewing") == "guided:chew:gum"
+    assert guided_context_name("chew", "chew-talk", "mixed", "talking-while-eating") == "guided:chew+talk"
+    assert guided_context_name("chew", "chew-slow", "mixed", "chewing-pace") == "guided:chew:slow"
+    assert guided_context_name("drink", "drink-1", "water", "drinking") == "guided:drink:water"
+    assert guided_context_name("other", "meal-1", "meal", "natural-meal") == "guided:other:natural-meal"
+    assert guided_context_name("talk", "talk-1", None, "talking") == "guided:talk"

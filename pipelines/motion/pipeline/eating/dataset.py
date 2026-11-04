@@ -187,6 +187,30 @@ def _read_motion(path: Path) -> tuple[np.ndarray, np.ndarray, int]:
     return t[keep], imu[keep], dropped
 
 
+CONTEXT_FOODS = {"gum", "crunchy", "soft", "water"}
+
+
+def guided_context_name(kind: str, activity_id: str, food: str | None, experiment_id: str | None) -> str:
+    """Reporting context of an instructed period (never a label).
+
+    Keeps confounds apart that share an activity kind: gum versus food
+    chewing, chewing while talking, slow versus fast chewing, and the
+    free-form periods of different experiments.
+    """
+
+    if kind == "other":
+        return f"guided:other:{experiment_id or 'unknown'}"
+    name = f"guided:{kind}"
+    if kind in {"chew", "stop_chewing", "drink"} and food in CONTEXT_FOODS:
+        name += f":{food}"
+    if kind == "chew" and "talk" in activity_id:
+        name += "+talk"
+    for pace in ("slow", "fast"):
+        if kind == "chew" and pace in activity_id:
+            name += f":{pace}"
+    return name
+
+
 def _guided_context(session_dir: Path, origin: float) -> tuple[list[tuple[float, float, str]], str | None]:
     path = session_dir / "guided_session.json"
     if not path.exists():
@@ -194,15 +218,18 @@ def _guided_context(session_dir: Path, origin: float) -> tuple[list[tuple[float,
     guided = _read_json(path)
     definition = guided.get("definition") or {}
     activities = definition.get("activities") or []
+    food = (definition.get("food") or {}).get("category")
+    experiment_id = guided.get("experiment_id") or definition.get("experiment_id")
     spans: list[tuple[float, float, str]] = []
     for attempt in guided.get("attempts") or []:
         index = attempt.get("activity_index")
         start, end = attempt.get("started_host_s"), attempt.get("ended_host_s")
         if not isinstance(index, int) or start is None or end is None or index >= len(activities):
             continue
-        kind = str(activities[index].get("kind") or "unknown")
-        spans.append((float(start) - origin, float(end) - origin, f"guided:{kind}"))
-    food = (definition.get("food") or {}).get("category")
+        activity = activities[index]
+        name = guided_context_name(str(activity.get("kind") or "unknown"), str(activity.get("id") or ""),
+                                   str(food) if food else None, experiment_id)
+        spans.append((float(start) - origin, float(end) - origin, name))
     return sorted(spans), (str(food) if food else None)
 
 

@@ -107,17 +107,18 @@ def collection_recommendations(summary: Mapping[str, Any]) -> list[dict[str, Any
             "most positives are 2025 labels whose alignment cannot be checked.",
             "baseline-90s",
         )
-    add(
-        1.0,
-        "A natural meal (manual Eating capture, then mark chewing spans)",
-        "No natural, uninstructed meal longer than five minutes exists; guided takes cannot show "
-        "real-world bout lengths, pauses or conversation during eating.",
-        None,
-    )
     recorded = {
         session.get("activity", "").removeprefix("guided:")
         for session in summary.get("sessions_overview", ())
     }
+    if "natural-meal" not in recorded:
+        add(
+            1.0,
+            "A natural meal (guided Natural Meal, labelled with assisted review)",
+            "No natural, uninstructed meal longer than five minutes exists; guided takes cannot show "
+            "real-world bout lengths, pauses or conversation during eating.",
+            "natural-meal",
+        )
     for experiment_id, title, missing in (
         ("talking-while-eating", "Talking while eating", "No recording mixes chewing with speech, as real meals do."),
         ("gum-chewing", "Chewing gum", "Gum is chewing without eating; whether motion can separate it is untested."),

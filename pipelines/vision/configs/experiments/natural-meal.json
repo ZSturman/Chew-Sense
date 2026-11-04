@@ -1,0 +1,106 @@
+{
+  "schema_version": "guided-experiment/1",
+  "experiment_id": "natural-meal",
+  "version": 1,
+  "title": "Natural Meal",
+  "summary": "Eat a real meal your own way for about nine minutes.",
+  "purpose": "Capture real bout lengths, pauses, talking and drinking during a meal. Periods are not instructions about chewing; every chewing span is labelled afterwards from video and motion proposals.",
+  "request": {
+    "source": "seed",
+    "summary": "No natural, uninstructed meal exists; guided takes cannot show real pauses, conversation or pace changes."
+  },
+  "priority": "high",
+  "required": false,
+  "target_recordings": 3,
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw stay visible while you eat.",
+    "Use steady, even lighting on your face.",
+    "Serve a normal meal; talking, pausing and drinking are all fine.",
+    "If the meal ends early, keep sitting until the recording finishes."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand"
+  ],
+  "food": {
+    "kind": "food_or_beverage",
+    "recommended": "Your usual meal",
+    "category": "meal"
+  },
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "meal-1",
+      "kind": "other",
+      "instruction": "Eat your meal as you normally would",
+      "detail": "Chew, pause, talk or drink whenever you like. Nothing here is a label; chewing is marked afterwards.",
+      "duration_s": 180,
+      "expected_behavior": "Natural eating with pauses; any mix of chewing, talking, drinking and rest",
+      "intended_label": "unknown",
+      "on_quality_loss": "mark",
+      "min_valid_fraction": 0.6
+    },
+    {
+      "id": "meal-2",
+      "kind": "other",
+      "instruction": "Keep eating naturally",
+      "duration_s": 180,
+      "expected_behavior": "Natural eating with pauses; any mix of chewing, talking, drinking and rest",
+      "intended_label": "unknown",
+      "on_quality_loss": "mark",
+      "min_valid_fraction": 0.6
+    },
+    {
+      "id": "meal-3",
+      "kind": "other",
+      "instruction": "Keep eating naturally, or sit and relax if you are done",
+      "duration_s": 180,
+      "expected_behavior": "Natural eating, finishing, or resting after the meal",
+      "intended_label": "unknown",
+      "on_quality_loss": "mark",
+      "min_valid_fraction": 0.6
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "completion": {
+    "min_activity_valid_fraction": 0.6
+  },
+  "evaluation_purpose": [
+    "training",
+    "evaluation",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "natural_meal"
+    ]
+  },
+  "estimated_minutes": 9.5,
+  "labeling": {
+    "event_review_required": false
+  }
+}
