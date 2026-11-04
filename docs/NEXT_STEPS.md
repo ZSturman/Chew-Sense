@@ -1,3 +1,33 @@
+# Audit continuation — November 3, 2026
+
+Details: [AUDIT_2026-11-03.md](AUDIT_2026-11-03.md). Branch
+`claude/audit-2026-11`.
+
+**Done:**
+- Trained and evaluated motion-only chewing-bout detectors on 32 real
+  recordings with provenance-tiered human labels, locked session splits
+  and an HTML report (`workspace/experiments/eating/`).
+- Measured a video-teacher pilot: video and motion agreed on 82% of
+  windows, and every agreed window matched the human label.
+- Added four confound experiments to the catalog.
+- Added detector status to Collect and Review.
+
+**Human next actions:**
+- Record `talking`, `talking-while-eating`, `baseline-90s`, a food texture,
+  `head-movement` and `drinking`, in that order. Review their chewing spans
+  on the phone and send them to the Mac.
+- Restart the loop service (`tools/loop-service uninstall && tools/loop-service
+  install`) and rebuild Review so they pick up the new code, stage and
+  panel. The service was left running untouched.
+
+**Codex/agent next actions:**
+- Implement agreement-based coarse proposals in Collect's review.
+- Port the detector features to Swift/CoreML and verify parity.
+- Rerun `chewsense-motion eating-experiment` after new reviewed data
+  arrives. Develop with `--dev-only`; never tune on the locked test.
+
+---
+
 # TestFlight refresh — October 31, 2026
 
 Collect **1.2 (7)** is **VALID / IN_BETA_TESTING** for the existing personal account holder. Store record **6755277802** and bundle identity are preserved. Earlier betas were expired; Apple refused the closed 1.1 train, so the current source/app version is 1.2. Compliance metadata was completed, and the source now declares OS-provided encryption exemption for subsequent uploads. Beta notes describe physical guided-loop validation as outstanding.

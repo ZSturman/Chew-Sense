@@ -1,5 +1,24 @@
 # Current Status
 
+## November 3, 2026 — first real training and evaluation
+
+See the [independent audit](AUDIT_2026-11-03.md). A motion-only chewing-bout
+detector now trains on the existing human coarse labels:
+
+- 32 recordings, one wearer;
+- persistent session-level splits;
+- grouped cross-validation and a locked test set;
+- an HTML error-analysis report.
+
+Gradient boosting on interpretable IMU features reached development F1
+0.87 [0.74–0.92] and locked-test F1 0.90 [0.51–0.98], with 7/7 test chewing
+bouts found and 2 false bouts. That is pilot evidence for one person, not a
+validated product. The deployable TCN does not yet generalize to 2026
+recordings (test F1 0.50). Nothing was promoted or deployed. Individual chew
+counting, bites and cadence remain unvalidated.
+
+---
+
 Phase 0 update: October 26, 2026. See [the protocol and current evidence](PHASE0.md)
 and [device handoff](NEXT_STEPS.md). The implementation now processes four paired
 legacy videos and supports independent blind review; physical synchronization,

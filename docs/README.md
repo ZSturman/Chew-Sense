@@ -8,6 +8,7 @@
 - [STATUS](STATUS.md): what works today.
 - [BLOCKERS](BLOCKERS.md): ordered blocking work and completion gates.
 - [ROADMAP](ROADMAP.md): data and model milestones.
+- [AUDIT_2026-11-03](AUDIT_2026-11-03.md): independent audit, first real chewing-bout training/evaluation, labeling pilot.
 
 Historical workflow documents are under
 `archive/legacy-project-history/consolidation-docs-2026/` and are not current

@@ -26,6 +26,13 @@ learning cycles passed on isolated fixtures, including fixed holdouts and new
 collection requests. No wearer model has been trained or promoted. See the
 [physical test record and next actions](docs/DEVICE_LOOP_2026-11-02.md).
 
+On November 3, an [independent audit](docs/AUDIT_2026-11-03.md) trained and
+evaluated the first motion-only chewing-bout detectors on real recordings:
+32 recordings, one wearer, locked session splits. Run
+`.venv/bin/chewsense-motion eating-experiment` to reproduce the HTML report
+in `workspace/experiments/eating/`. These are pilot results; nothing was
+promoted or deployed.
+
 Start with [START_HERE.md](START_HERE.md) for the broader repository.
 
 ## Main Products

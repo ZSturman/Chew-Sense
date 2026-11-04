@@ -37,6 +37,22 @@ manifest-safe purge so media hashes and presence flags remain truthful.
 Coarse label markers use video-relative time. If the origin is absent, the app
 refuses to relabel rather than substituting the first motion row.
 
+## Chewing-Bout Detector (coarse labels)
+
+```bash
+chewsense-motion eating-experiment                 # CV + locked test + HTML report
+chewsense-motion eating-experiment --dev-only      # exploration; locked test untouched
+chewsense-motion eating-report                     # rebuild the latest report
+chewsense-motion video-teacher-eval --vision-root <folder of chewsense-vision run outputs>
+```
+
+The detector reads sessions, loop working copies and field tests without
+modifying them. It writes to `workspace/experiments/eating/`. `splits.json`
+there is permanent; delete it only to start a new, separately reported
+evaluation. Labels are human coarse chewing spans with provenance tiers
+(see `pipelines/motion/pipeline/eating/dataset.py`). Runs are experimental
+and are never registered or deployed.
+
 ## Vision And Review
 
 ```bash

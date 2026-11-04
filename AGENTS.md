@@ -11,5 +11,6 @@ Historical repositories and original recordings are immutable source evidence.
 - Use stable per-platform DerivedData paths and topic result bundles; scratch logs go in `/tmp`.
 - Keep media/models/experiment output in ignored `workspace/` or `CHEWSENSE_WORKSPACE`.
 - Predictions never constitute verified truth. Unknown observability, sensor loss and unverified clocks must mask supervision.
-- Do not train/promote models as part of Phase 0. Device fidelity requires physical evidence.
+- Do not promote or deploy models without explicit approval. Experimental training is allowed through `chewsense-motion eating-experiment`. It writes only to `workspace/experiments/eating/`, uses human coarse labels with provenance tiers and keeps `splits.json` immutable. Use `--dev-only` while developing so the locked test is not consulted. Device fidelity requires physical evidence.
+- Coarse-label tiers with unverified clocks (2025 legacy, field tests) are eligible only behind the ±1 s transition guard; they never supervise individual chews.
 - Update `docs/PHASE0.md` and `docs/NEXT_STEPS.md` when pilot behavior or blockers change.
