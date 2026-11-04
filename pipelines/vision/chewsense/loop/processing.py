@@ -49,9 +49,29 @@ SESSION_STEPS = (
     "prepare_copies",
     "vision",
     "sync_assessment",
+    "coarse_proposals",
     "review_tasks",
 )
 RUN_ON_SESSIONS = Path(__file__).resolve().parents[2] / "run_on_sessions.py"
+
+
+def propose_coarse_spans(assisted: Path, session_id: str, log_path: Path) -> dict[str, Any]:
+    """Run ``chewsense-motion assist-propose`` for one recording (proposals, never labels).
+
+    A subprocess keeps the motion pipeline an optional peer of this package.
+    """
+    tool = Path(sys.executable).with_name("chewsense-motion")
+    command = [str(tool), "assist-propose",
+               "--session-dir", str(assisted / "sessions/raw" / session_id),
+               "--vision-dir", str(assisted / "derived/vision" / session_id),
+               "--output", str(assisted / "derived/assist" / session_id)]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as log:
+        completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=900)
+    revisions = sorted((assisted / "derived/assist" / session_id).glob("coarse-proposals-v*.json"))
+    if completed.returncode != 0 or not revisions:
+        raise RuntimeError(f"assist-propose exited with status {completed.returncode}; see {log_path}")
+    return read_json(revisions[-1]) or {}
 
 
 class StepInterrupted(Exception):
@@ -140,11 +160,13 @@ class Processor:
         *,
         vision_runner: Callable[[Path, str, Path], None] | None = None,
         on_session_done: Callable[[str], None] | None = None,
+        proposer: Callable[[Path, str, Path], dict[str, Any]] | None = None,
     ):
         self.paths = paths.ensure()
         self.config = config
         self.registry = ExperimentRegistry(paths.experiments / "definitions")
         self.vision = vision_runner or VisionRunner(config["processing"]["vision_timeout_s"])
+        self.proposer = proposer or propose_coarse_spans
         self.on_session_done = on_session_done
         self._wake = threading.Event()
         self._current: dict[str, Any] | None = None
@@ -406,6 +428,28 @@ class Processor:
         )
         write_json_atomic(reports / "sync-assessment.json", result)
         self._record(session_id, sync_assessment=result["status"])
+
+    def _step_coarse_proposals(self, job):
+        """Video + motion chewing-span proposals for assisted review.
+
+        Optional assistance: a failure is recorded on the session and in the
+        job log but does not block review tasks.
+        """
+        session_id = job["session_id"]
+        record = read_json(self.paths.session_record(session_id), {}) or {}
+        if record.get("role") == "diagnostic":
+            return
+        try:
+            payload = self.proposer(self.paths.assisted, session_id,
+                                    self.paths.session_reports(session_id) / "assist.log")
+        except Exception as exc:  # noqa: BLE001 - surfaced on the session, never hidden
+            self._record(session_id, coarse_proposals="failed",
+                         attention=f"chewing-span proposals failed: {exc}")
+            return
+        summary = payload.get("summary") or {}
+        self._record(session_id, coarse_proposals="created",
+                     coarse_proposal_summary={k: summary.get(k) for k in (
+                         "coverage", "review_items", "batch_items", "label_conflicts")})
 
     def _step_review_tasks(self, job):
         self.refresh_review_tasks()

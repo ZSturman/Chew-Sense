@@ -5,6 +5,7 @@ struct ChewSenseReviewApp: App {
     @StateObject private var state = ReviewerState()
     @StateObject private var playback = PlaybackController()
     @StateObject private var viewport = TimelineViewport()
+    @StateObject private var assist = CoarseAssistStore()
 
     var body: some Scene {
         WindowGroup {
@@ -12,6 +13,7 @@ struct ChewSenseReviewApp: App {
                 .environmentObject(state)
                 .environmentObject(playback)
                 .environmentObject(viewport)
+                .environmentObject(assist)
                 .frame(minWidth: 980, minHeight: 640)
         }
         .windowToolbarStyle(.unifiedCompact)

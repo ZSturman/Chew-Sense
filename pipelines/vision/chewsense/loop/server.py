@@ -44,7 +44,7 @@ class LoopService:
     """Owns the processor, controller and device registry for both servers."""
 
     def __init__(self, paths: LoopPaths, config: dict[str, Any], *, vision_runner=None,
-                 trainer=None, lm: LMStudio | None = None):
+                 trainer=None, lm: LMStudio | None = None, proposer=None):
         self.paths = paths.ensure()
         self.config = config
         self.identity = ServiceIdentity(paths.service).ensure()
@@ -67,7 +67,7 @@ class LoopService:
                 write_json_atomic(state, {"state": "failed", "error": "Service restarted before training completed; outputs preserved."})
         self.controller = LoopController(paths, config, lm=lm,
                                          trainer=trainer if trainer is not None else self.schedule_training)
-        self.processor = Processor(paths, config, vision_runner=vision_runner,
+        self.processor = Processor(paths, config, vision_runner=vision_runner, proposer=proposer,
                                    on_session_done=lambda _sid: self._analysis_requested.set())
         if not paths.catalog.exists():
             self.analyze()

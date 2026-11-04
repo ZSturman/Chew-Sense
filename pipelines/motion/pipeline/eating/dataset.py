@@ -18,6 +18,17 @@ model, detector, or guided schedule produced is ever a label here.
 ``session_declared_negative``
     The whole recording was captured as a declared non-eating scenario
     (legacy "Not-eating" captures, negative field-test activities).
+``human_assisted``
+    The wearer decided a span in Review after seeing video + motion
+    proposals (``coarse-review-vNNNN.json``).  Training only.
+``human_batch_accepted``
+    The wearer accepted a video + motion agreement span together with others
+    without inspecting it individually.  Training only, and its automatic
+    boundaries get an extra 0.5 s margin.
+
+Assisted tiers never enter evaluation: a label made while looking at the
+detectors cannot independently score them.  Where an assisted decision
+repeats an existing phone label, the phone label (and its tier) stands.
 
 Excluded, never labels: guided instructions, detector proposals,
 ``automatic`` sources, field-test time the reviewer did not mark, and any span
@@ -39,17 +50,19 @@ import pandas as pd
 from ..temporal import resample_motion_window
 
 
+ASSISTED_TIERS = ("human_assisted", "human_batch_accepted")
 LABEL_TIERS = (
     "human_coarse",
     "wearer_no_food_attestation",
     "legacy_human_coarse",
     "human_marked_segment",
     "session_declared_negative",
+    *ASSISTED_TIERS,
 )
-# Tiers whose labels may serve as evaluation reference.  All current tiers are
-# human statements; the tuple exists so a weaker tier can be added for
-# training only without silently entering the metrics.
-EVALUATION_TIERS = LABEL_TIERS
+# Tiers whose labels may serve as evaluation reference: independent human
+# statements only.  Assisted decisions train but never score.
+EVALUATION_TIERS = tuple(tier for tier in LABEL_TIERS if tier not in ASSISTED_TIERS)
+BATCH_BOUNDARY_MARGIN_S = 0.5
 
 MOTION_COLUMNS = ("ax", "ay", "az", "gx", "gy", "gz")
 CHEWING = "chewing"
@@ -214,11 +227,22 @@ def recorded_at(session_id: str, fallback: str) -> str:
     return fallback
 
 
-def load_canonical_session(
-    session_dir: Path,
-    *,
-    loop_roles: Mapping[str, str] | None = None,
-) -> EatingSession:
+@dataclass
+class CanonicalMotion:
+    manifest: dict[str, Any]
+    session_id: str
+    motion_path: Path
+    video_t: np.ndarray
+    imu: np.ndarray
+    dropped: int
+    origin: float
+    method: str
+    duration: float
+
+
+def load_canonical_motion(session_dir: Path) -> CanonicalMotion:
+    """Motion on the video timeline (``t - video_clock_origin``) and duration."""
+
     manifest = _read_json(session_dir / "session.json")
     session_id = str(manifest.get("session_id") or session_dir.name)
     motion_ref = manifest.get("motion") or {}
@@ -231,18 +255,103 @@ def load_canonical_session(
     if origin is None:
         raise SessionRejected("manifest has no video-clock origin")
     origin = float(origin)
-    method = str(clock.get("method") or "unknown")
     video_t = t - origin
     capture = manifest.get("capture") or {}
     duration = float(capture.get("duration_s") or video_t[-1])
+    return CanonicalMotion(
+        manifest=manifest, session_id=session_id, motion_path=motion_path, video_t=video_t, imu=imu,
+        dropped=dropped, origin=origin, method=str(clock.get("method") or "unknown"), duration=duration,
+    )
+
+
+def latest_coarse_review(session_dir: Path) -> tuple[Path, dict[str, Any]] | None:
+    revisions = sorted((Path(session_dir) / "annotations").glob("coarse-review-v*.json"))
+    if not revisions:
+        return None
+    payload = _read_json(revisions[-1])
+    if payload.get("artifact_type") != "coarse_label_review":
+        raise SessionRejected(f"{revisions[-1].name} is not a coarse-label review")
+    return revisions[-1], payload
+
+
+def _review_intervals(review: Mapping[str, Any], duration: float) -> list[tuple[float, float, str, str]]:
+    """``(start, end, label, tier)`` from a saved assisted review; label may be 'unknown'."""
+
+    result = []
+    for item in review.get("intervals") or []:
+        try:
+            start, end = float(item["start_ts"]), float(item["end_ts"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        label = str(item.get("label", ""))
+        if label not in {CHEWING, NOT_CHEWING, "unknown"} or not end > start:
+            continue
+        batch = item.get("decision") == "batch_accepted"
+        if batch and not item.get("boundary_adjusted"):
+            start, end = start + BATCH_BOUNDARY_MARGIN_S, end - BATCH_BOUNDARY_MARGIN_S
+            if not end > start:
+                continue
+        tier = "human_batch_accepted" if batch else "human_assisted"
+        result.append((max(0.0, start), min(end, duration), label, tier))
+    return result
+
+
+def overlay_review(
+    base: Sequence[LabeledInterval], review: Sequence[tuple[float, float, str, str]]
+) -> list[LabeledInterval]:
+    """Apply assisted decisions on top of independent labels.
+
+    Inside a reviewed span: 'unknown' removes any label; the same label as
+    the base keeps the base interval and tier; a different label (or no base)
+    takes the review's assisted tier.  Outside reviewed spans the base stands.
+    """
+
+    cuts = sorted({p for i in base for p in (i.start, i.end)} | {p for r in review for p in r[:2]})
+    pieces: list[LabeledInterval] = []
+    for lo, hi in zip(cuts, cuts[1:]):
+        if hi - lo <= 1e-9:
+            continue
+        mid = (lo + hi) / 2
+        base_item = next((i for i in base if i.start <= mid < i.end), None)
+        review_item = next((r for r in review if r[0] <= mid < r[1]), None)
+        if review_item is None:
+            chosen = base_item and LabeledInterval(lo, hi, base_item.label, base_item.tier)
+        elif review_item[2] == "unknown":
+            chosen = None
+        elif base_item is not None and base_item.label == review_item[2]:
+            chosen = LabeledInterval(lo, hi, base_item.label, base_item.tier)
+        else:
+            chosen = LabeledInterval(lo, hi, review_item[2], review_item[3])
+        if chosen is None:
+            continue
+        if pieces and pieces[-1].label == chosen.label and pieces[-1].tier == chosen.tier \
+                and abs(pieces[-1].end - chosen.start) <= 1e-9:
+            pieces[-1] = LabeledInterval(pieces[-1].start, chosen.end, chosen.label, chosen.tier)
+        else:
+            pieces.append(chosen)
+    return pieces
+
+
+def load_canonical_session(
+    session_dir: Path,
+    *,
+    loop_roles: Mapping[str, str] | None = None,
+) -> EatingSession:
+    motion = load_canonical_motion(session_dir)
+    manifest, session_id, motion_path = motion.manifest, motion.session_id, motion.motion_path
+    video_t, imu, dropped = motion.video_t, motion.imu, motion.dropped
+    origin, method, duration = motion.origin, motion.method, motion.duration
 
     coarse_path = session_dir / "annotations" / "coarse_labels.json"
-    if not coarse_path.exists():
+    review = latest_coarse_review(session_dir)
+    if not coarse_path.exists() and review is None:
         raise SessionRejected("no human coarse labels (coarse review missing)")
-    coarse = _read_json(coarse_path)
-    raw_intervals = coarse.get("intervals")
-    if not isinstance(raw_intervals, list):
-        raise SessionRejected("coarse labels have no interval list")
+    raw_intervals: list[Any] = []
+    if coarse_path.exists():
+        coarse = _read_json(coarse_path)
+        raw_intervals = coarse.get("intervals")
+        if not isinstance(raw_intervals, list):
+            raise SessionRejected("coarse labels have no interval list")
     activity = str(manifest.get("activity") or "unknown")
     legacy = manifest.get("source_app") == "legacy_import"
     single_negative = (
@@ -276,6 +385,10 @@ def load_canonical_session(
             notes.append(f"ignored coarse interval with non-human source {source!r}")
             continue
         intervals.append(LabeledInterval(max(0.0, start), min(end, duration), label, tier))
+    if review is not None:
+        review_path, review_payload = review
+        intervals = overlay_review(_sorted_intervals(intervals), _review_intervals(review_payload, duration))
+        notes.append(f"assisted coarse review {review_path.name} applied")
     if not intervals:
         raise SessionRejected("no human-labelled time")
     if method != "shared_host_clock":

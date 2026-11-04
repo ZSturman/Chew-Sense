@@ -8,6 +8,7 @@ struct HUDTop: View {
     let toggleHelp: () -> Void
     let toggleReviewQueue: () -> Void
     let toggleSections: () -> Void
+    let toggleAssist: () -> Void
     let toggleSignals: () -> Void
 
     @State private var showExperiment = false
@@ -33,6 +34,9 @@ struct HUDTop: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
+                    Button("Chewing spans", systemImage: "wand.and.stars") { toggleAssist() }
+                        .disabled(state.isBlindReview)
+                        .help("Review video + motion chewing-span proposals")
                     Button("Sections", systemImage: "list.bullet") { toggleSections() }
                     Button("Review chews", systemImage: "checklist") { toggleReviewQueue() }
                     Button(state.isBlindReview ? "Benchmark tools" : "Review tools", systemImage: "timer") { showExperiment.toggle() }

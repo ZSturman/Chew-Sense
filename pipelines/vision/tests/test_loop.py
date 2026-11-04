@@ -273,9 +273,18 @@ def test_bad_archives_are_rejected_without_import(tmp_path, loop, video, problem
 
 
 # --------------------------------------------------------------- processing
-def _processor(loop, vision=None, **config):
+def fake_proposer(calls=None):
+    def propose(assisted, session_id, log_path):
+        if calls is not None:
+            calls.append(session_id)
+        return {"summary": {"coverage": 0.5, "review_items": 2, "batch_items": 3, "label_conflicts": 0}}
+    return propose
+
+
+def _processor(loop, vision=None, proposer=None, **config):
     registry_for(loop)
-    return Processor(loop, loop_config(**config), vision_runner=vision or fake_vision())
+    return Processor(loop, loop_config(**config), vision_runner=vision or fake_vision(),
+                     proposer=proposer or fake_proposer())
 
 
 def _enqueue(processor, tmp_path, session_id, video, **kwargs):
@@ -315,6 +324,31 @@ def test_automatic_processing_creates_separate_assisted_and_blind_copies(tmp_pat
         assert (loop.session_reports("e1") / name).exists()
     # Source remains byte-identical to the uploaded archive contents.
     assert sha(loop.source("e1") / "e1.mov") == sha(video)
+
+
+def test_chewing_span_proposals_follow_vision(tmp_path, loop, video):
+    calls = []
+    processor = _processor(loop, proposer=fake_proposer(calls))
+    _enqueue(processor, tmp_path, "a1", video)
+    _drain(processor)
+    record = read_json(loop.session_record("a1"))
+    assert calls == ["a1"]
+    assert record["coarse_proposals"] == "created"
+    assert record["coarse_proposal_summary"]["review_items"] == 2
+    assert SESSION_STEPS.index("coarse_proposals") == SESSION_STEPS.index("vision") + 2
+
+
+def test_failed_proposals_are_visible_but_do_not_block_review(tmp_path, loop, video):
+    def broken(assisted, session_id, log_path):
+        raise RuntimeError("no motion")
+
+    processor = _processor(loop, proposer=broken)
+    _enqueue(processor, tmp_path, "f1", video)
+    _drain(processor)
+    record = read_json(loop.session_record("f1"))
+    assert record["processing"] == "completed"
+    assert record["coarse_proposals"] == "failed"
+    assert "chewing-span proposals failed: no motion" in record["attention"]
 
 
 def test_same_upload_never_creates_two_jobs(tmp_path, loop, video):
@@ -580,7 +614,7 @@ def test_training_failure_or_missing_result_is_reported(loop, returncode):
 def test_phone_status_explains_review_and_training_blockers(loop):
     from chewsense.loop.server import LoopService
 
-    service = LoopService(loop, loop_config(), vision_runner=fake_vision(), trainer=lambda p: None)
+    service = LoopService(loop, loop_config(), vision_runner=fake_vision(), trainer=lambda p: None, proposer=fake_proposer())
     summary = service.phone_status()["pipeline"]
     assert not summary["training_ready"]
     assert not summary["research_targets_met"]
@@ -722,7 +756,7 @@ def test_end_to_end_pair_upload_resume_and_process(tmp_path, video):
 
     paths = LoopPaths(tmp_path / "loop")
     config = loop_config(**{"service.max_chunk_bytes": 4096, "roles.boosted_evaluation_fraction": 1.0})
-    service = LoopService(paths, config, vision_runner=fake_vision(), trainer=lambda _p: None)
+    service = LoopService(paths, config, vision_runner=fake_vision(), trainer=lambda _p: None, proposer=fake_proposer())
     device, admin, stop = serve(service, host="127.0.0.1", device_port=0, admin_port=0, advertise=False)
     try:
         client = _Client(device.server_address[1])
@@ -793,7 +827,7 @@ def test_end_to_end_pair_upload_resume_and_process(tmp_path, video):
 def test_checksum_mismatch_restarts_upload(tmp_path):
     from chewsense.loop.server import LoopService
 
-    service = LoopService(LoopPaths(tmp_path / "loop"), loop_config(), vision_runner=fake_vision(),
+    service = LoopService(LoopPaths(tmp_path / "loop"), loop_config(), vision_runner=fake_vision(), proposer=fake_proposer(),
                           trainer=lambda _p: None)
     upload = service.create_upload("phone", {"session_id": "x", "archive_sha256": "a" * 64, "size_bytes": 4})
     service.append_chunk(upload["upload_id"], 0, b"abcd")

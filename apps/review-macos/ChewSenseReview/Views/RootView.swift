@@ -8,8 +8,10 @@ struct RootView: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
     @EnvironmentObject var viewport: TimelineViewport
+    @EnvironmentObject var assist: CoarseAssistStore
 
     @State private var showSidebar: Bool = true
+    @State private var showAssist = false
     @State private var showHelp: Bool = false
     @State private var showReviewQueue: Bool = false
     @State private var showSections = true
@@ -24,7 +26,12 @@ struct RootView: View {
                 Divider()
             }
             mainStage
-            if showReviewQueue {
+            if showAssist, state.selectedSession != nil {
+                Divider()
+                CoarseAssistPanel(onClose: { withAnimation { showAssist = false } })
+                    .frame(width: 380)
+                    .transition(.move(edge: .trailing))
+            } else if showReviewQueue {
                 Divider()
                 ReviewQueuePanel(onClose: { withAnimation { showReviewQueue = false } })
                     .frame(width: 360)
@@ -64,6 +71,7 @@ struct RootView: View {
         }
         .onChange(of: state.selectedSession?.id) { _, _ in
             loadEffectiveVideo(preserveTime: false)
+            assist.load(session: state.isBlindReview ? nil : state.selectedSession, workspaceRoot: state.workspaceRoot)
             if state.selectedSession != nil { showSidebar = false }
         }
         .onChange(of: state.useAnnotatedVideo) { _, _ in
@@ -120,8 +128,9 @@ struct RootView: View {
         VStack(spacing: 8) {
             HUDTop(toggleSidebar: { showSidebar.toggle() },
                    toggleHelp: { showHelp.toggle() },
-                   toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false } },
-                   toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false } },
+                   toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false; showAssist = false } },
+                   toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false; showAssist = false } },
+                   toggleAssist: { showAssist.toggle(); if showAssist { showReviewQueue = false; showSections = false } },
                    toggleSignals: { showSignals.toggle() })
             Text(state.isBlindReview
                  ? "Independent benchmark: add actual chews in the phone-labeled sections, then check for misses elsewhere. Routine recordings use automatic proposals."

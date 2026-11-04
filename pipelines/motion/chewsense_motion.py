@@ -1533,6 +1533,130 @@ def cmd_eating_parity(args: argparse.Namespace) -> int:
     return 0 if summary["status"] == "pass" else 1
 
 
+def _assist_root() -> Path:
+    return get_workspace_root() / "experiments" / "assist"
+
+
+def cmd_assist_propose(args: argparse.Namespace) -> int:
+    """Propose chewing spans from independent video and motion evidence (never labels)."""
+
+    from pipeline.eating.assist import empirical_summary, propose_for_session_dir
+    from pipeline.eating.dataset import SessionRejected
+    from pipeline.eating.runtime import load_spec
+
+    repo = get_repo_root()
+    workspace = get_workspace_root()
+    spec_path = Path(args.spec) if args.spec else repo / LIVE_EATING_SPEC
+    try:
+        spec = load_spec(spec_path)
+    except (OSError, ValueError) as exc:
+        print(f"Cannot read eating-detector specification {spec_path}: {exc}")
+        return 1
+    latest_eval = _assist_root() / "latest.json"
+    empirical = empirical_summary(json.loads(latest_eval.read_text()) if latest_eval.exists() else None)
+    jobs: list[tuple[Path, Path, Path]] = []
+    if args.loop:
+        assisted = workspace / "loop" / "assisted"
+        roles = {}
+        for record in sorted((workspace / "loop" / "state" / "sessions").glob("*.json")):
+            data = json.loads(record.read_text())
+            roles[data.get("session_id") or record.stem] = data.get("role")
+        for session_dir in sorted((assisted / "sessions" / "raw").iterdir()):
+            if not (session_dir / "session.json").exists():
+                continue
+            if roles.get(session_dir.name) == "diagnostic":
+                print(f"  skip {session_dir.name}: diagnostic (timing) recording")
+                continue
+            jobs.append((session_dir, assisted / "derived" / "vision" / session_dir.name,
+                         assisted / "derived" / "assist" / session_dir.name))
+    elif args.session_dir and args.vision_dir:
+        session_dir = Path(args.session_dir)
+        output = Path(args.output) if args.output else (
+            session_dir.parent.parent.parent / "derived" / "assist" / session_dir.name)
+        jobs.append((session_dir, Path(args.vision_dir), output))
+    else:
+        print("Give --loop, or --session-dir with --vision-dir")
+        return 2
+    failures = 0
+    for session_dir, vision_dir, output in jobs:
+        try:
+            path, payload = propose_for_session_dir(session_dir, vision_dir, spec, output,
+                                                    spec_path=spec_path, empirical=empirical)
+        except (FileNotFoundError, SessionRejected, ValueError) as exc:
+            failures += 1
+            print(f"  {session_dir.name}: no proposals ({exc})")
+            continue
+        summary = payload["summary"]
+        print(f"  {session_dir.name}: {summary['coverage']:.0%} agreement, {summary['review_items']} spans to review, "
+              f"{summary['label_conflicts']} conflicts with existing labels -> {path}")
+    return 1 if failures and failures == len(jobs) else 0
+
+
+def cmd_assist_eval(args: argparse.Namespace) -> int:
+    """Measure agreement proposals against existing human labels on held-out predictions."""
+
+    import pandas as pd
+
+    from pipeline.eating.assist import AssistConfig, evaluate_assist
+    from pipeline.eating.dataset import discover_sessions
+
+    workspace = get_workspace_root()
+    root = workspace / "experiments" / "eating"
+    try:
+        run_dir = _eating_run_dir(root, args.run)
+    except FileNotFoundError as exc:
+        print(exc)
+        return 1
+    metrics = json.loads((run_dir / "metrics.json").read_text())
+    selected = metrics.get("selected_model") or "hgb"
+    predictions = pd.read_csv(run_dir / "predictions.csv.gz")
+    predictions = predictions.rename(columns={f"p_{selected}": "probability"})[["session_id", "t_end", "probability"]]
+    sessions, _ = discover_sessions(
+        canonical_roots=[workspace / "sessions" / "raw", workspace / "loop" / "assisted" / "sessions" / "raw"],
+        field_test_roots=[workspace / "sessions" / "field-tests"],
+        loop_root=workspace / "loop",
+    )
+    roots = [Path(p) for p in args.vision_root] if args.vision_root else [
+        workspace / "loop" / "assisted" / "derived" / "vision",
+        workspace / "derived" / "vision",
+        workspace / "experiments" / "video-teacher-20261103" / "vision",
+    ]
+    vision = {}
+    for session in sessions:
+        for vroot in roots:
+            if (vroot / session.session_id / "mouth_cycles.json").exists() and (vroot / session.session_id / "signals" / "ts.npy").exists():
+                vision[session.session_id] = vroot / session.session_id
+                break
+    if not vision:
+        print("No recordings have both human labels and Vision output")
+        return 1
+    config = AssistConfig(motion_threshold=float(metrics["results"][selected]["threshold"]))
+    result = evaluate_assist([s for s in sessions if s.session_id in vision], vision, predictions, config)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    result.update({
+        "evaluation_id": f"assist-{stamp}",
+        "motion_run": run_dir.name,
+        "motion_predictions": "out-of-fold (development) and locked-test predictions; no recording scored by a model trained on it",
+        "vision_dirs": {k: str(v) for k, v in vision.items()},
+        "generated_at": datetime.now().astimezone().isoformat(),
+    })
+    out = _assist_root()
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"assist-{stamp}.json").write_text(json.dumps(result, indent=2, default=float) + "\n")
+    (out / "latest.json").write_text(json.dumps(result, indent=2, default=float) + "\n")
+    chew, neg, cov = result["auto_chewing_precision"], result["auto_not_chewing_precision"], result["coverage"]
+    print(f"Recordings {result['recordings']}, scored windows {result['windows_scored']}")
+    print(f"  agreement coverage {cov['rate']:.0%}; proposed chewing correct {result['totals']['auto_chewing_correct']}/"
+          f"{result['totals']['auto_chewing']} (95% CI from {chew['low']:.3f}); proposed not-chewing correct "
+          f"{result['totals']['auto_not_correct']}/{result['totals']['auto_not']} (from {neg['low']:.3f})")
+    print(f"  false positives {result['false_positive_windows']}, false negatives {result['false_negative_windows']}, "
+          f"review windows {result['review_windows']} ({result['video_unavailable_windows']} without a visible face)")
+    print(f"  modelled review effort {result['effort_model']['assisted_s']:.0f} s vs {result['effort_model']['manual_s']:.0f} s manual "
+          "(modelled, not measured)")
+    print(f"Wrote {out / f'assist-{stamp}.json'}")
+    return 0
+
+
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
@@ -1923,6 +2047,25 @@ Examples:
     p_eating_parity.add_argument("--write-live-fixture", action="store_true",
                                  help="Also regenerate Live's synthetic XCTest parity fixture for this specification")
     p_eating_parity.set_defaults(func=cmd_eating_parity)
+
+    p_assist = subparsers.add_parser(
+        "assist-propose",
+        help="Propose chewing spans where video and AirPods motion agree (proposals, never labels)",
+    )
+    p_assist.add_argument("--loop", action="store_true", help="All recordings in <workspace>/loop/assisted")
+    p_assist.add_argument("--session-dir", help="One canonical recording folder")
+    p_assist.add_argument("--vision-dir", help="Its ungated Vision output folder")
+    p_assist.add_argument("--output", help="Proposal folder (default: <workspace>/derived/assist/<session>)")
+    p_assist.add_argument("--spec", help="Eating-detector specification (default: the one bundled in Live)")
+    p_assist.set_defaults(func=cmd_assist_propose)
+
+    p_assist_eval = subparsers.add_parser(
+        "assist-eval",
+        help="Measure agreement proposals against human labels using held-out motion predictions",
+    )
+    p_assist_eval.add_argument("--run", help="Eating run for motion predictions (default: latest locked-test run)")
+    p_assist_eval.add_argument("--vision-root", action="append", help="Folder(s) of Vision outputs by session ID")
+    p_assist_eval.set_defaults(func=cmd_assist_eval)
 
     p_video_teacher = subparsers.add_parser(
         "video-teacher-eval",
