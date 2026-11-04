@@ -40,3 +40,9 @@ See:
 - [`../../docs/RUNBOOK.md`](../../docs/RUNBOOK.md)
 - [`../../docs/DATA_CONTRACT.md`](../../docs/DATA_CONTRACT.md)
 - [`../../docs/STATUS.md`](../../docs/STATUS.md)
+
+Phase 0 timing safeguards use absolute timestamp tolerances, preserve gaps under
+clock translation, and mask inference endpoints without nearby measured motion.
+Finalization also requires explicit synchronization confirmation before motion
+supervision is eligible. See [the experiment protocol](../../docs/PHASE0.md).
+No model training or promotion is required to test label transfer.

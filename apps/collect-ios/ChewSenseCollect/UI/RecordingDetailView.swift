@@ -15,6 +15,7 @@ struct RecordingDetailView: View {
     @State private var validationMessage: String?
     
     @EnvironmentObject var recorderController: RecorderController
+    @EnvironmentObject var services: CollectServices
     @State private var showShareSheet = false
     @State private var itemsToShare: [URL] = []
     @State private var isLabelled: Bool = false
@@ -89,15 +90,15 @@ struct RecordingDetailView: View {
         }
     }
 
-    private func prepareShareItems() {
-        // Prefer zip if available; fallback to folder contents
-        if #available(iOS 16.0, *) {
-            if let zip = try? recorderController.zipSessionFolder(folder) {
-                itemsToShare = [zip]
-                return
-            }
+    private func prepareShareItems() -> Bool {
+        do {
+            itemsToShare = [try recorderController.zipSessionFolder(folder)]
+            return true
+        } catch {
+            itemsToShare = []
+            validationMessage = "Export blocked: \(error.localizedDescription)"
+            return false
         }
-        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
     }
 
     var body: some View {
@@ -107,6 +108,9 @@ struct RecordingDetailView: View {
                 // Video playback view
                 PlainVideoPlayerView(player: viewModel.player)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
+
+                UploadStatusView(services: services, folder: folder)
+                    .padding(.horizontal)
 
                 // Centered play/pause button between video and timeline
                 Button(action: togglePlayPause) {
@@ -176,6 +180,7 @@ struct RecordingDetailView: View {
                                     // coarse artifact is safely on disk.
                                     recorderController.setLabelled(true, for: folder)
                                     refreshMetadata()
+                                    services.uploads.recordingFinished(folder)
                                 } catch {
                                     validationMessage = error.localizedDescription
                                 }
@@ -203,8 +208,7 @@ struct RecordingDetailView: View {
                         CollectGuidanceView(stage: .export)
                         HStack(spacing: 12) {
                             Button {
-                                prepareShareItems()
-                                showShareSheet = true
+                                if prepareShareItems() { showShareSheet = true }
                             } label: {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
@@ -224,8 +228,7 @@ struct RecordingDetailView: View {
                                 .foregroundStyle(.green)
                             HStack(spacing: 12) {
                                 Button {
-                                    prepareShareItems()
-                                    showShareSheet = true
+                                    if prepareShareItems() { showShareSheet = true }
                                 } label: {
                                     Label("Share Again", systemImage: "square.and.arrow.up")
                                 }

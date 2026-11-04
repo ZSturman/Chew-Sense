@@ -3,8 +3,39 @@ import AppKit
 
 /// Bottom deck: chew strip + transport bar + zoom controls.
 struct BottomDeck: View {
+    @EnvironmentObject var state: ReviewerState
+    @EnvironmentObject var playback: PlaybackController
+
     var body: some View {
         VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Picker("Timeline mode", selection: $state.timelineEditingEnabled) {
+                    Text("Scrub").tag(false)
+                    Text("Edit chews").tag(true)
+                }
+                .pickerStyle(.segmented).frame(width: 190)
+                .accessibilityIdentifier("timelineMode")
+                Spacer()
+                Button("Add chew", systemImage: "plus") {
+                    let t = playback.currentTime
+                    state.addChew(start: max(0, t - 0.21), end: t + 0.21, peak: t)
+                    state.timelineEditingEnabled = true
+                }
+                Button("Delete selected", systemImage: "trash") {
+                    if let id = state.selectedBiteID { state.rejectBite(id: id) }
+                    else { state.deleteSelectedOrAt(videoTime: playback.currentTime) }
+                }
+                .disabled(state.selectedChewID == nil && state.selectedBiteID == nil)
+                .accessibilityIdentifier("deleteSelectedEvent")
+                Button("Undo", systemImage: "arrow.uturn.backward") { state.undo() }
+                    .disabled(!state.canUndo)
+            }
+            .controlSize(.small)
+            Text(state.timelineEditingEnabled
+                 ? "Edit mode: click a chew to select it; drag empty space to add one, or drag its handles to adjust it."
+                 : "Scrub mode: clicking or dragging only moves playback. Switch to Edit chews to select or change events.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             ChewStripView()
                 .frame(height: 80)
             TransportBar()
@@ -51,8 +82,18 @@ struct ChewStripView: View {
                 ticks(range: range, span: span, width: width)
 
                 // Eating segments (drawn behind chew blocks)
-                ForEach(state.eatingSegments) { seg in
+                ForEach(state.showPhoneSections ? state.eatingSegments : []) { seg in
                     eatingBand(seg, range: range, span: span, width: width)
+                        .allowsHitTesting(false)
+                }
+
+                ForEach(state.visibleReviewSections) { section in
+                    let x0 = xFor(section.start, range: range, span: span, width: width)
+                    let x1 = xFor(section.end, range: range, span: span, width: width)
+                    Rectangle()
+                        .fill((section.source == .phone ? Color.blue : Color.purple).opacity(0.55))
+                        .frame(width: max(0, x1 - x0), height: 6)
+                        .offset(x: x0, y: section.source == .phone ? 1 : 8)
                         .allowsHitTesting(false)
                 }
 
@@ -291,6 +332,13 @@ struct ChewStripView: View {
 
     private func handleTap(at loc: CGPoint, width: CGFloat, range: ClosedRange<Double>, span: Double) {
         let t = tFor(loc.x, range: range, span: span, width: width)
+        guard state.timelineEditingEnabled else {
+            playback.pause()
+            state.selectChew(id: nil)
+            playback.clearLoop()
+            playback.seek(to: t)
+            return
+        }
         if let bite = bite(near: t) {
             state.selectBite(id: bite.id)
             playback.seek(to: bite.ts)
@@ -313,6 +361,14 @@ struct ChewStripView: View {
                 let xStart = g.startLocation.x
                 let xNow = max(0, min(g.location.x, width))
                 let tNow = tFor(xNow, range: range, span: span, width: width)
+                if !state.timelineEditingEnabled {
+                    playback.pause()
+                    state.selectChew(id: nil)
+                    playback.clearLoop()
+                    playback.seek(to: tNow)
+                    activeDrag = .scrub
+                    return
+                }
                 if activeDrag == nil {
                     if let hit = hitMarker(at: xStart, range: range, span: span, width: width) {
                         playback.suppressLoop = true

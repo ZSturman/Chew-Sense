@@ -8,6 +8,7 @@ import Foundation
 struct FramePrediction {
     let ts: Double
     let mouthOpen: Double
+    var headSpeed: Double? = nil
 }
 
 enum FramePredictionsLoader {
@@ -36,6 +37,10 @@ enum FramePredictionsLoader {
             .first
         guard let mouthIdx = openIdx else { return [] }
 
+        let angleIndices = ["head_yaw", "head_pitch", "head_roll"].compactMap { headers.firstIndex(of: $0) }
+        let faceIndex = headers.firstIndex(of: "face_detected")
+        var previousAngles: [Double]?
+        var previousTime: Double?
         var out: [FramePrediction] = []
         out.reserveCapacity(lines.count)
         for line in lines {
@@ -44,7 +49,23 @@ enum FramePredictionsLoader {
             guard let ts = Double(cols[tsIdx]),
                   let raw = Double(cols[mouthIdx]) else { continue }
             let mouth = raw.isFinite ? raw : 0
-            out.append(FramePrediction(ts: ts, mouthOpen: mouth))
+            var speed: Double?
+            let visible = faceIndex.map { cols.indices.contains($0) && ["true", "1"].contains(cols[$0].lowercased()) } ?? true
+            if visible, angleIndices.count == 3, angleIndices.allSatisfy({ cols.indices.contains($0) }) {
+                let angles = angleIndices.compactMap { Double(cols[$0]) }
+                if angles.count == 3, angles.allSatisfy(\.isFinite) {
+                    if let previousAngles, let previousTime, ts > previousTime, ts - previousTime <= 0.1 {
+                        let squared = zip(angles, previousAngles).map { pow($0 - $1, 2) }.reduce(0, +)
+                        speed = sqrt(squared) / (ts - previousTime)
+                    }
+                    previousAngles = angles
+                    previousTime = ts
+                }
+            } else {
+                previousAngles = nil
+                previousTime = nil
+            }
+            out.append(FramePrediction(ts: ts, mouthOpen: mouth, headSpeed: speed))
         }
         return out
     }

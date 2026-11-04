@@ -24,6 +24,8 @@
 		A100000F /* BottomDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000F /* BottomDeck.swift */; };
 		A1000010 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010 /* SessionSidebar.swift */; };
 		A1000011 /* HelpPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011 /* HelpPanel.swift */; };
+		A1000024 /* PipelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000024 /* PipelineStore.swift */; };
+		A1000025 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000025 /* PipelineView.swift */; };
 		A1000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000012 /* Assets.xcassets */; };
 		A1000020 /* TimelineViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000020 /* TimelineViewport.swift */; };
 		A1000021 /* ReviewQueueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000021 /* ReviewQueueSheet.swift */; };
@@ -62,6 +64,8 @@
 		B100000F /* BottomDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomDeck.swift; sourceTree = "<group>"; };
 		B1000010 /* SessionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSidebar.swift; sourceTree = "<group>"; };
 		B1000011 /* HelpPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPanel.swift; sourceTree = "<group>"; };
+		B1000024 /* PipelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineStore.swift; sourceTree = "<group>"; };
+		B1000025 /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
 		B1000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000020 /* TimelineViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineViewport.swift; sourceTree = "<group>"; };
@@ -165,6 +169,8 @@
 				B1000011 /* HelpPanel.swift */,
 				B1000021 /* ReviewQueueSheet.swift */,
 				B1000023 /* CycleShapeChart.swift */,
+				B1000024 /* PipelineStore.swift */,
+				B1000025 /* PipelineView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -285,6 +291,8 @@
 				A100000F /* BottomDeck.swift in Sources */,
 				A1000010 /* SessionSidebar.swift in Sources */,
 				A1000011 /* HelpPanel.swift in Sources */,
+				A1000024 /* PipelineStore.swift in Sources */,
+				A1000025 /* PipelineView.swift in Sources */,
 				A1000020 /* TimelineViewport.swift in Sources */,
 				A1000021 /* ReviewQueueSheet.swift in Sources */,
 				A1000022 /* FramePredictionsLoader.swift in Sources */,

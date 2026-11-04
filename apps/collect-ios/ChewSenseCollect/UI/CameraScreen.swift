@@ -12,6 +12,7 @@ struct CameraScreen: View {
     @ObservedObject var controller: RecorderController
     var onDone: (URL?) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var showAirPods = false
 
     init(controller: RecorderController, onDone: @escaping (URL?) -> Void = { _ in }) {
         self.controller = controller
@@ -42,10 +43,11 @@ struct CameraScreen: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                RoutePickerView()
-                    .frame(width: 44, height: 44)
-                    .foregroundColor(.white)
+                Button("AirPods", systemImage: "airpodspro") { showAirPods = true }
             }
+        }
+        .sheet(isPresented: $showAirPods) {
+            AirPodsConnectionSheet(controller: controller, keepCameraPreview: true)
         }
         .onAppear {
             controller.prepare()

@@ -22,12 +22,12 @@ struct HelpPanel: View {
                     }
 
                     section(title: "Add a chew") {
-                        bullet("Drag horizontally on the chew strip below the video to define a Closed start → Closed end range. Maximum open is initially placed at the midpoint.")
+                        bullet("The timeline starts in Scrub mode: click or drag to move playback without changing labels. Choose Edit chews before drawing a Closed start → Closed end range; Maximum open starts at the midpoint.")
                         bullet("Or, with no chew selected, press 1 / 2 / 3 to drop Closed start / Maximum open / Closed end markers at the playhead and create a chew.")
                     }
 
                     section(title: "Adjust an existing chew") {
-                        bullet("Click a chew block to select and seek to it.")
+                        bullet("In Edit chews mode, click a chew block to select it. Delete selected removes a manual addition or rejects a proposal; Undo restores the previous decision.")
                         bullet("Drag a marker to fine-tune: green ▶ Closed start · yellow ◆ Maximum open · red ◀ Closed end.")
                         bullet("With a chew selected, press 1, 2, or 3 to snap that marker to the playhead.")
                         bullet("Hold ⌥ + ←/→ to nudge the last-touched marker by one frame.")
@@ -96,7 +96,7 @@ struct HelpPanel: View {
         let rows: [(String, String)] = [
             ("Space", "Play / pause"),
             ("1 / 2 / 3", "Set Closed start / Maximum open / Closed end"),
-            ("Drag on strip", "Create new chew"),
+            ("Drag on strip", "Scrub; Edit chews mode creates/adjusts events"),
             ("A", "Add chew at playhead (0.4 s wide)"),
             ("D / Delete", "Delete selected chew"),
             ("N / P", "Next / previous chew"),

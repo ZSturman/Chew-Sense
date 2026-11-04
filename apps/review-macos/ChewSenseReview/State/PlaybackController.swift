@@ -11,6 +11,14 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var isLooping = false
     @Published var playbackRate: Double = 1.0
+    @Published private(set) var displayQuarterTurns = 0
+
+    func rotateDisplay(by turns: Int) {
+        displayQuarterTurns = ((displayQuarterTurns + turns) % 4 + 4) % 4
+        if let currentURL {
+            UserDefaults.standard.set(displayQuarterTurns, forKey: "ReviewDisplayRotation:\(currentURL.path)")
+        }
+    }
 
     /// Set to true while a marker drag is in progress. While true, loop logic
     /// will not auto-seek so the drag interaction can't be interrupted.
@@ -33,6 +41,7 @@ final class PlaybackController: ObservableObject {
         pause()
         removeTimeObserver()
         currentURL = url
+        displayQuarterTurns = UserDefaults.standard.integer(forKey: "ReviewDisplayRotation:\(url.path)")
         currentTime = 0
         duration = 0
         durationTask?.cancel()

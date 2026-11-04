@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+from chewsense.loop.process_lifetime import watch_service_parent
+
 from chewsense.config import load_config
 from chewsense.integrations.export_to_pipeline import load_events_json
 from chewsense.pipeline import run as run_pipeline
@@ -29,6 +31,8 @@ from chewsense.paths import derived_vision_root, raw_sessions_root
 from chewsense.session_bundle import (
     create_candidates_from_events,
     load_coarse_intervals,
+    load_session_manifest,
+    LegacySchemaError,
     migrate_legacy_session,
     save_auto_predictions,
 )
@@ -44,6 +48,13 @@ DONE_MARKER = "events.json"
 
 def find_session_video(session_dir: Path) -> Path | None:
     """Return the first `*.mov` (or `*.mp4`) inside a raw session bundle."""
+    try:
+        manifest = load_session_manifest(session_dir)
+    except (FileNotFoundError, LegacySchemaError):
+        manifest = None
+    if manifest is not None:
+        path = session_dir / manifest.video.path if manifest.video else None
+        return path if path is not None and path.is_file() else None
     for ext in ("*.mov", "*.MOV", "*.mp4", "*.MP4"):
         videos = sorted(session_dir.glob(ext))
         if videos:
@@ -127,13 +138,16 @@ def main() -> int:
                 session_dir,
                 source_app="collect",
             )
+            manifest = load_session_manifest(session_dir)
+            video = session_dir / manifest.video.path if manifest.video else video
+            audio_path = session_dir / manifest.audio.path if manifest.audio and manifest.audio.enabled and manifest.audio.path else None
             coarse_intervals = load_coarse_intervals(session_dir)
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"[fail-bundle] {session_id}: {exc!r}")
             continue
         if args.force or not already_labeled:
-            print(f"[run]  {session_id}: {video.name} -> {out_dir.relative_to(ROOT)}")
+            print(f"[run]  {session_id}: {video.name} -> {out_dir}")
             t0 = time.time()
             try:
                 events = run_pipeline(
@@ -141,6 +155,7 @@ def main() -> int:
                     out_dir,
                     cfg,
                     coarse_intervals=coarse_intervals,
+                    audio_path=audio_path,
                 )
                 save_auto_predictions(session_dir, events)
                 candidate_path, candidates = create_candidates_from_events(
@@ -204,4 +219,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    watch_service_parent()
     sys.exit(main())

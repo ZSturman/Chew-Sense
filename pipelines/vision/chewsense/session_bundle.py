@@ -21,6 +21,7 @@ from .canonical import (
     CanonicalPointer,
     MaterializedAnnotations,
     ReviewDraft,
+    ReviewContext,
     ReviewRevision,
     audit_artifacts,
     file_sha256,
@@ -560,6 +561,9 @@ def create_candidates_from_events(
             "vision_pipeline": f"chewsense-{__version__}",
             "automatic_events_schema": events.schema_version,
         }
+    from .features._models import model_provenance
+
+    model_versions.update(model_provenance())
     return write_candidate_artifact(
         derived_dir,
         session_id=manifest.session_id,
@@ -569,6 +573,9 @@ def create_candidates_from_events(
         model_versions=model_versions,
         generated_at=generated_at,
         debug_telemetry={
+            "video_sha256": file_sha256(session_dir / manifest.video.path) if manifest.video else None,
+            "coarse_sha256": file_sha256(session_dir / "annotations/coarse_labels.json") if (session_dir / "annotations/coarse_labels.json").exists() else None,
+            "run_manifest": _read_json(Path(derived_dir) / "debug/manifest.json") if (Path(derived_dir) / "debug/manifest.json").exists() else None,
             "source_events_schema": events.schema_version,
             "source_chew_stream": "fused_mouth_cycles",
             "automatic_mouth_states_are_telemetry": True,
@@ -606,12 +613,17 @@ def finalize_session(
                 "annotations/review-draft.json from immutable candidates"
             )
         raise FileNotFoundError(f"missing review draft: {draft_path}")
+    provenance_path = session_dir / "pilot-provenance.json"
+    if provenance_path.exists() and _read_json(provenance_path).get("legacy_diagnostic_only"):
+        raise ValueError("legacy diagnostic working copies cannot be finalized as verified training data; use a new physical recording")
     review = load_review_draft(draft_path)
     candidates_path = _candidate_path(derived_dir, review.candidate_revision)
     if not candidates_path.exists():
         raise FileNotFoundError(f"missing exact candidate revision: {candidates_path}")
     candidates = load_candidate_artifact(candidates_path)
 
+    if manifest.clock_sync.estimated_drift_ppm != 0:
+        raise ValueError("nonzero clock drift is not applied by the constant-origin mapping; use a separately validated mapping before finalization")
     complete = review_complete(candidates, review)
     if candidates.requires_full_coarse_review:
         raise ValueError(
@@ -632,9 +644,22 @@ def finalize_session(
     materialized = materialize_annotations(candidates, frozen_review)
     materialized_path = annotations_dir / f"materialized-v{frozen_review.review_revision:04d}.json"
 
-    coarse = load_coarse_intervals(session_dir) or []
+    coarse = load_coarse_intervals(session_dir)
+    if coarse is None:
+        raise ValueError("coarse review is missing; it cannot become an all-negative session")
+    coarse_hash = candidates.debug_telemetry.get("coarse_sha256")
+    if coarse_hash and coarse_hash != file_sha256(session_dir / "annotations/coarse_labels.json"):
+        raise ValueError("coarse review changed after candidate generation; generate a fresh revision and re-review")
+    for reference in (manifest.video, manifest.motion, manifest.audio if manifest.audio and manifest.audio.enabled else None):
+        if reference is not None and reference.path and reference.sha256:
+            if file_sha256(session_dir / reference.path) != reference.sha256:
+                raise ValueError(f"media hash mismatch before finalization: {reference.path}")
     motion_path = session_dir / manifest.motion.path
-    duration = manifest.capture.duration_s
+    source_meta = (candidates.debug_telemetry.get("run_manifest") or {}).get("video_meta", {})
+    if manifest.video and candidates.debug_telemetry.get("video_sha256"):
+        if file_sha256(session_dir / manifest.video.path) != candidates.debug_telemetry["video_sha256"]:
+            raise ValueError("candidate video hash does not match source video")
+    duration = source_meta.get("duration_s", manifest.capture.duration_s)
     if duration is None:
         motion = pd.read_csv(motion_path)
         ts_col = _timestamp_column(motion)
@@ -649,6 +674,7 @@ def finalize_session(
         time_offset=manifest.clock_sync.video_clock_origin_host_time_s,
         duration_s=float(duration),
         coarse_intervals=coarse,
+        review_context=frozen_review.review_context or ReviewContext(),
     )
     motion_labels_path = annotations_dir / f"motion-labels-v{frozen_review.review_revision:04d}.csv"
 

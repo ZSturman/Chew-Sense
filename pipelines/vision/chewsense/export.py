@@ -1,6 +1,7 @@
 """Exporter: writes the JSON/CSV/parquet/manifest/plots/review_payload bundle."""
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import subprocess
@@ -12,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from .events.schema import FrameRecord, VideoEvents
+from .features._models import model_provenance
 
 
 def _git_sha() -> str:
@@ -147,10 +149,15 @@ def write_outputs(
         "schema_version": events.schema_version,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "git_sha": _git_sha(),
+        "pipeline_source_sha256": hashlib.sha256(b"".join(
+            str(p.relative_to(Path(__file__).parent)).encode() + b"\0" + p.read_bytes()
+            for p in sorted(Path(__file__).parent.rglob("*.py"))
+        )).hexdigest(),
         "python": sys.version,
         "platform": platform.platform(),
         "video_meta": video_meta,
         "config": config,
+        "model_assets": model_provenance(),
         "n_frames_recorded": len(frame_records),
         "n_chew_cycle_proposals": len(events.mouth_cycles),
         "n_food_entry_proposals": len(events.food_entry_proposals),

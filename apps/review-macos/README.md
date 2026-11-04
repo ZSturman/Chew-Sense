@@ -1,5 +1,33 @@
 # ChewSense Review
 
+## Section-based review — November 2, 2026
+
+The video has a dedicated unobstructed area. **Sections** reuses the chewing
+intervals labeled in Collect; clicking one seeks to its start, zooms the timeline
+and focuses the chew queue. **Phone labels**, **Requested actions**, and
+**Chewing sections only** control navigation/bands. Requested activity times
+come from the recording's actual host-clock events, never the nominal schedule,
+and never become verified labels. Independent benchmarks keep predictions
+hidden and requested-action navigation off by default. The action toggle can
+still be enabled explicitly for navigation; it never creates or verifies events.
+
+The timeline starts in **Scrub** mode: clicking/dragging only moves playback.
+Choose **Edit chews** to select, adjust or draw events. **Add chew** is explicit,
+and **Delete selected** / **Undo** are always visible. Accidental manual additions
+can be removed without changing other annotations.
+
+In assisted review, **Accept proposals I reviewed here** accepts only pending
+proposals in the selected section; other events remain pending and the whole
+group can be undone. Phone labels need not be recreated. Fine anchors are for
+independent benchmark calibration and corrections, not manually entering every
+routine recording's chews from scratch. Final verification still requires the
+existing checks. Signal charts are available under **More**.
+
+**More → Rotate video right/left** fixes the display of older sideways clips.
+It does not edit source video, annotations or clock mapping. Current Collect
+captures orientation correctly; physical landscape preview/playback was checked.
+See [the physical test record](../../docs/DEVICE_LOOP_2026-11-02.md).
+
 <!-- WORKSPACE-VERIFICATION:START -->
 ## Current state and getting started
 
@@ -95,3 +123,25 @@ materialization and immutable review revisions are performed by
 `chewsense-vision finalize-session`.
 
 See [`../../docs/RUNBOOK.md`](../../docs/RUNBOOK.md).
+
+
+## Phase 0 experiment controls
+
+See [the full recording/review protocol](../../docs/PHASE0.md). The HUD Experiment
+panel records active labeling time, free uncertain/unobservable time ranges and
+explicit marker synchronization confirmation. Unconfirmed clocks leave motion
+supervision masked during finalization. The signal chart also follows the
+playhead when no chew is selected.
+
+Independent gold uses `prepare-experiment --blind` in a separate workspace with
+empty immutable proposals. Model and motion evidence remain hidden there;
+annotate manually before opening assisted predictions. Never run Vision in the
+blind workspace or evaluate a model against its accepted corrections.
+
+## Pipeline window
+
+**Window → Pipeline** (⌘⇧P) shows the guided loop service: processing state
+with Pause/Resume/Stop, pairing codes, sessions requiring review (blind first)
+with highlighted spans that open the right workspace at that time, required
+recordings, independent evaluation results, weaknesses and training gates.
+Choose the `workspace/loop` folder once. See [GUIDED_LOOP.md](../../docs/GUIDED_LOOP.md).

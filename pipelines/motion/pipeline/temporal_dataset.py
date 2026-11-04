@@ -53,6 +53,7 @@ HARD_NEGATIVE_ACTIVITIES = frozenset(
         "drinking",
         "drinking_water",
         "head_nod",
+        "head_movement",
         "head_shake",
         "head_shaking",
         "nodding",
@@ -87,6 +88,7 @@ class SessionMaterialization:
     candidate_sha256: str | None = None
     review_sha256: str | None = None
     review_revision: int | None = None
+    food_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,20 @@ def discover_v2_sessions(root: str | Path) -> list[Path]:
 def _normalize_activity(value: object) -> str:
     text = re.sub(r"[^a-z0-9]+", "_", str(value or "unknown").strip().lower())
     return text.strip("_") or "unknown"
+
+
+def session_activity_context(session_dir: Path, manifest: Mapping[str, Any]) -> str:
+    """Confound metadata only; never a source of training labels."""
+    activity = _normalize_activity(manifest.get("activity"))
+    if activity == "unknown" and (session_dir / "guided_session.json").exists():
+        guided = _read_json(session_dir / "guided_session.json")
+        kinds = {a.get("kind") for a in guided.get("definition", {}).get("activities", [])}
+        kinds -= {"sync_marker", "rest"}
+        confounds = {"talk": "talking", "walk": "walking", "drink": "drinking",
+                     "head_movement": "head_movement"}
+        if len(kinds) == 1:
+            activity = confounds.get(next(iter(kinds)), activity)
+    return activity
 
 
 def _load_coarse_intervals(session_dir: Path, session_id: str) -> tuple[list[dict[str, Any]], bool]:
@@ -312,7 +328,10 @@ def _nearest_values(
     right = np.clip(right, 0, len(source_t) - 1)
     choose_right = np.abs(source_t[right] - target_t) < np.abs(source_t[left] - target_t)
     indices = np.where(choose_right, right, left)
-    return values[indices]
+    distance = np.abs(source_t[indices] - target_t)
+    bracket_ok = (source_t[right] - source_t[left] <= 0.08) | (distance <= 1e-9)
+    covered = (distance <= 0.04) & bracket_ok & (target_t >= source_t[0]) & (target_t <= source_t[-1])
+    return np.where(covered, values[indices], 0)
 
 
 def _mask_for_intervals(
@@ -502,13 +521,22 @@ def _materialize_one(
         targets[:, MASK_EVENT] = 0.0
         targets[:, MASK_PHASE] = 0.0
 
+    # The endpoint itself must have sensor coverage; a mostly missing context
+    # or nearest surviving label cannot turn an outage into a negative target.
+    endpoint_valid = windows[:, 6, -1] >= 0.5
+    for column in (MASK_EATING, MASK_EVENT, MASK_PHASE):
+        targets[:, column] *= endpoint_valid
     targets[targets[:, MASK_EVENT] < 0.5, TARGET_EVENT] = 0.0
     invalid_phase = targets[:, MASK_PHASE] < 0.5
     targets[invalid_phase, TARGET_PHASE_SIN] = 0.0
     targets[invalid_phase, TARGET_PHASE_COS] = 0.0
     targets[invalid_phase, TARGET_PHASE_CONFIDENCE] = 0.0
 
-    activity = _normalize_activity(manifest.get("activity"))
+    activity = session_activity_context(session_dir, manifest)
+    guided_path = session_dir / "guided_session.json"
+    food_category = None
+    if guided_path.exists():
+        food_category = (_read_json(guided_path).get("definition", {}).get("food") or {}).get("category")
     hard_negative_session = activity in HARD_NEGATIVE_ACTIVITIES
     hard_negative_mask = (
         hard_negative_session
@@ -538,6 +566,7 @@ def _materialize_one(
         candidate_sha256=(str(materialized["candidate_sha256"]) if materialized else None),
         review_sha256=(str(materialized["review_sha256"]) if materialized else None),
         review_revision=(int(materialized["review_revision"]) if materialized else None),
+        food_category=food_category,
     )
     return (
         windows,

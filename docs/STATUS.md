@@ -1,6 +1,11 @@
 # Current Status
 
-Updated July 13, 2026.
+Phase 0 update: October 26, 2026. See [the protocol and current evidence](PHASE0.md)
+and [device handoff](NEXT_STEPS.md). The implementation now processes four paired
+legacy videos and supports independent blind review; physical synchronization,
+new human gold and actual annotation time savings remain pending.
+
+The remaining status text records the July 13, 2026 baseline.
 
 ## Bottom Line
 

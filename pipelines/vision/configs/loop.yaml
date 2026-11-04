@@ -1,0 +1,77 @@
+# Guided collection loop policy. Override per workspace in
+# $CHEWSENSE_WORKSPACE/loop/service/loop.yaml (deep-merged).
+#
+# Targets below are research-stage engineering targets copied from the
+# October 25 research and existing promotion gates. They are not measured
+# Chew Sense performance and not production requirements.
+
+roles:
+  # Deterministic, persisted assignment; a session never changes role and a
+  # repeat recording inherits its parent's role so one occasion never spans
+  # training and evaluation.
+  evaluation_fraction: 0.34
+  boosted_evaluation_fraction: 0.5
+  min_evaluation_sessions: 6
+
+processing:
+  vision_timeout_s: 3600
+  # A draft the reviewer marked verified with a full video pass is frozen
+  # automatically with the existing finalize-session code.
+  auto_finalize_verified_drafts: true
+  rescan_interval_s: 60
+
+evaluation:
+  tolerances_s: [0.25, 0.10, 0.05]
+  primary_tolerance_s: 0.25
+  min_evaluation_sessions: 6
+  min_gold_events: 300
+
+acceptance:
+  research:
+    # Research section I, "Proposed pass/fail criteria" (held-out, observable spans).
+    chew_event_f1_at_250ms: 0.85
+    per_session_relative_count_error: 0.10
+    # The research target is median closure error <= two frames; evaluation
+    # reports MAE. Absolute timing errors are typically right-skewed, so MAE
+    # is used as a usually-conservative proxy until a median is reported.
+    closure_timestamp_mae_s: 0.067
+    closure_timestamp_p95_s: 0.150
+    sync_median_residual_s: 0.05
+    sync_p95_residual_s: 0.10
+    labeling_time_saved_fraction: 0.50
+    # False events per negative minute are reported per confound; no numeric
+    # chew target has been agreed, so none is enforced.
+  # Existing Live promotion gates (pipelines/motion/pipeline/promotion.py) are
+  # authoritative for motion models and are read from code, not duplicated.
+
+training:
+  # Experimental training is allowed only when every gate passes. Promotion
+  # is never automatic.
+  auto_experimental_training: true
+  min_verified_training_sessions: 20
+  min_verified_negative_sessions: 20
+  min_sync_verified_fraction: 1.0
+  min_new_sessions_between_runs: 5
+  max_runs_per_7_days: 2
+  plateau_runs: 3
+  plateau_min_f1_gain: 0.01
+
+planner:
+  max_active_generated: 6
+  max_versions_per_experiment: 5
+  auto_publish_generated: true
+  min_activity_gold_events: 50
+  min_negative_minutes_per_confound: 5.0
+
+lmstudio:
+  enabled: true
+  base_url: "http://127.0.0.1:1234/v1"
+  timeout_s: 180   # runs in the background; never blocks processing
+  model: null   # null: use the first loaded model
+
+service:
+  device_port: 48765
+  admin_port: 48766
+  max_chunk_bytes: 8388608
+  pairing_window_s: 600
+  pairing_attempts: 5

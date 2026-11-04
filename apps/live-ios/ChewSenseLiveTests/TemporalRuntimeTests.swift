@@ -131,6 +131,17 @@ final class TemporalRuntimeTests: XCTestCase {
         }
     }
 
+    func testLargeOriginsDoNotChangeGapValidityOrRepairClockResets() throws {
+        for origin in [0.0, 3600.0, 100000.0, 1_000_000_000.0] {
+            let samples = [origin, origin + 1].map {
+                MotionSample(timestamp: $0, ax: 1, ay: 1, az: 1, gx: 1, gy: 1, gz: 1)
+            }
+            let window = try XCTUnwrap(TemporalWindowBuilder.build(samples: samples))
+            for i in 0..<150 { XCTAssertEqual(window.values[6 * 150 + i], (i == 99 || i == 149) ? 1 : 0) }
+            XCTAssertNil(TemporalWindowBuilder.build(samples: samples.reversed()))
+        }
+    }
+
     func testCadenceCueRequiresFiveIntervalsThreeViolationsAndCooldown() {
         let coach = CadenceCoach(
             minimumMedianIntervalSec: 0.5,

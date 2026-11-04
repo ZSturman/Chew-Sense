@@ -15,6 +15,13 @@ struct ChewSenseReviewApp: App {
                 .frame(minWidth: 980, minHeight: 640)
         }
         .windowToolbarStyle(.unifiedCompact)
+
+        Window("Pipeline", id: "pipeline") {
+            PipelineView()
+                .environmentObject(state)
+                .environmentObject(playback)
+        }
+        .keyboardShortcut("p", modifiers: [.command, .shift])
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .undoRedo) {

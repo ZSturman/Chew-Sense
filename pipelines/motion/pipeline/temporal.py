@@ -323,13 +323,17 @@ def resample_motion_window(
     values = np.asarray(imu, dtype=np.float32)
     if source_t.ndim != 1 or values.ndim != 2 or values.shape != (len(source_t), 6):
         raise ValueError("timestamps must be (n,) and imu must be (n, 6)")
-    if len(source_t) < 2 or np.any(np.diff(source_t) <= 0):
+    if len(source_t) < 2 or not np.all(np.isfinite(source_t)) or np.any(np.diff(source_t) <= 0):
         raise ValueError("at least two strictly increasing samples are required")
-    if sample_rate_hz <= 0 or context_seconds <= 0:
+    if not np.all(np.isfinite(values)):
+        raise ValueError("motion values must be finite")
+    if sample_rate_hz <= 0 or context_seconds <= 0 or max_gap_seconds <= 0:
         raise ValueError("sample rate and context must be positive")
 
     sample_count = int(round(sample_rate_hz * context_seconds))
     end = float(source_t[-1] if end_timestamp is None else end_timestamp)
+    if not np.isfinite(end):
+        raise ValueError("end timestamp must be finite")
     grid = end - (sample_count - 1 - np.arange(sample_count)) / float(sample_rate_hz)
     output = np.zeros((7, sample_count), dtype=np.float32)
     for channel in range(6):
@@ -341,8 +345,9 @@ def resample_motion_window(
     right_index = np.clip(right, 0, len(source_t) - 1)
     bracket_gap = source_t[right_index] - source_t[left_index]
     valid = inside & (bracket_gap <= max_gap_seconds)
-    exact = (right < len(source_t)) & np.isclose(source_t[right_index], grid, atol=1e-9)
-    valid |= exact
+    exact = (right < len(source_t)) & np.isclose(source_t[right_index], grid, rtol=0.0, atol=1e-9)
+    exact_left = (right > 0) & np.isclose(source_t[left_index], grid, rtol=0.0, atol=1e-9)
+    valid |= exact | exact_left
     output[:6, ~valid] = 0.0
     output[6] = valid.astype(np.float32)
     return output, grid

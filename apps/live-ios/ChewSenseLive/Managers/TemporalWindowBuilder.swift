@@ -32,7 +32,9 @@ enum TemporalWindowBuilder {
         maxGapSec: Double = 0.08
     ) -> TemporalModelWindow? {
         guard samples.count >= 2, sampleRateHz > 0, contextSec > 0 else { return nil }
-        let sorted = samples.sorted { $0.timestamp < $1.timestamp }
+        // A clock reset is invalid input, not something to sort into continuity.
+        let sorted = samples
+        guard maxGapSec > 0, sorted.allSatisfy({ $0.timestamp.isFinite && axisValues($0).allSatisfy(\.isFinite) }) else { return nil }
         for index in 1..<sorted.count {
             guard sorted[index - 1].timestamp < sorted[index].timestamp else { return nil }
         }
@@ -40,6 +42,7 @@ enum TemporalWindowBuilder {
         let count = Int((sampleRateHz * contextSec).rounded())
         guard count == TemporalModelWindow.sampleCount else { return nil }
         let end = endTimestamp ?? sorted.last!.timestamp
+        guard end.isFinite else { return nil }
         let timestamps = (0..<count).map {
             end - Double(count - 1 - $0) / sampleRateHz
         }
@@ -53,6 +56,7 @@ enum TemporalWindowBuilder {
 
             let exact = right < sorted.count
                 && abs(sorted[right].timestamp - timestamp) <= 1e-9
+            let exactLeft = right > 0 && abs(sorted[right - 1].timestamp - timestamp) <= 1e-9
             let validBracket = right > 0
                 && right < sorted.count
                 && sorted[right].timestamp - sorted[right - 1].timestamp <= maxGapSec
@@ -60,6 +64,8 @@ enum TemporalWindowBuilder {
             let axes: [Double]?
             if exact {
                 axes = axisValues(sorted[right])
+            } else if exactLeft {
+                axes = axisValues(sorted[right - 1])
             } else if validBracket {
                 let left = sorted[right - 1]
                 let rightSample = sorted[right]

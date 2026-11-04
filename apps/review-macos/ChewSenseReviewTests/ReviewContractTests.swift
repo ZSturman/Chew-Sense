@@ -3,6 +3,125 @@ import XCTest
 @testable import ChewSenseReview
 
 final class ReviewContractTests: XCTestCase {
+    private var savedWorkspacePreference: Any?
+
+    override func setUp() {
+        super.setUp()
+        savedWorkspacePreference = UserDefaults.standard.object(forKey: "ChewSenseReview.workspaceRoot")
+    }
+
+    override func tearDown() {
+        if let savedWorkspacePreference {
+            UserDefaults.standard.set(savedWorkspacePreference, forKey: "ChewSenseReview.workspaceRoot")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "ChewSenseReview.workspaceRoot")
+        }
+        super.tearDown()
+    }
+
+    func testSectionNavigationKeepsPhoneTruthSeparateFromActualInstructionTimes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("annotations"), withIntermediateDirectories: true)
+        let coarse = Data(#"{"intervals":[{"start_ts":20,"end_ts":40,"label":"chewing"}]}"#.utf8)
+        try coarse.write(to: directory.appendingPathComponent("annotations/coarse_labels.json"))
+        let guided = Data(#"{"video_clock_origin_host_time_s":100,"definition":{"activities":[{"id":"chew","kind":"chew","instruction":"Chew normally","duration_s":20}]},"attempts":[{"activity_id":"chew","outcome":"completed","started_host_s":125,"ended_host_s":148}]}"#.utf8)
+        try guided.write(to: directory.appendingPathComponent("guided_session.json"))
+        let assisted = ReviewSection.load(from: directory, includeInstructions: true)
+        XCTAssertEqual(assisted.count, 2)
+        XCTAssertEqual(assisted[0].source, .phone)
+        XCTAssertEqual(assisted[0].start, 20)
+        XCTAssertEqual(assisted[1].source, .instruction)
+        XCTAssertEqual(assisted[1].start, 25)
+        XCTAssertEqual(assisted[1].end, 48)
+        let blind = ReviewSection.load(from: directory, includeInstructions: false)
+        XCTAssertEqual(blind.count, 1)
+        XCTAssertEqual(blind[0].source, .phone)
+    }
+
+    @MainActor
+    func testManualChewDeletionAndUndoPreserveOtherAnnotations() throws {
+        let fixture = try makeSessionFixture(chews: [chew("original", 0.1, 0.2, 0.3)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        XCTAssertFalse(state.timelineEditingEnabled)
+        state.addChew(start: 0.6, end: 0.9, peak: 0.75)
+        XCTAssertEqual(state.overrides.addedChews.count, 1)
+        state.deleteSelectedOrAt(videoTime: 0.75)
+        XCTAssertTrue(state.overrides.addedChews.isEmpty)
+        XCTAssertEqual(state.chews.map(\.id), ["original"])
+        XCTAssertTrue(state.overrides.chewDecisions.isEmpty)
+        state.undo()
+        XCTAssertEqual(state.overrides.addedChews.count, 1)
+        state.redo()
+        XCTAssertTrue(state.overrides.addedChews.isEmpty)
+    }
+
+    @MainActor
+    func testFocusedAcceptanceNeverVerifiesEventsOutsideTheReviewedSection() throws {
+        let fixture = try makeSessionFixture(chews: [chew("inside", 0.1, 0.2, 0.3), chew("outside", 0.6, 0.7, 0.8)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let annotations = fixture.session.rawDir.appendingPathComponent("annotations")
+        try FileManager.default.createDirectory(at: annotations, withIntermediateDirectories: true)
+        try Data(#"{"intervals":[{"start_ts":0,"end_ts":0.4,"label":"chewing"}]}"#.utf8)
+            .write(to: annotations.appendingPathComponent("coarse_labels.json"))
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        state.focusedSectionID = "phone-0"
+        XCTAssertEqual(state.reviewQueueChews.map(\.id), ["inside"])
+        XCTAssertEqual(state.selectNextChew()?.id, "inside")
+        XCTAssertEqual(state.selectNextChew()?.id, "inside")
+        state.acceptReviewedSectionProposals()
+        XCTAssertTrue(state.isVerified(id: "inside"))
+        XCTAssertFalse(state.isVerified(id: "outside"))
+        XCTAssertFalse(state.canFinalizeReview)
+        let decisions = state.overrides.chewDecisions
+        state.showPhoneSections = false
+        state.showInstructionSections = false
+        XCTAssertEqual(state.overrides.chewDecisions, decisions)
+        state.undo()
+        XCTAssertFalse(state.isVerified(id: "inside"))
+    }
+
+    func testExperimentContextRoundTripAndBlindProposalGuard() throws {
+        let (bundle, hash) = try loadArtifact(makeCandidateArtifact(chews: [chew("c", 0.1, 0.2, 0.3)]))
+        var draft = ReviewDraft.empty(sessionID: "golden_session", candidateRevision: bundle.candidateRevision, candidateSHA256: hash)
+        draft.reviewContext = .init(mode: "assisted", activeSeconds: 12.5, syncVerified: false,
+            excludedSpans: [.init(startTS: 1.0, endTS: 2.0, disposition: "unobservable")])
+        let data = try JSONEncoder().encode(draft)
+        XCTAssertEqual(try JSONDecoder().decode(ReviewDraft.self, from: data), draft)
+        XCTAssertNoThrow(try ReviewContractValidator.validate(draft, candidates: bundle, candidateHash: hash))
+        draft.reviewContext?.mode = "blind"
+        XCTAssertThrowsError(try ReviewContractValidator.validate(draft, candidates: bundle, candidateHash: hash))
+    }
+
+    func testNestedDetectorFloatsMatchPythonWithoutDecimalRounding() throws {
+        let data = Data(#"{"nested": {"confidence": 0.022380195558071136, "gap": 0.033334000000000086, "negative_zero": -0.0, "tiny": 1e-06, "integer": 12}}"#.utf8)
+        XCTAssertEqual(try CandidateContentHasher.hash(data: data), "51115945d8593e6ce7f1ea65bd2566d753b58c50f3f143e05f339b22d0103760")
+    }
+
+    @MainActor
+    func testWorkspaceSwitchSavesDraftAndClearsPreviouslyVisiblePredictions() throws {
+        let fixture = try makeSessionFixture(chews: [chew("c", 0.1, 0.2, 0.3)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        XCTAssertEqual(state.chews.count, 1)
+        state.markChewUncertain(id: "c")
+        let next = fixture.root.appendingPathComponent("blind")
+        state.setWorkspaceRoot(next)
+        XCTAssertNil(state.selectedSession)
+        XCTAssertTrue(state.chews.isEmpty)
+        XCTAssertTrue(state.framePredictions.isEmpty)
+        let saved = try XCTUnwrap(OverridePersistence.loadIfPresent(fixture.session.overridesURL))
+        XCTAssertEqual(saved.chewDecisions.first?.disposition, .uncertain)
+        XCTAssertFalse(saved.verified)
+    }
+
     func testGuidanceNamesTheRequiredReviewHandoff() {
         XCTAssertEqual(ReviewGuidanceStage.workspace.title, "Open a review workspace")
         XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("finalize-session"))

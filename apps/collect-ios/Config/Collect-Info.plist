@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- Merged with the generated Info.plist. Arrays cannot be expressed as
+	     INFOPLIST_KEY_ build settings, so Bonjour discovery lives here. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_chewsense._tcp</string>
+	</array>
+</dict>
+</plist>

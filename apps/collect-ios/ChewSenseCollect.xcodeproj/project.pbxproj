@@ -404,11 +404,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = MF8J7AY2X3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Collect-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Collect finds and connects to the ChewSense service on your Mac to send recordings you choose and to receive recording requests. Nothing is sent elsewhere.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Optional microphone access records local review audio for voice-activity filtering and human review. Audio is not used by the shipping motion model.";
@@ -422,7 +424,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSense-DataCollectionAndLabeling";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -442,11 +444,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = MF8J7AY2X3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Collect-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Collect finds and connects to the ChewSense service on your Mac to send recordings you choose and to receive recording requests. Nothing is sent elsewhere.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Optional microphone access records local review audio for voice-activity filtering and human review. Audio is not used by the shipping motion model.";
@@ -460,7 +464,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "zachary-sturman.ChewSense-DataCollectionAndLabeling";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

@@ -12,28 +12,23 @@ struct CycleShapeChart: View {
     private let padSeconds: Double = 0.15
 
     var body: some View {
-        if let chew = state.selectedChew {
-            content(for: chew)
+        if !state.isBlindReview {
+            content(for: state.selectedChew)
                 .frame(height: 130)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(alignment: .topLeading) {
-                    legend
-                        .padding(8)
-                }
+                .overlay(alignment: .topLeading) { legend.padding(8) }
         }
     }
 
     @ViewBuilder
-    private func content(for chew: ReviewChew) -> some View {
-        let lo = chew.startTS - padSeconds
-        let hi = chew.endTS + padSeconds
-        let samples = windowedSamples(in: lo...hi)
-        let isReal = !samples.isEmpty
-        let series: [(t: Double, v: Double)] = isReal
-            ? samples
-            : stylizedTriangle(for: chew)
+    private func content(for chew: ReviewChew?) -> some View {
+        let lo = max(0, chew.map { $0.startTS - padSeconds } ?? (playback.currentTime - 3))
+        let hi = chew.map { $0.endTS + padSeconds } ?? max(6, playback.currentTime + 3)
+        let series = windowedSamples(in: lo...hi)
+        let head = state.framePredictions.filter { (lo...hi).contains($0.ts) && $0.headSpeed != nil }
+        let headMax = max(head.compactMap(\.headSpeed).max() ?? 1, 1e-6)
         let yMax = max(series.map(\.v).max() ?? 1.0, 1e-6)
         let motion = windowedMotion(in: lo...hi)
         let accelerationMax = max(motion.map(\.accelerationMagnitude).max() ?? 1.0, 1e-6)
@@ -64,6 +59,12 @@ struct CycleShapeChart: View {
                 .foregroundStyle(Color.pink.opacity(0.75))
                 .lineStyle(StrokeStyle(lineWidth: 1))
             }
+            ForEach(Array(head.enumerated()), id: \.offset) { _, sample in
+                LineMark(x: .value("t", sample.ts), y: .value("Visual head speed", (sample.headSpeed ?? 0) / headMax),
+                         series: .value("Head", "visual head speed"))
+                    .foregroundStyle(Color.purple)
+            }
+            if let chew {
             RuleMark(x: .value("start", chew.startTS))
                 .foregroundStyle(Color.green)
                 .lineStyle(StrokeStyle(lineWidth: 1.5))
@@ -82,6 +83,7 @@ struct CycleShapeChart: View {
                 .annotation(position: .top, alignment: .trailing) {
                     Text("C₁").font(.caption2.bold()).foregroundStyle(.red)
                 }
+            }
             RuleMark(x: .value("playhead", playback.currentTime))
                 .foregroundStyle(Color.white.opacity(0.85))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
@@ -93,7 +95,7 @@ struct CycleShapeChart: View {
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.08))
                 AxisValueLabel {
                     if let t = value.as(Double.self) {
-                        Text(formatRelative(t, origin: chew.startTS))
+                        Text(String(format: "%.2f s", t))
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.7))
                     }
@@ -106,7 +108,8 @@ struct CycleShapeChart: View {
     private var legend: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 10) {
-                legendItem(color: .cyan, text: state.framePredictions.isEmpty ? "stylized jaw" : "visual jaw-open")
+                if !state.framePredictions.isEmpty { legendItem(color: .cyan, text: "visual jaw-open") }
+                if state.framePredictions.contains(where: { $0.headSpeed != nil }) { legendItem(color: .purple, text: "visual head speed") }
                 if !state.motionEvidence.isEmpty {
                     legendItem(color: .orange, text: "AirPods accel")
                     legendItem(color: .pink, text: "AirPods rotation")
@@ -145,20 +148,4 @@ struct CycleShapeChart: View {
         state.motionEvidence.filter { range.contains($0.videoTS) }
     }
 
-    private func stylizedTriangle(for chew: ReviewChew) -> [(t: Double, v: Double)] {
-        let lo = chew.startTS - padSeconds
-        let hi = chew.endTS + padSeconds
-        return [
-            (lo, 0),
-            (chew.startTS, 0),
-            (chew.peakTS, 1),
-            (chew.endTS, 0),
-            (hi, 0),
-        ]
-    }
-
-    private func formatRelative(_ t: Double, origin: Double) -> String {
-        let d = t - origin
-        return String(format: "%+.2fs", d)
-    }
 }

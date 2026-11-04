@@ -44,6 +44,7 @@ struct ReviewQueuePanel: View {
             rebuildQueue(reset: true)
         }
         .onChange(of: unverifiedOnly) { _, _ in rebuildQueue(reset: true) }
+        .onChange(of: state.focusedSectionID) { _, _ in rebuildQueue(reset: true) }
         .onChange(of: state.chews.map(\.id)) { _, _ in rebuildQueue(reset: false) }
         .onDisappear {
             playback.clearLoop()
@@ -318,7 +319,7 @@ struct ReviewQueuePanel: View {
     }
 
     private func rebuildQueue(reset: Bool) {
-        let new = state.chews
+        let new = state.reviewQueueChews
             .filter { !unverifiedOnly || !state.isVerified(id: $0.id) }
             .map(\.id)
         queue = new

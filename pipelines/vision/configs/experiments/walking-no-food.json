@@ -1,0 +1,117 @@
+{
+  "schema_version": "guided-experiment/1",
+  "experiment_id": "walking-no-food",
+  "version": 1,
+  "title": "Walking Without Eating",
+  "summary": "Identify walking-related false positives.",
+  "purpose": "Collect negative examples of walking-related AirPods movement.",
+  "request": {
+    "source": "seed",
+    "summary": "Walking produces periodic head motion that a motion model may confuse with chewing."
+  },
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "preparation": [
+    "Wear both AirPods and confirm they are connected.",
+    "No food required.",
+    "Find a clear, safe, level area to walk.",
+    "Start and finish standing, facing the camera."
+  ],
+  "equipment": [
+    "AirPods",
+    "Safe walking space"
+  ],
+  "food": {
+    "kind": "none"
+  },
+  "camera": {
+    "position": "Hold the iPhone at chest height facing you while standing; it may face away while walking.",
+    "face_required": true,
+    "jaw_required": false
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Stand still and nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "stand-1",
+      "kind": "rest",
+      "instruction": "Stand without eating",
+      "duration_s": 15,
+      "expected_behavior": "Standing still",
+      "intended_label": "not_chewing",
+      "requires_face": false
+    },
+    {
+      "id": "walk-1",
+      "kind": "walk",
+      "instruction": "Walk normally",
+      "duration_s": 30,
+      "expected_behavior": "Natural walking pace",
+      "intended_label": "not_chewing",
+      "requires_face": false,
+      "on_quality_loss": "mark"
+    },
+    {
+      "id": "stand-2",
+      "kind": "rest",
+      "instruction": "Stop and stand still",
+      "duration_s": 15,
+      "expected_behavior": "Standing still",
+      "intended_label": "not_chewing",
+      "requires_face": false
+    },
+    {
+      "id": "walk-talk",
+      "kind": "walk",
+      "instruction": "Walk while talking",
+      "duration_s": 20,
+      "expected_behavior": "Walking and speaking",
+      "intended_label": "not_chewing",
+      "requires_face": false,
+      "on_quality_loss": "mark"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Face the camera and perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "walking",
+      "talking"
+    ]
+  },
+  "estimated_minutes": 2.5,
+  "safety_notes": [
+    "Walk only where it is safe; watch where you are going, not the screen.",
+    "Stop the recording at any time if you need to."
+  ],
+  "labeling": {
+    "wearer_no_food_attestation": true,
+    "event_review_required": false
+  },
+  "completion": {
+    "min_face_visible_fraction": 0.2
+  }
+}

@@ -39,7 +39,7 @@ class HandsExtractor:
             min_tracking_confidence=cfg["hands"]["min_tracking_confidence"],
         )
         self._lm = mp_vision.HandLandmarker.create_from_options(opts)
-        self._frame_idx = 0
+        self._last_timestamp_ms = -1
 
     def close(self):
         try:
@@ -54,13 +54,13 @@ class HandsExtractor:
         self.close()
 
     def process(
-        self, bgr, mouth_xy: tuple[float, float] | None, face_scale: float
+        self, bgr, mouth_xy: tuple[float, float] | None, face_scale: float, timestamp_s: float
     ) -> HandFrameFeatures:
         h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        ts_ms = self._frame_idx * 33
-        self._frame_idx += 1
+        ts_ms = max(self._last_timestamp_ms + 1, round(timestamp_s * 1000))
+        self._last_timestamp_ms = ts_ms
         out = HandFrameFeatures()
         try:
             res = self._lm.detect_for_video(mp_image, ts_ms)

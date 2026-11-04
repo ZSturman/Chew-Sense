@@ -42,6 +42,91 @@ final class ReviewerState: ObservableObject {
     // MARK: UI state
     @Published var statusMessage = ""
     @Published var isDirty = false
+    @Published private(set) var reviewSections: [ReviewSection] = []
+    @Published var showPhoneSections = true
+    @Published var showInstructionSections = true
+    @Published var chewingSectionsOnly = true
+    @Published var focusedSectionID: String?
+    @Published var timelineEditingEnabled = false
+
+    var visibleReviewSections: [ReviewSection] {
+        reviewSections.filter {
+            ($0.source == .phone ? showPhoneSections : showInstructionSections)
+                && (!chewingSectionsOnly || $0.kind == "chew")
+        }
+    }
+
+    var focusedReviewSection: ReviewSection? {
+        reviewSections.first { $0.id == focusedSectionID }
+    }
+
+    var reviewQueueChews: [ReviewChew] {
+        guard let section = focusedReviewSection else { return chews }
+        return chews.filter { $0.peakTS >= section.start && $0.peakTS < section.end }
+    }
+
+    func acceptReviewedSectionProposals() {
+        guard !isBlindReview, focusedReviewSection != nil else { return }
+        let pending = reviewQueueChews.filter { disposition(for: $0.id) == nil && isCandidateChew($0.id) }
+        guard !pending.isEmpty else { return }
+        pushUndo()
+        invalidateCompletion()
+        overrides.chewDecisions += pending.map { .init(candidateID: $0.id, disposition: .accepted) }
+        rebuildPreview()
+        isDirty = true
+        statusMessage = "Accepted \(pending.count) proposals in the section you reviewed; other sections remain pending"
+    }
+
+    @Published var reviewTimerRunning = false
+    private var reviewTimerStart: TimeInterval?
+    var isBlindReview: Bool { overrides.reviewContext?.mode == "blind" }
+
+    func toggleReviewTimer() {
+        if reviewTimerRunning { accumulateReviewTime() }
+        else {
+            if overrides.reviewContext == nil { overrides.reviewContext = .init() }
+            reviewTimerStart = ProcessInfo.processInfo.systemUptime
+            reviewTimerRunning = true
+        }
+        isDirty = true
+    }
+
+    private func accumulateReviewTime() {
+        if let start = reviewTimerStart {
+            if overrides.reviewContext == nil { overrides.reviewContext = .init() }
+            overrides.reviewContext?.activeSeconds += max(0, ProcessInfo.processInfo.systemUptime - start)
+        }
+        reviewTimerStart = nil
+        reviewTimerRunning = false
+    }
+
+    func confirmSynchronization(_ value: Bool) {
+        if overrides.reviewContext == nil { overrides.reviewContext = .init() }
+        overrides.reviewContext?.syncVerified = value
+        overrides.verified = false
+        isDirty = true
+    }
+
+    func excludeSpan(start: Double, end: Double, disposition: String) {
+        guard start.isFinite, end.isFinite, start >= 0, start < end else {
+            statusMessage = "Excluded range requires 0 ≤ start < end"
+            return
+        }
+        pushUndo()
+        if overrides.reviewContext == nil { overrides.reviewContext = .init() }
+        overrides.reviewContext?.excludedSpans.append(.init(startTS: start, endTS: end, disposition: disposition))
+        invalidateCompletion()
+        isDirty = true
+        statusMessage = "Excluded \(String(format: "%.2f–%.2f", start, end)) seconds"
+    }
+
+    func removeLastExclusion() {
+        guard overrides.reviewContext?.excludedSpans.isEmpty == false else { return }
+        pushUndo()
+        overrides.reviewContext?.excludedSpans.removeLast()
+        invalidateCompletion()
+        isDirty = true
+    }
 
     // MARK: Undo / redo
     private struct Snapshot {
@@ -69,6 +154,11 @@ final class ReviewerState: ObservableObject {
     // MARK: - Workspace
 
     func setWorkspaceRoot(_ url: URL) {
+        if workspaceRoot != url {
+            guard saveBeforeLeavingSession() else { return }
+            selectedSession = nil
+            resetLoadedState()
+        }
         workspaceRoot = url
         UserDefaults.standard.set(url.path, forKey: Self.rootDefaultsKey)
         refreshSessions()
@@ -81,7 +171,17 @@ final class ReviewerState: ObservableObject {
 
     // MARK: - Loading
 
+    private func saveBeforeLeavingSession() -> Bool {
+        let wasTiming = reviewTimerRunning
+        accumulateReviewTime()
+        if wasTiming { isDirty = true }
+        if isDirty { saveOverrides() }
+        return !isDirty
+    }
+
     func loadSession(_ session: Session) {
+        guard saveBeforeLeavingSession() else { return }
+        accumulateReviewTime()
         selectedSession = session
         resetLoadedState()
         guard let candidateURL = session.candidatesJSON else {
@@ -111,6 +211,9 @@ final class ReviewerState: ObservableObject {
             candidates = bundle
             loadedCandidateHash = hash
             overrides = draft
+            if isBlindReview, !bundle.chews.isEmpty || !bundle.foodEntries.isEmpty {
+                throw ReviewDraftError.invalidDisposition("Blind review requires an empty proposal artifact")
+            }
             baseRows = try loadAutoBaseline(for: session)
             framePredictions = session.framePredictionsCSV
                 .map { FramePredictionsLoader.load(from: $0) } ?? []
@@ -125,7 +228,24 @@ final class ReviewerState: ObservableObject {
                     motionEvidenceMessage = error.localizedDescription
                 }
             }
+            if isBlindReview {
+                framePredictions = []
+                motionEvidence = []
+                baseRows = []
+                useAnnotatedVideo = false
+            }
             rebuildPreview()
+            // Instructions are an optional navigation layer, never detector
+            // results or labels. Keep them off initially in a blind benchmark.
+            var instructionDirectory: URL?
+            if isBlindReview, let workspaceRoot, workspaceRoot.lastPathComponent == "blind",
+               workspaceRoot.deletingLastPathComponent().lastPathComponent == "loop" {
+                instructionDirectory = workspaceRoot.deletingLastPathComponent()
+                    .appendingPathComponent("sources/\(session.id)")
+            }
+            reviewSections = ReviewSection.load(from: session.rawDir, includeInstructions: true,
+                                               instructionDirectory: instructionDirectory)
+            showInstructionSections = !isBlindReview
             statusMessage = bundle.requiresFullCoarseReview
                 ? "Loaded revision \(bundle.candidateRevision), but coarse labels are missing; verification is blocked"
                 : "Loaded \(bundle.chews.count) chew and \(bundle.foodEntries.count) food-entry candidates · v\(String(format: "%04d", bundle.candidateRevision))"
@@ -136,6 +256,9 @@ final class ReviewerState: ObservableObject {
     }
 
     private func resetLoadedState() {
+        reviewSections = []
+        focusedSectionID = nil
+        timelineEditingEnabled = false
         baseRows = []
         alignedRows = []
         candidates = nil
@@ -167,6 +290,10 @@ final class ReviewerState: ObservableObject {
     // MARK: - Saving + completion
 
     func saveOverrides() {
+        let resume = reviewTimerRunning
+        accumulateReviewTime()
+        if overrides.reviewContext == nil { overrides.reviewContext = .init() }
+        if resume { reviewTimerStart = ProcessInfo.processInfo.systemUptime; reviewTimerRunning = true }
         guard let session = selectedSession,
               let candidateURL = session.candidatesJSON,
               let candidates,
@@ -285,18 +412,20 @@ final class ReviewerState: ObservableObject {
 
     @discardableResult
     func selectNextChew() -> ReviewChew? {
-        guard !chews.isEmpty else { return nil }
-        let index = selectedChewIndex.map { min($0 + 1, chews.count - 1) } ?? 0
-        selectedChewID = chews[index].id
-        return chews[index]
+        let visible = reviewQueueChews
+        guard !visible.isEmpty else { return nil }
+        let index = visible.firstIndex { $0.id == selectedChewID }.map { min($0 + 1, visible.count - 1) } ?? 0
+        selectedChewID = visible[index].id
+        return visible[index]
     }
 
     @discardableResult
     func selectPreviousChew() -> ReviewChew? {
-        guard !chews.isEmpty else { return nil }
-        let index = selectedChewIndex.map { max($0 - 1, 0) } ?? (chews.count - 1)
-        selectedChewID = chews[index].id
-        return chews[index]
+        let visible = reviewQueueChews
+        guard !visible.isEmpty else { return nil }
+        let index = visible.firstIndex { $0.id == selectedChewID }.map { max($0 - 1, 0) } ?? (visible.count - 1)
+        selectedChewID = visible[index].id
+        return visible[index]
     }
 
     @discardableResult
@@ -641,14 +770,15 @@ final class ReviewerState: ObservableObject {
 
     @discardableResult
     func advanceToNextUnverified() -> ReviewChew? {
-        let start = (selectedChewIndex ?? -1) + 1
-        if start < chews.count {
-            for index in start..<chews.count where disposition(for: chews[index].id) == nil {
-                selectedChewID = chews[index].id
-                return chews[index]
+        let visible = reviewQueueChews
+        let start = (visible.firstIndex { $0.id == selectedChewID } ?? -1) + 1
+        if start < visible.count {
+            for index in start..<visible.count where disposition(for: visible[index].id) == nil {
+                selectedChewID = visible[index].id
+                return visible[index]
             }
         }
-        for chew in chews where disposition(for: chew.id) == nil {
+        for chew in visible where disposition(for: chew.id) == nil {
             selectedChewID = chew.id
             return chew
         }
@@ -836,5 +966,52 @@ final class ReviewerState: ObservableObject {
 
     func eatingSegment(enclosing chew: ReviewChew) -> EatingSegment? {
         eatingSegments.first { $0.startTS <= chew.peakTS && $0.endTS >= chew.peakTS }
+    }
+}
+
+/// Navigation context only. Requested activities never become annotation truth.
+struct ReviewSection: Identifiable, Equatable {
+    enum Source { case phone, instruction }
+    let id: String
+    let title: String
+    let kind: String
+    let start: Double
+    let end: Double
+    let source: Source
+
+    static func load(from directory: URL, includeInstructions: Bool, instructionDirectory: URL? = nil) -> [ReviewSection] {
+        func object(_ name: String, at root: URL? = nil) -> [String: Any] {
+            guard let data = try? Data(contentsOf: (root ?? directory).appendingPathComponent(name)),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+            return value
+        }
+        var result: [ReviewSection] = []
+        let intervals = object("annotations/coarse_labels.json")["intervals"] as? [[String: Any]] ?? []
+        for (index, interval) in intervals.enumerated() {
+            guard let start = interval["start_ts"] as? Double, let end = interval["end_ts"] as? Double,
+                  start.isFinite, end.isFinite, start >= 0, start < end else { continue }
+            let label = interval["label"] as? String ?? "unknown"
+            result.append(.init(id: "phone-\(index)", title: label == "chewing" ? "Chewing" : label == "not_chewing" ? "Not chewing" : "Unknown",
+                                kind: label == "chewing" ? "chew" : "other", start: start, end: end, source: .phone))
+        }
+        if includeInstructions {
+            let guided = object("guided_session.json", at: instructionDirectory)
+            let definition = guided["definition"] as? [String: Any] ?? [:]
+            let activities = definition["activities"] as? [[String: Any]] ?? []
+            let attempts = guided["attempts"] as? [[String: Any]] ?? []
+            let origin = guided["video_clock_origin_host_time_s"] as? Double ?? .nan
+            for (index, attempt) in attempts.enumerated() {
+                guard attempt["outcome"] as? String == "completed",
+                      let startHost = attempt["started_host_s"] as? Double,
+                      let endHost = attempt["ended_host_s"] as? Double,
+                      let id = attempt["activity_id"] as? String,
+                      let activity = activities.first(where: { $0["id"] as? String == id }) else { continue }
+                let start = startHost - origin, end = endHost - origin
+                guard start.isFinite, end.isFinite, start >= 0, start < end else { continue }
+                result.append(.init(id: "instruction-\(index)", title: activity["instruction"] as? String ?? id,
+                                    kind: activity["kind"] as? String ?? "other", start: start, end: end, source: .instruction))
+            }
+        }
+        return result.sorted { $0.start < $1.start }
     }
 }

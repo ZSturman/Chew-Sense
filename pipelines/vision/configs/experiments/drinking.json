@@ -1,0 +1,103 @@
+{
+  "schema_version": "guided-experiment/1",
+  "experiment_id": "drinking",
+  "version": 1,
+  "title": "Drinking",
+  "summary": "Distinguish drinking movements from chewing.",
+  "purpose": "Collect sips that should not be counted as chews.",
+  "request": {
+    "source": "seed",
+    "summary": "Swallowing and cup motion may resemble chewing in AirPods motion."
+  },
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Have a glass of water within reach."
+  ],
+  "equipment": [
+    "AirPods",
+    "Glass of water"
+  ],
+  "food": {
+    "kind": "beverage",
+    "recommended": "Glass of water",
+    "category": "water"
+  },
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "still-1",
+      "kind": "rest",
+      "instruction": "Sit still",
+      "duration_s": 10,
+      "expected_behavior": "Seated, still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "drink-1",
+      "kind": "drink",
+      "instruction": "Take a few sips of water",
+      "duration_s": 20,
+      "expected_behavior": "Lift glass, sip, swallow; no chewing",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "still-2",
+      "kind": "rest",
+      "instruction": "Put the glass down and sit still",
+      "duration_s": 10,
+      "expected_behavior": "Seated, still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "drink-2",
+      "kind": "drink",
+      "instruction": "Take a few more sips",
+      "duration_s": 20,
+      "expected_behavior": "Sip and swallow",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "drinking"
+    ],
+    "food_category": [
+      "water"
+    ]
+  },
+  "estimated_minutes": 2.2
+}

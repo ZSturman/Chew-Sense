@@ -31,6 +31,10 @@ def test_golden_session_v2_end_to_end(tmp_path: Path):
         "458b0545db2646bccdd2f5b9e3e09d8c2d93371f1a4ab5e82c9cbc4873195e11"
     )
 
+    draft_path = session / "annotations/review-draft.json"
+    draft = json.loads(draft_path.read_text())
+    draft["review_context"] = {"mode": "assisted", "sync_verified": True}
+    draft_path.write_text(json.dumps(draft))
     materialized = finalize_session(session, derived)
 
     assert materialized.verified

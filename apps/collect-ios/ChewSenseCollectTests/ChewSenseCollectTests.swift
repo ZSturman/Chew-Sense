@@ -5,6 +5,8 @@
 //  Created by Zachary Sturman on 11/13/25.
 //
 
+import AVFoundation
+import CoreVideo
 import Foundation
 import Testing
 @testable import ChewSenseCollect
@@ -194,7 +196,7 @@ struct ChewSenseCollectTests {
     // MARK: - VideoEditorViewModel CSV relabelling
 
     @Test
-    func videoEditor_relabelCSVAddsLabelColumnAndMarksChewingRows() throws {
+    func videoEditor_coarseReviewPreservesMotionAndVideoRelativeBounds() throws {
         // The first motion row arrives 250 ms after video time zero. Labels
         // must still use the manifest origin rather than shifting to that row.
         let folder = FileManager.default.temporaryDirectory
@@ -231,15 +233,14 @@ struct ChewSenseCollectTests {
 
         try viewModel.relabelCSV(at: csvURL)
 
-        let updated = try String(contentsOf: csvURL)
-        let lines = updated.split(separator: "\n").map(String.init)
+        #expect(try String(contentsOf: csvURL) == csv)
+        let data = try Data(contentsOf: folder.appendingPathComponent("annotations/coarse_labels.json"))
+        let coarse = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let intervals = coarse["intervals"] as! [[String: Any]]
+        let chewing = try #require(intervals.first { $0["label"] as? String == "chewing" })
+        #expect(chewing["start_ts"] as? Double == 0.5)
+        #expect(chewing["end_ts"] as? Double == 1.5)
 
-        #expect(lines[0].contains("label"))
-        // Video-relative 0.25 -> false, 0.5 and 1.0 -> true, 2.0 -> false.
-        #expect(lines[1].hasSuffix(",false"))
-        #expect(lines[2].hasSuffix(",true"))
-        #expect(lines[3].hasSuffix(",true"))
-        #expect(lines[4].hasSuffix(",false"))
     }
 
     @Test
@@ -329,6 +330,74 @@ struct ChewSenseCollectTests {
         let intervals = coarse["intervals"] as! [[String: Any]]
         #expect(intervals.count == 1)
         #expect(intervals[0]["label"] as? String == "not_chewing")
-        #expect(intervals[0]["start_ts"] as? Double == 0.25)
+        #expect(intervals[0]["start_ts"] as? Double == 0.0)
     }
+
+    @Test
+    func exportArchiveIncludesMediaAndAnnotationsWithoutChangingSource() throws {
+        let folder = try makeTemporarySessionFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let video = folder.appendingPathComponent("capture.mov")
+        let motion = folder.appendingPathComponent("capture.csv")
+        let audio = folder.appendingPathComponent("capture.m4a")
+        for url in [video, motion, audio] { try Data("fixture bytes".utf8).write(to: url) }
+        let annotations = folder.appendingPathComponent("annotations")
+        try FileManager.default.createDirectory(at: annotations, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: annotations.appendingPathComponent("coarse_labels.json"))
+        let manifest: [String: Any] = [
+            "video": try CanonicalCaptureContract.mediaReference(url: video, mediaType: "video", includeHash: true),
+            "motion": try CanonicalCaptureContract.mediaReference(url: motion, mediaType: "motion_csv", includeHash: true),
+            "audio": ["enabled": true, "path": audio.lastPathComponent, "sha256": try CanonicalCaptureContract.sha256(of: audio)]
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("session.json"))
+        let originalHash = try CanonicalCaptureContract.sha256(of: motion)
+        let controller = RecorderController()
+        let archive = try controller.zipSessionFolder(folder)
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let bytes = try Data(contentsOf: archive)
+        #expect(Array(bytes.prefix(2)) == [0x50, 0x4b])
+        // ZIP central-directory names remain readable even when contents compress.
+        for name in ["capture.mov", "capture.csv", "capture.m4a", "session.json", "coarse_labels.json"] {
+            #expect(bytes.range(of: Data(name.utf8)) != nil)
+        }
+        #expect(try CanonicalCaptureContract.sha256(of: motion) == originalHash)
+        try Data("changed".utf8).write(to: motion)
+        #expect(throws: (any Error).self) { try controller.zipSessionFolder(folder) }
+    }
+
+    @Test
+    func hostClockPresentationTimestampSurvivesWriterExport() async throws {
+        let folder = try makeTemporarySessionFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("clock.mov")
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 16, AVVideoHeightKey: 16
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
+        writer.add(input)
+        #expect(writer.startWriting())
+        let origin = CMTime(seconds: 100000, preferredTimescale: 1_000_000)
+        writer.startSession(atSourceTime: origin)
+        var pixel: CVPixelBuffer?
+        #expect(CVPixelBufferCreate(kCFAllocatorDefault, 16, 16, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess)
+        for _ in 0..<100 {
+            if input.isReadyForMoreMediaData { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(adaptor.append(try #require(pixel), withPresentationTime: CMTime(seconds: 100000.3, preferredTimescale: 1_000_000)))
+        input.markAsFinished()
+        await writer.finishWriting()
+        #expect(writer.status == .completed)
+        let asset = AVURLAsset(url: url)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        // Compressed AVAssetReader buffers include empty-edit markers and
+        // media-local PTS. Playback time comes from the track edit mapping.
+        let segments = try await track.load(.segments)
+        let firstPresented = try #require(segments.first { !$0.isEmpty })
+        let exportedPTS = CMTimeGetSeconds(firstPresented.timeMapping.target.start)
+        #expect(abs(exportedPTS - 0.3) < 0.001)
+        // This checks the writer's mapping, not physical camera/AirPods latency.
+    }
+
 }

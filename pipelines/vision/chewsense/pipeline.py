@@ -11,7 +11,6 @@ from typing import Iterable
 import numpy as np
 from tqdm import tqdm
 
-from .annotate import render_annotated_video
 from .events.schema import (
     FoodEntryProposal,
     FrameRecord,
@@ -24,7 +23,7 @@ from .export import write_outputs
 from .features.audio import compute_audio_frame_features
 from .features.face import FaceExtractor
 from .features.hands import HandsExtractor
-from .ingest import extract_audio, iter_frames, probe
+from .ingest import analysis_grid, extract_audio, iter_frames, probe
 from .signals.food_entry_detector import detect_food_entries
 from .signals.head_pose import classify_pose
 from .signals.jaw_signal import bandpass, smooth
@@ -43,6 +42,7 @@ def run(
     cfg: dict,
     *,
     coarse_intervals: Iterable[object] | None = None,
+    audio_path: str | Path | None = None,
 ) -> VideoEvents:
     video_path = Path(video_path)
     out_dir = Path(out_dir)
@@ -57,6 +57,7 @@ def run(
     mouth_width: list[float] = []
     head_yaw: list[float] = []
     head_pitch: list[float] = []
+    head_roll: list[float] = []
     h2m: list[float] = []
     n_hands: list[int] = []
     face_detected: list[bool] = []
@@ -84,11 +85,11 @@ def run(
         if n is not None:
             iterator = tqdm(iterator, total=n, desc="features", unit="frame")
         for idx, ts, frame in iterator:
-            ff = face_ext.process(frame)
+            ff = face_ext.process(frame, ts)
             if ff.face_detected:
-                hf = hands_ext.process(frame, ff.mouth_center_xy, ff.face_scale)
+                hf = hands_ext.process(frame, ff.mouth_center_xy, ff.face_scale, ts)
             else:
-                hf = hands_ext.process(frame, None, 0.0)
+                hf = hands_ext.process(frame, None, 0.0, ts)
 
             timestamps.append(ts)
             face_detected.append(ff.face_detected)
@@ -97,6 +98,7 @@ def run(
             mouth_width.append(ff.mouth_width if ff.face_detected else 0.0)
             head_yaw.append(ff.head_yaw if ff.face_detected else 0.0)
             head_pitch.append(ff.head_pitch if ff.face_detected else 0.0)
+            head_roll.append(_safe(ff.head_roll_matrix) if ff.face_detected else 0.0)
             h2m.append(hf.min_distance)
             n_hands.append(hf.n_hands)
             inner_lip_open_l.append(ff.inner_lip_open if ff.face_detected else 0.0)
@@ -127,7 +129,35 @@ def run(
                 "nose_xy": ff.nose_xy if ff.face_detected else None,
             }
 
-    ts_arr = np.array(timestamps, dtype=np.float64)
+    source_pts = np.asarray(timestamps, dtype=np.float64)
+    ts_arr, source_indices, frame_coverage = analysis_grid(source_pts)
+    fps = 30.0  # existing per-frame thresholds now have a fixed, documented time base
+    jaw_open = [ jaw_open[i] for i in source_indices ]
+    mouth_width = [ mouth_width[i] for i in source_indices ]
+    head_yaw = [ head_yaw[i] for i in source_indices ]
+    head_pitch = [ head_pitch[i] for i in source_indices ]
+    head_roll = [ head_roll[i] for i in source_indices ]
+    h2m = [ h2m[i] for i in source_indices ]
+    n_hands = [ n_hands[i] for i in source_indices ]
+    face_detected = [ face_detected[i] for i in source_indices ]
+    face_scale = [ face_scale[i] for i in source_indices ]
+    inner_lip_open_l = [ inner_lip_open_l[i] for i in source_indices ]
+    outer_lip_open_l = [ outer_lip_open_l[i] for i in source_indices ]
+    lip_aperture_ratio_l = [ lip_aperture_ratio_l[i] for i in source_indices ]
+    chin_to_nose_l = [ chin_to_nose_l[i] for i in source_indices ]
+    jaw_open_bs_l = [ jaw_open_bs_l[i] for i in source_indices ]
+    mouth_close_bs_l = [ mouth_close_bs_l[i] for i in source_indices ]
+    mouth_funnel_bs_l = [ mouth_funnel_bs_l[i] for i in source_indices ]
+    mouth_pucker_bs_l = [ mouth_pucker_bs_l[i] for i in source_indices ]
+    mouth_roll_lower_bs_l = [ mouth_roll_lower_bs_l[i] for i in source_indices ]
+    mouth_roll_upper_bs_l = [ mouth_roll_upper_bs_l[i] for i in source_indices ]
+    mouth_press_left_bs_l = [ mouth_press_left_bs_l[i] for i in source_indices ]
+    mouth_press_right_bs_l = [ mouth_press_right_bs_l[i] for i in source_indices ]
+    mouth_smile_left_bs_l = [ mouth_smile_left_bs_l[i] for i in source_indices ]
+    mouth_smile_right_bs_l = [ mouth_smile_right_bs_l[i] for i in source_indices ]
+    face_confidence_l = [ face_confidence_l[i] for i in source_indices ]
+    face_detected = np.asarray(face_detected, dtype=bool) & frame_coverage
+    overlay_meta = {i: overlay_meta[int(j)] for i, j in enumerate(source_indices)}
     jaw = np.array(jaw_open, dtype=np.float32)
     h2m_arr = np.array(h2m, dtype=np.float32)
     h2m_arr[~np.isfinite(h2m_arr)] = 1e3  # sentinel
@@ -135,7 +165,7 @@ def run(
     face_scale_arr = np.array(face_scale, dtype=np.float32)
 
     # Audio
-    audio_pair = extract_audio(video_path, sample_rate=cfg["ingest"]["audio_sample_rate"])
+    audio_pair = extract_audio(audio_path or video_path, sample_rate=cfg["ingest"]["audio_sample_rate"])
     if audio_pair is not None:
         audio, sr = audio_pair
         audio_present = True
@@ -303,14 +333,23 @@ def run(
         consensus_ok = int(used_ch_arr[i]) > 0
         base_scale = fc if consensus_ok else max(fc * 0.5, 0.3)
         if occluded_flags[i]:
-            labels.append("occluded"); label_conf.append(0.5); continue
+            labels.append("occluded")
+            label_conf.append(0.5)
+            continue
         if in_chew_cycle[i]:
-            labels.append("chewing"); label_conf.append(min(1.0, 0.7 + 0.3 * base_scale)); continue
+            labels.append("chewing")
+            label_conf.append(min(1.0, 0.7 + 0.3 * base_scale))
+            continue
         if h2m_arr[i] < enter:
-            labels.append("hand_to_mouth"); label_conf.append(min(1.0, 0.55 + 0.4 * base_scale)); continue
+            labels.append("hand_to_mouth")
+            label_conf.append(min(1.0, 0.55 + 0.4 * base_scale))
+            continue
         if talking_flags[i]:
-            labels.append("talking"); label_conf.append(min(1.0, 0.5 + 0.4 * base_scale)); continue
-        labels.append("idle"); label_conf.append(min(1.0, 0.4 + 0.5 * base_scale))
+            labels.append("talking")
+            label_conf.append(min(1.0, 0.5 + 0.4 * base_scale))
+            continue
+        labels.append("idle")
+        label_conf.append(min(1.0, 0.4 + 0.5 * base_scale))
 
     # FrameRecords
     frame_records: list[FrameRecord] = []
@@ -330,6 +369,7 @@ def run(
             mouth_width=float(mouth_width[i]),
             head_yaw=float(head_yaw[i]),
             head_pitch=float(head_pitch[i]),
+            head_roll=float(head_roll[i]),
             hand_to_mouth_min=float(h2m_arr[i]) if h2m_arr[i] < 1e3 else 1e3,
             n_hands=int(n_hands[i]),
             is_speaking=bool(is_speaking[i]),
@@ -447,7 +487,10 @@ def run(
         events.signal_quality = sq
 
     signals = {
-        "ts": ts_arr.astype(np.float32),
+        "ts": ts_arr,
+        "source_frame_index": source_indices,
+        "source_pts": source_pts,
+        "frame_coverage": frame_coverage,
         "jaw_open": jaw,
         "jaw_open_smooth": jaw_smooth,
         "jaw_open_bp": jaw_bp,
@@ -487,22 +530,17 @@ def run(
             "width": meta.width,
             "height": meta.height,
             "duration_s": meta.duration_s,
+            "timestamp_source": "ffprobe_display_pts",
+            "analysis_rate_hz": fps,
+            "source_first_pts_s": float(source_pts[0]),
+            "source_max_gap_s": float(np.max(np.diff(source_pts))) if len(source_pts) > 1 else 0,
+            "missing_video_spans": [[float(a), float(b)] for a, b in zip(source_pts[:-1], source_pts[1:]) if b - a > 0.1],
+            "missing_analysis_frames": int((~frame_coverage).sum()),
+            "audio_source": str(audio_path or video_path),
             "audio_present": audio_present,
+            "speech_status": "vad_estimate" if audio_present else "unknown",
             "audio_sample_rate": sr,
         },
-    )
-
-    # Annotated video (Pass 2)
-    render_annotated_video(
-        video_path=video_path,
-        out_path=out_dir / "annotated_video.mp4",
-        frame_records=frame_records,
-        overlay_meta=overlay_meta,
-        events=events,
-        cfg=cfg,
-        width=meta.width,
-        height=meta.height,
-        fps=meta.fps,
     )
 
     return events

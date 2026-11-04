@@ -1,0 +1,83 @@
+{
+  "schema_version": "guided-experiment/1",
+  "experiment_id": "quiet-sitting",
+  "version": 1,
+  "title": "Quiet Sitting",
+  "summary": "Measure AirPods motion while sitting without eating.",
+  "purpose": "Collect verified negative examples of quiet sitting.",
+  "request": {
+    "source": "seed",
+    "summary": "Seated rest is the most common non-chewing state and needs verified negatives."
+  },
+  "priority": "medium",
+  "required": false,
+  "target_recordings": 3,
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording."
+  ],
+  "equipment": [
+    "AirPods"
+  ],
+  "food": {
+    "kind": "none"
+  },
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "sit-1",
+      "kind": "rest",
+      "instruction": "Sit quietly and relax",
+      "duration_s": 40,
+      "expected_behavior": "Seated, no eating, natural small movements",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "sit-2",
+      "kind": "rest",
+      "instruction": "Keep sitting, look around naturally",
+      "duration_s": 30,
+      "expected_behavior": "Seated, no eating",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "confound_negative"
+  ],
+  "tags": {
+    "activity": [
+      "rest"
+    ]
+  },
+  "estimated_minutes": 2.3,
+  "labeling": {
+    "wearer_no_food_attestation": true
+  }
+}

@@ -284,6 +284,10 @@ def test_finalized_golden_session_materializes_exact_temporal_contract(tmp_path)
     repo_root = Path(__file__).resolve().parents[3]
     work = tmp_path / "golden"
     shutil.copytree(repo_root / "fixtures/golden/session-v2", work)
+    draft_path = work / "session" / "annotations" / "review-draft.json"
+    draft_payload = json.loads(draft_path.read_text())
+    draft_payload["review_context"] = {"mode": "assisted", "sync_verified": True}
+    draft_path.write_text(json.dumps(draft_payload))
     finalize_session(work / "session", work / "derived")
 
     result = materialize_temporal_dataset([work / "session"], tmp_path / "dataset")
@@ -324,8 +328,11 @@ def test_coarse_only_and_all_negative_sessions_never_train_event_or_phase(tmp_pa
 
     assert np.all(y[:, 6:8] == 0)
     assert np.all(y[session_ids == "golden-negative-v2", 0] == 0)
-    assert np.all(y[session_ids == "golden-negative-v2", 5] == 1)
-    assert np.all(negative_mask[session_ids == "golden-negative-v2"])
+    # The fixture begins at 0.2s and samples at 10 Hz. Pre-roll and sensor
+    # gaps must not silently become negative supervision.
+    X = np.load(result.output_dir / "X.npy")
+    np.testing.assert_array_equal(y[session_ids == "golden-negative-v2", 5], X[session_ids == "golden-negative-v2", 6, -1])
+    np.testing.assert_array_equal(negative_mask[session_ids == "golden-negative-v2"], y[session_ids == "golden-negative-v2", 5] >= .5)
 
 
 def test_missing_coarse_review_is_not_silently_all_negative(tmp_path):
@@ -342,6 +349,10 @@ def test_tampered_immutable_review_blocks_temporal_materialization(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     work = tmp_path / "tampered"
     shutil.copytree(repo_root / "fixtures/golden/session-v2", work)
+    draft_path = work / "session" / "annotations" / "review-draft.json"
+    draft_payload = json.loads(draft_path.read_text())
+    draft_payload["review_context"] = {"mode": "assisted", "sync_verified": True}
+    draft_path.write_text(json.dumps(draft_payload))
     finalize_session(work / "session", work / "derived")
     pointer = json.loads((work / "session/annotations/canonical_events.json").read_text())
     review_path = work / "session" / pointer["review_path"]
@@ -576,3 +587,29 @@ def test_pytorch_coreml_temporal_probability_parity(tmp_path):
         pytest.skip(str(exc))
 
     assert report["max_probability_error"] <= 1e-3
+
+
+@pytest.mark.parametrize("origin", [0, 3600, 100000, 1_000_000_000])
+def test_resampling_gap_mask_is_translation_invariant(origin):
+    values = np.ones((2, 6), dtype=np.float32)
+    window, grid = resample_motion_window(
+        np.array([0.0, 1.0]) + origin, values,
+        end_timestamp=origin + 1, context_seconds=2,
+    )
+    expected = np.zeros(100, dtype=np.float32)
+    expected[[49, 99]] = 1
+    np.testing.assert_array_equal(window[6], expected)
+    assert np.all(window[:6, window[6] == 0] == 0)
+
+
+def test_resampler_accepts_an_exact_left_sample_across_float_rounding():
+    source = np.array([0., .1, .2, .3, .4])
+    out, grid = resample_motion_window(source, np.ones((5, 6)), end_timestamp=.30000000000000004, context_seconds=.02)
+    assert out[6, -1] == 1
+
+
+def test_derived_mask_lookup_does_not_bridge_outages():
+    from pipeline.temporal_dataset import _nearest_values
+    source = np.array([100000., 100000.02, 100001., 100001.02])
+    target = np.array([99999., 100000., 100000.03, 100000.5, 100001.02, 100002.])
+    np.testing.assert_array_equal(_nearest_values(source, np.ones(4), target), [0, 1, 0, 0, 1, 0])

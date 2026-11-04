@@ -1,0 +1,21 @@
+#!/bin/sh
+# ChewSense guided-collection loop service control.
+#   tools/loop-service start     run in the foreground (Ctrl-C stops)
+#   tools/loop-service install   start automatically at login (LaunchAgent) and now
+#   tools/loop-service uninstall remove the LaunchAgent
+#   tools/loop-service pair      print a pairing code for Collect
+#   tools/loop-service status    print processing status
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+CLI="$ROOT/.venv/bin/chewsense-vision"
+[ -x "$CLI" ] || { echo "Run 'uv sync --locked' in $ROOT first." >&2; exit 1; }
+export CHEWSENSE_MODELS_DIR="${CHEWSENSE_MODELS_DIR:-$ROOT/workspace/models/mediapipe}"
+PLIST="$HOME/Library/LaunchAgents/com.chewsense.loop.plist"
+case "${1:-start}" in
+  start) exec "$CLI" loop serve ;;
+  install) "$CLI" loop install-agent && launchctl bootstrap "gui/$(id -u)" "$PLIST" && echo "Service running; logs in ~/Library/Logs/ChewSense/loop.log" ;;
+  uninstall) launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true; rm -f "$PLIST"; echo "LaunchAgent removed." ;;
+  pair) exec "$CLI" loop pair ;;
+  status) exec "$CLI" loop status ;;
+  *) sed -n '2,7p' "$0"; exit 2 ;;
+esac

@@ -19,7 +19,7 @@ from typing import Any, Iterable, Literal, Sequence
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import model_serializer, BaseModel, ConfigDict, Field, model_validator
 
 
 SCHEMA_VERSION = "2.0.0"
@@ -236,6 +236,25 @@ class AddedFoodEntry(_StrictModel):
         return self
 
 
+class ReviewExclusion(_StrictModel):
+    start_ts: float = Field(ge=0)
+    end_ts: float = Field(ge=0)
+    disposition: Literal["uncertain", "unobservable"] = "uncertain"
+
+    @model_validator(mode="after")
+    def validate_span(self) -> "ReviewExclusion":
+        if not np.isfinite(self.start_ts) or not np.isfinite(self.end_ts) or self.end_ts <= self.start_ts:
+            raise ValueError("excluded span requires finite start < end")
+        return self
+
+
+class ReviewContext(_StrictModel):
+    mode: Literal["assisted", "blind"] = "assisted"
+    active_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+    sync_verified: bool = False
+    excluded_spans: tuple[ReviewExclusion, ...] = ()
+
+
 class ReviewDraft(_StrictModel):
     schema_version: Literal["2.0.0"] = SCHEMA_VERSION
     artifact_type: Literal["review_draft"] = "review_draft"
@@ -251,6 +270,15 @@ class ReviewDraft(_StrictModel):
     added_chews: tuple[AddedChew, ...] = ()
     added_food_entries: tuple[AddedFoodEntry, ...] = ()
     notes: str | None = None
+    review_context: ReviewContext | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_review(self, handler):
+        payload = handler(self)
+        # Omit the additive field for historical revisions so their hashes remain valid.
+        if self.review_context is None:
+            payload.pop("review_context", None)
+        return payload
 
     @model_validator(mode="after")
     def validate_ids(self) -> "ReviewDraft":
@@ -431,7 +459,10 @@ def _coarse_state(coarse_intervals: Sequence[Any] | None) -> tuple[CoarseLabelSt
     labels = [getattr(item, "label", None) for item in coarse_intervals]
     if "chewing" not in labels and "unknown" not in labels:
         return "all_negative", False
-    return "reviewed_intervals", "unknown" in labels
+    # Explicitly reviewed unknown intervals are exclusions, not unfinished
+    # negative labels. The full-video event review is still required, and row
+    # materialization masks unknown and uncovered coarse time.
+    return "reviewed_intervals", False
 
 
 def _inside_chewing(ts: float, coarse_intervals: Sequence[Any] | None) -> bool:
@@ -681,6 +712,9 @@ def validate_review_lineage(candidates: CandidateArtifact, review: ReviewDraft) 
         raise ValueError(
             "stale review: candidate SHA-256 does not match; reload the exact candidate revision"
         )
+    if review.review_context is not None and review.review_context.mode == "blind":
+        if candidates.chews or candidates.food_entries or review.chew_decisions or review.food_entry_decisions:
+            raise ValueError("blind review requires empty proposals and independently added events")
     candidate_chews = {item.id for item in candidates.chews}
     reviewed_chews = {item.candidate_id for item in review.chew_decisions}
     unknown_chews = reviewed_chews - candidate_chews
@@ -938,16 +972,44 @@ def materialize_motion_rows(
     duration_s: float,
     coarse_intervals: Sequence[Any],
     timestamp_col: str = "timestamp",
+    review_context: ReviewContext | None = None,
+    max_event_distance_s: float = 0.04,
+    max_gap_s: float = 0.08,
 ) -> pd.DataFrame:
     """Derive phase and event targets; these rows are never edited truth."""
     motion = pd.read_csv(motion_csv_path)
     if timestamp_col not in motion:
         raise ValueError(f"motion CSV is missing {timestamp_col!r}")
     motion_ts = motion[timestamp_col].astype(float).to_numpy()
+    if not np.all(np.isfinite(motion_ts)):
+        raise ValueError("motion timestamps must be finite")
+    if not np.isfinite(time_offset) or not np.isfinite(duration_s):
+        raise ValueError("motion mapping and duration must be finite")
     if motion_ts.size > 1 and np.any(np.diff(motion_ts) <= 0):
         raise ValueError("motion timestamps must be strictly increasing")
     video_ts = motion_ts - float(time_offset)
     n = video_ts.size
+    axes = ["ax", "ay", "az", "gx", "gy", "gz"]
+    if any(column not in motion for column in axes):
+        raise ValueError("motion CSV requires all six sensor axes for valid label projection")
+    sensor_valid = np.isfinite(motion[axes].to_numpy(dtype=float)).all(axis=1)
+    if max_event_distance_s <= 0 or max_gap_s <= 0:
+        raise ValueError("event tolerance and gap threshold must be positive")
+
+    def nearby(ts: float) -> int | None:
+        if not n or ts < video_ts[0] - TIMESTAMP_TOLERANCE_S or ts > video_ts[-1] + TIMESTAMP_TOLERANCE_S:
+            return None
+        right = int(np.searchsorted(video_ts, ts))
+        if 0 < right < n and video_ts[right] - video_ts[right - 1] > max_gap_s:
+            if min(abs(ts - video_ts[right - 1]), abs(video_ts[right] - ts)) > TIMESTAMP_TOLERANCE_S:
+                return None
+        i = int(np.argmin(np.abs(video_ts - ts)))
+        return i if sensor_valid[i] and abs(video_ts[i] - ts) <= max_event_distance_s + TIMESTAMP_TOLERANCE_S else None
+
+    def cycle_covered(start: float, end: float) -> bool:
+        a, b = nearby(start), nearby(end)
+        return a is not None and b is not None and np.all(sensor_valid[a:b + 1]) and np.all(np.diff(video_ts[a:b + 1]) <= max_gap_s)
+
     eating = np.zeros(n, dtype=np.int8)
     for interval in coarse_intervals:
         if getattr(interval, "label", None) != "chewing":
@@ -983,7 +1045,7 @@ def materialize_motion_rows(
         phase[closing] = "closing"
         chew_id[opening | closing] = chew.id
         confidence[opening | closing] = chew.confidence
-        phase_valid[opening | closing] = 1
+        phase_valid[opening | closing] = int(cycle_covered(chew.start_closed_ts, chew.end_closed_ts))
         phase_angle[opening] = (
             math.pi
             * (video_ts[opening] - chew.start_closed_ts)
@@ -994,8 +1056,10 @@ def materialize_motion_rows(
             * (video_ts[closing] - chew.open_peak_ts)
             / (chew.end_closed_ts - chew.open_peak_ts)
         )
-        if n:
-            index = int(np.argmin(np.abs(video_ts - chew.chew_event_ts)))
+        index = nearby(chew.chew_event_ts)
+        if index is not None:
+            if chew_event[index]:
+                raise ValueError("multiple chew events project to the same motion sample")
             chew_event[index] = 1
             event_id[index] = chew.id
 
@@ -1026,11 +1090,14 @@ def materialize_motion_rows(
         if decision.disposition not in {"unobservable", "uncertain"} or not n:
             continue
         candidate = food_candidate_map[decision.candidate_id]
-        index = int(np.argmin(np.abs(video_ts - candidate.food_entry_ts)))
-        food_entry_valid[index] = 0
+        index = nearby(candidate.food_entry_ts)
+        if index is not None:
+            food_entry_valid[index] = 0
     for item in annotations.food_entries:
-        if n:
-            index = int(np.argmin(np.abs(video_ts - item.food_entry_ts)))
+        index = nearby(item.food_entry_ts)
+        if index is not None:
+            if food_event[index]:
+                raise ValueError("multiple food-entry events project to the same motion sample")
             food_event[index] = 1
             food_entry_id[index] = item.id
 
@@ -1054,6 +1121,27 @@ def materialize_motion_rows(
         # reviewed all-negative. Missing coarse review never reaches verified
         # materialization.
         coarse_valid = np.ones(n, dtype=bool)
+    valid = within_video & coarse_valid & sensor_valid & annotations.verified
+    # Candidate-level and free-span exclusions affect every target, including negatives.
+    valid &= event_valid.astype(bool)
+    source_video = (candidates.debug_telemetry.get("run_manifest") or {}).get("video_meta", {})
+    if source_video:
+        valid &= video_ts >= float(source_video.get("source_first_pts_s", 0))
+        valid &= video_ts <= float(source_video.get("duration_s", duration_s))
+        for start, end in source_video.get("missing_video_spans", []):
+            valid &= ~((video_ts > start) & (video_ts < end))
+    review_context = review_context or ReviewContext()
+    if not review_context.sync_verified:
+        valid[:] = False
+    for span in review_context.excluded_spans:
+        valid &= ~((video_ts >= span.start_ts) & (video_ts <= span.end_ts))
+    event_valid &= valid.astype(np.int8)
+    food_entry_valid &= valid.astype(np.int8)
+    phase_valid &= valid.astype(np.int8)
+    chew_event[event_valid == 0] = 0
+    event_id[event_valid == 0] = ""
+    food_event[food_entry_valid == 0] = 0
+    food_entry_id[food_entry_valid == 0] = ""
     return pd.DataFrame(
         {
             "timestamp": motion_ts,
@@ -1071,7 +1159,7 @@ def materialize_motion_rows(
             "food_entry_id": food_entry_id.astype(str),
             "food_entry_valid": food_entry_valid,
             "event_valid": event_valid,
-            "label_valid": (within_video & coarse_valid).astype(np.int8),
+            "label_valid": valid.astype(np.int8),
             "label_source": (
                 "human_reviewed" if annotations.verified else "human_review_draft"
             ),
@@ -1112,6 +1200,10 @@ def audit_artifacts(
             ):
                 error("candidate_bounds", f"food entry {entry.id} is outside video bounds")
     if review is not None:
+        if duration_s is not None and review.review_context is not None:
+            for span in review.review_context.excluded_spans:
+                if span.end_ts > duration_s + TIMESTAMP_TOLERANCE_S:
+                    error("exclusion_bounds", "excluded range exceeds video duration")
         try:
             validate_review_lineage(candidates, review)
         except ValueError as exc:

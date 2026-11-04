@@ -13,7 +13,6 @@ Feature vector per frame (all face-scale-normalized where applicable):
 """
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +22,7 @@ from tqdm import tqdm
 from .audio import compute_audio_frame_features
 from .face import FaceExtractor
 from .hands import HandsExtractor
-from ..ingest import extract_audio, iter_frames, probe
+from ..ingest import analysis_grid, extract_audio, iter_frames, probe
 from ..signals.jaw_signal import bandpass, smooth
 
 # Column order used by trainer + inference
@@ -63,9 +62,9 @@ def extract(video_path: str | Path, cfg: dict) -> pd.DataFrame:
         if meta.n_frames > 0:
             it = tqdm(it, total=meta.n_frames, desc="extract", unit="frame")
         for _, ts, frame in it:
-            ff = face_ext.process(frame)
+            ff = face_ext.process(frame, ts)
             mxy = ff.mouth_center_xy if ff.face_detected else None
-            hf = hands_ext.process(frame, mxy, ff.face_scale if ff.face_detected else 0.0)
+            hf = hands_ext.process(frame, mxy, ff.face_scale if ff.face_detected else 0.0, ts)
             timestamps.append(ts)
             face_detected.append(ff.face_detected)
             face_scale.append(ff.face_scale)
@@ -76,11 +75,19 @@ def extract(video_path: str | Path, cfg: dict) -> pd.DataFrame:
             h2m.append(hf.min_distance if hf.min_distance < 1e3 else 1e3)
             n_hands.append(hf.n_hands)
 
-    ts_arr = np.array(timestamps, dtype=np.float64)
+    source_pts = np.asarray(timestamps, dtype=np.float64)
+    ts_arr, source_indices, coverage = analysis_grid(source_pts)
+    jaw_open, mouth_width, head_yaw, head_pitch, h2m, n_hands, face_detected, face_scale = (
+        np.asarray(values)[source_indices] for values in
+        (jaw_open, mouth_width, head_yaw, head_pitch, h2m, n_hands, face_detected, face_scale)
+    )
+    face_detected = face_detected & coverage
+
     jaw = np.array(jaw_open, dtype=np.float32)
     js = smooth(jaw, cfg)
-    jb = bandpass(js, meta.fps, cfg)
-    djs = np.zeros_like(js); djs[1:] = np.diff(js)
+    jb = bandpass(js, 30.0, cfg)
+    djs = np.zeros_like(js)
+    djs[1:] = np.diff(js)
 
     audio_pair = extract_audio(video_path, sample_rate=cfg["ingest"]["audio_sample_rate"])
     if audio_pair is not None:
@@ -91,7 +98,9 @@ def extract(video_path: str | Path, cfg: dict) -> pd.DataFrame:
 
     df = pd.DataFrame({
         "frame_idx": np.arange(len(ts_arr), dtype=np.int32),
-        "ts": ts_arr.astype(np.float32),
+        "ts": ts_arr,
+        "source_frame_idx": source_indices,
+        "frame_coverage": coverage.astype(np.int8),
         "jaw_open": jaw,
         "jaw_open_smooth": js.astype(np.float32),
         "jaw_open_bp": jb.astype(np.float32),
@@ -107,7 +116,7 @@ def extract(video_path: str | Path, cfg: dict) -> pd.DataFrame:
         "face_scale": np.array(face_scale, dtype=np.float32),
     })
     df.attrs["video_path"] = str(video_path)
-    df.attrs["fps"] = meta.fps
+    df.attrs["fps"] = 30.0
     df.attrs["video_id"] = video_path.stem
     return df
 

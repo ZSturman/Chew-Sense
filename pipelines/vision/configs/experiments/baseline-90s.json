@@ -1,0 +1,137 @@
+{
+  "schema_version": "guided-experiment/1",
+  "experiment_id": "baseline-90s",
+  "version": 1,
+  "title": "90-Second Baseline",
+  "summary": "Establish video and AirPods synchronization while recording chewing and non-chewing behavior.",
+  "purpose": "Establish initial synchronization and collect labeled examples of chewing and non-chewing.",
+  "request": {
+    "source": "seed",
+    "summary": "No independently reviewed synchronized recording exists yet; this is the first required evidence."
+  },
+  "priority": "high",
+  "required": true,
+  "target_recordings": 3,
+  "preparation": [
+    "Wear both AirPods and confirm they are connected to this iPhone.",
+    "Prop the iPhone so your face and jaw are visible.",
+    "Use steady, even lighting on your face.",
+    "Stay within the camera view for the whole recording.",
+    "Prepare a small portion of food that is easy to chew."
+  ],
+  "equipment": [
+    "AirPods",
+    "iPhone stand or stable surface"
+  ],
+  "food": {
+    "kind": "food",
+    "recommended": "A small portion of food",
+    "category": "mixed"
+  },
+  "camera": {
+    "position": "Prop the iPhone upright at face height, about an arm's length away, front camera facing you with face and jaw visible."
+  },
+  "activities": [
+    {
+      "id": "nod-start",
+      "kind": "sync_marker",
+      "instruction": "Look at the camera and nod distinctly",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "still-1",
+      "kind": "rest",
+      "instruction": "Sit still without chewing",
+      "duration_s": 15,
+      "expected_behavior": "Seated, mouth closed and still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "chew-1",
+      "kind": "chew",
+      "instruction": "Chew food normally",
+      "duration_s": 20,
+      "expected_behavior": "Normal chewing with the mouth visible",
+      "intended_label": "chewing",
+      "on_quality_loss": "pause"
+    },
+    {
+      "id": "stop-1",
+      "kind": "stop_chewing",
+      "instruction": "Stop chewing",
+      "duration_s": 10,
+      "expected_behavior": "Finish, swallow and keep the jaw still",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-middle",
+      "kind": "sync_marker",
+      "instruction": "Nod distinctly again",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "chew-2",
+      "kind": "chew",
+      "instruction": "Chew again",
+      "duration_s": 15,
+      "expected_behavior": "Normal chewing with the mouth visible",
+      "intended_label": "chewing"
+    },
+    {
+      "id": "talk-1",
+      "kind": "talk",
+      "instruction": "Talk without chewing",
+      "duration_s": 10,
+      "expected_behavior": "Speak a few sentences with no food in the mouth",
+      "intended_label": "not_chewing"
+    },
+    {
+      "id": "nod-end",
+      "kind": "sync_marker",
+      "instruction": "Perform a final nod",
+      "duration_s": 5,
+      "expected_behavior": "One clear nod visible in video and AirPods motion; mouth still",
+      "intended_label": "not_chewing",
+      "sync_marker": true,
+      "on_quality_loss": "repeat",
+      "min_valid_fraction": 0.9
+    },
+    {
+      "id": "still-2",
+      "kind": "rest",
+      "instruction": "Sit still",
+      "duration_s": 5,
+      "expected_behavior": "Seated and still",
+      "intended_label": "not_chewing"
+    }
+  ],
+  "evaluation_purpose": [
+    "training",
+    "evaluation",
+    "synchronization"
+  ],
+  "tags": {
+    "activity": [
+      "chewing",
+      "talking",
+      "rest"
+    ],
+    "food_category": [
+      "mixed"
+    ]
+  },
+  "estimated_minutes": 2.5,
+  "completion": {
+    "required_sync_markers": 3
+  }
+}

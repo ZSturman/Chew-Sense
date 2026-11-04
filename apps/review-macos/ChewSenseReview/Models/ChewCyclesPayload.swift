@@ -189,7 +189,7 @@ enum CandidateContractError: LocalizedError, Equatable {
 /// v2 contract. `content_sha256` is excluded before hashing.
 enum CandidateContentHasher {
     static func hash(data: Data) throws -> String {
-        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard var object = try CanonicalJSON.parse(data) as? [String: Any] else {
             throw CandidateContractError.missingContentHash
         }
         object.removeValue(forKey: "content_sha256")
@@ -215,11 +215,69 @@ enum CandidateContentHasher {
 }
 
 private enum CanonicalJSON {
+    private struct NumberToken { let canonical: String }
+
+    /// Foundation's NSDecimalNumber.doubleValue can lose one ULP for long
+    /// decimals. Preserve numeric lexemes until Swift's correctly rounded
+    /// Double parser sees them, including floats nested inside debug evidence.
+    static func parse(_ data: Data) throws -> Any {
+        let bytes = Array(data)
+        let prefix = "__chewsense_number_" + UUID().uuidString + "_"
+        var rewritten = [UInt8]()
+        var numbers: [String: NumberToken] = [:]
+        var index = 0
+        var quoted = false
+        var escaped = false
+        while index < bytes.count {
+            let byte = bytes[index]
+            if quoted {
+                rewritten.append(byte)
+                if escaped { escaped = false }
+                else if byte == 92 { escaped = true }
+                else if byte == 34 { quoted = false }
+                index += 1
+            } else if byte == 34 {
+                quoted = true
+                rewritten.append(byte)
+                index += 1
+            } else if byte == 45 || (48...57).contains(byte) {
+                let start = index
+                while index < bytes.count && "0123456789.eE+-".utf8.contains(bytes[index]) { index += 1 }
+                let literal = String(decoding: bytes[start..<index], as: UTF8.self)
+                guard literal.range(of: #"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$"#, options: .regularExpression) != nil else {
+                    throw NSError(domain: "CanonicalJSON", code: 3)
+                }
+                let canonical: String
+                if literal.contains(".") || literal.lowercased().contains("e") {
+                    guard let number = Double(literal), number.isFinite else { throw NSError(domain: "CanonicalJSON", code: 1) }
+                    canonical = String(number)
+                } else {
+                    canonical = literal == "-0" ? "0" : literal
+                }
+                let marker = prefix + String(numbers.count)
+                numbers[marker] = NumberToken(canonical: canonical)
+                rewritten.append(contentsOf: ("\"" + marker + "\"").utf8)
+            } else {
+                rewritten.append(byte)
+                index += 1
+            }
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(rewritten))
+        func restore(_ value: Any) -> Any {
+            if let text = value as? String, let number = numbers[text] { return number }
+            if let array = value as? [Any] { return array.map(restore) }
+            if let dictionary = value as? [String: Any] { return dictionary.mapValues(restore) }
+            return value
+        }
+        return restore(object)
+    }
+
     static func data(_ value: Any) throws -> Data {
         Data(try string(value).utf8)
     }
 
     private static func string(_ value: Any) throws -> String {
+        if let number = value as? NumberToken { return number.canonical }
         if value is NSNull { return "null" }
         if let value = value as? String { return try escaped(value) }
         if let value = value as? [Any] {

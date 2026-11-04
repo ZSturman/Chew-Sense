@@ -12,3 +12,8 @@
 Historical workflow documents are under
 `archive/legacy-project-history/consolidation-docs-2026/` and are not current
 instructions.
+
+- [Phase 0 recording, review and evaluation](PHASE0.md)
+- [Phase 0 device handoff and next steps](NEXT_STEPS.md)
+
+- [Guided collection loop: experiments, Mac service, automatic processing, evaluation](GUIDED_LOOP.md)

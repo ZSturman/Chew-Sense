@@ -133,6 +133,7 @@ class FrameRecord(BaseModel):
     mouth_width: float = 0.0
     head_yaw: float = 0.0
     head_pitch: float = 0.0
+    head_roll: float = 0.0
     hand_to_mouth_min: float = float("inf")  # min over detected hands, normalized
     n_hands: int = 0
     is_speaking: bool = False

@@ -9,6 +9,7 @@ import Foundation
 import AVFoundation
 import Combine
 import CoreMotion
+import QuartzCore
 
 struct RecordingMetadata: Codable {
     var labelled: Bool
@@ -24,6 +25,10 @@ final class RecorderController: NSObject, ObservableObject {
     @Published var statusText = "Idle"
     @Published var alert: AppAlert?
     @Published var isMotionAvailable: Bool = false
+    @Published private(set) var audioRouteName = "iPad / iPhone speaker"
+    @Published private(set) var airPodsMessage = "Wear your AirPods and choose them as the audio output."
+    private var audioRouteObserver: NSObjectProtocol?
+    private var connectionTestPlayer: AVAudioPlayer?
 
     @Published var latestMotion: (ax: Double, ay: Double, az: Double)?
     @Published private(set) var reviewAudioPermission = "not_requested"
@@ -44,6 +49,14 @@ final class RecorderController: NSObject, ObservableObject {
     private var currentEatingLabel: Bool?
 
     private var recorder: VideoIMURecorder?
+    /// Guided experiments keep recording through AirPods loss and mark the gap
+    /// instead of stopping and splitting the session.
+    @Published private(set) var guidedModeActive = false
+    var onMotionAvailabilityChanged: ((Bool) -> Void)?
+    /// Installed before preview so guided quality checks see preview frames.
+    var videoFrameObserver: ((CMSampleBuffer) -> Void)? {
+        didSet { recorder?.videoFrameObserver = videoFrameObserver }
+    }
     private var cancellables = Set<AnyCancellable>()
     private var imuCheckTimer: DispatchSourceTimer?
     private var isPreparingRecording = false
@@ -52,16 +65,70 @@ final class RecorderController: NSObject, ObservableObject {
         self.captureReviewAudio = UserDefaults.standard.bool(forKey: "CaptureLocalReviewAudio")
         super.init()
         loadMetadata()
+        updateAudioRoute()
+        audioRouteObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.updateAudioRoute()
+            self?.recorder?.refreshMotionConnection()
+        }
     }
 
     func activateAudioSession() {
         let audio = AVAudioSession.sharedInstance()
         do {
-            try audio.setCategory(.playback, options: [.mixWithOthers])
+            // An active recording may own a microphone route. Do not replace
+            // its category or interrupt the video to retry headphone motion.
+            if !isRecording { try audio.setCategory(.playback, options: [.mixWithOthers]) }
             try audio.setActive(true)
+            updateAudioRoute()
         } catch {
-            print("Failed to activate audio session: \(error)")
+            airPodsMessage = "Audio output could not activate: \(error.localizedDescription)"
         }
+    }
+
+    private func updateAudioRoute() {
+        let names = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName)
+        audioRouteName = names.isEmpty ? "No audio output selected" : names.joined(separator: ", ")
+    }
+
+    func retryAirPodsMotion() {
+        guard !CollectionTestMode.isEnabled else { return }
+        airPodsMessage = "Retrying motion. Wear the AirPod and select it under Choose AirPods if needed."
+        activateAudioSession()
+        if let recorder { recorder.reconnectMotion() }
+        else { prepare() }
+    }
+
+    func playAirPodsTestSound() {
+        guard !CollectionTestMode.isEnabled else { return }
+        activateAudioSession()
+        do {
+            let player = try AVAudioPlayer(data: Self.connectionTestTone())
+            player.volume = 0.35
+            connectionTestPlayer = player
+            player.prepareToPlay()
+            guard player.play() else { throw Err("Test sound could not start.") }
+            airPodsMessage = "Test sound plays through \(audioRouteName). Choose your AirPods if you hear it from the device."
+            recorder?.reconnectMotion()
+        } catch { airPodsMessage = error.localizedDescription }
+    }
+
+    private static func connectionTestTone() -> Data {
+        let rate = 22_050, count = rate * 3 / 10
+        var data = Data()
+        func word<T: FixedWidthInteger>(_ value: T) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        data.append(Data("RIFF".utf8)); word(UInt32(36 + count * 2)); data.append(Data("WAVEfmt ".utf8))
+        word(UInt32(16)); word(UInt16(1)); word(UInt16(1)); word(UInt32(rate)); word(UInt32(rate * 2))
+        word(UInt16(2)); word(UInt16(16)); data.append(Data("data".utf8)); word(UInt32(count * 2))
+        for index in 0..<count {
+            let fade = min(1, min(Double(index), Double(count - index - 1)) / 220)
+            word(Int16(sin(2 * .pi * 660 * Double(index) / Double(rate)) * fade * 6_000))
+        }
+        return data
     }
 
     private func makeTimestampString() -> String {
@@ -71,7 +138,7 @@ final class RecorderController: NSObject, ObservableObject {
         return formatter.string(from: Date())
     }
 
-    func prepare() {
+    func prepare(startPreview: Bool = true) {
         if CollectionTestMode.isEnabled {
             isMotionAvailable = CollectionTestMode.simulatedMotionAvailable
             statusText = isMotionAvailable ? "Ready – simulated AirPods" : "Ready"
@@ -93,11 +160,12 @@ final class RecorderController: NSObject, ObservableObject {
                         DispatchQueue.main.async { self?.alert = AppAlert("Recorder error", err.localizedDescription) }
                     }
                     try r.configureSessionOnly()
+                    r.videoFrameObserver = self.videoFrameObserver
                     self.recorder = r
                     self.captureSession = r.exposedSession
-                    r.startPreview()
+                    if startPreview { r.startPreview() }
                     
-                    r.trialDeviceMotionCheck { [weak self] ready in
+                    r.checkMotionReadiness { [weak self] ready in
                         DispatchQueue.main.async {
                             self?.isMotionAvailable = ready
                         }
@@ -132,7 +200,7 @@ final class RecorderController: NSObject, ObservableObject {
                         permission: self.reviewAudioPermission
                     )
                     self.captureSession = self.recorder?.exposedSession
-                    self.recorder?.startPreview()
+                    if startPreview { self.recorder?.startPreview() }
                 }
 
                 imuCheckTimer?.cancel()
@@ -158,16 +226,24 @@ final class RecorderController: NSObject, ObservableObject {
     }
     
     func checkIMUReadiness() {
-        recorder?.trialDeviceMotionCheck { [weak self] ready in
+        recorder?.checkMotionReadiness { [weak self] ready in
             DispatchQueue.main.async {
-                self?.isMotionAvailable = ready
+                self?.handleMotionAvailabilityChange(ready)
             }
         }
     }
     
     private func handleMotionAvailabilityChange(_ available: Bool) {
+        let changed = isMotionAvailable != available
         isMotionAvailable = available
+        if changed {
+            onMotionAvailabilityChanged?(available)
+            airPodsMessage = available ? "Receiving fresh AirPods motion." : "Motion stopped. Wear your AirPod, then choose it or retry motion here."
+        }
 
+        if guidedModeActive {
+            return
+        }
         if isRecording && !available {
             // Motion disappeared during an active recording: pause.
             pauseDueToMotionLoss()
@@ -176,6 +252,51 @@ final class RecorderController: NSObject, ObservableObject {
             // allow the user to resume.
             canResumeRecording = true
         }
+    }
+
+    // MARK: - Guided capture helpers
+
+    var hostTimeNow: Double {
+        CollectionTestMode.isEnabled ? CACurrentMediaTime() : VideoIMURecorder.hostTimeNow()
+    }
+
+    /// True when a headphone sample arrived within `window` seconds.
+    func motionIsFresh(window: Double = 0.5) -> Bool {
+        if CollectionTestMode.isEnabled { return isMotionAvailable }
+        guard isRecording, let last = recorder?.latestMotionHostTime else { return isMotionAvailable }
+        return hostTimeNow - last <= window
+    }
+
+    var isCaptureInterrupted: Bool { recorder?.isCaptureInterrupted ?? false }
+
+    func motionCoverage(videoDuration: Double) -> Double? {
+        if CollectionTestMode.isEnabled { return 1.0 }
+        return recorder?.motionCoverage(videoDuration: videoDuration)
+    }
+
+    /// Starts a continuous guided recording named for the experiment.
+    /// `completion` receives the saved folder after stop, or nil if capture
+    /// could not start.
+    func startGuided(experimentID: String, completion: @escaping (URL?) -> Void) {
+        guidedModeActive = true
+        guidedNamePrefix = "Guided-\(experimentID)"
+        guidedStopCompletion = completion
+        start(withLabel: nil)
+    }
+
+    func stopGuided() {
+        stop()
+    }
+
+    private var guidedNamePrefix: String?
+    private var guidedStopCompletion: ((URL?) -> Void)?
+
+    private func finishGuidedStop(folder: URL?) {
+        guidedModeActive = false
+        guidedNamePrefix = nil
+        let completion = guidedStopCompletion
+        guidedStopCompletion = nil
+        completion?(folder)
     }
 
     func start(withLabel label: Bool?) {
@@ -210,6 +331,7 @@ final class RecorderController: NSObject, ObservableObject {
             } catch {
                 self.statusText = "Ready"
                 self.alert = AppAlert("Could not start capture", error.localizedDescription)
+                if self.guidedModeActive { self.finishGuidedStop(folder: nil) }
             }
         }
     }
@@ -225,12 +347,14 @@ final class RecorderController: NSObject, ObservableObject {
         // Determine base name prefix based on label semantics
         // "Eating" if true, "Not-eating" if false, "Session" if nil
         let basePrefix: String
-        if let lbl = label {
+        if let guided = guidedNamePrefix {
+            basePrefix = guided
+        } else if let lbl = label {
             basePrefix = lbl ? "Eating" : "Not-eating"
         } else {
             basePrefix = "Session"
         }
-        let baseName = "\(basePrefix)-\(timestamp)"
+        let baseName = "\(basePrefix)-\(timestamp)-\(UUID().uuidString.prefix(8))"
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let folder = docs.appendingPathComponent(baseName, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -244,6 +368,11 @@ final class RecorderController: NSObject, ObservableObject {
         // Start recording
         r.startRecording(to: url)
 
+        guard r.isRecording else {
+            self.statusText = "Could not start capture"
+            if guidedModeActive { finishGuidedStop(folder: nil) }
+            return
+        }
         self.isRecording = true
         self.statusText = "Recording…"
         self.lastURL = nil
@@ -271,15 +400,13 @@ final class RecorderController: NSObject, ObservableObject {
                 self.lastURL = url
                 self.lastSessionFolder = url.deletingLastPathComponent()
                 if let folder = self.lastSessionFolder {
-                    let isEating = self.currentEatingLabel ?? false
-                    let labelledValue = !isEating   // Not Eating -> labelled = true, Eating -> labelled = false
+                    let labelledValue = self.currentEatingLabel == false   // Not Eating -> labelled = true, Eating -> labelled = false
                     self.setMetadata(for: folder, labelled: labelledValue, shared: false)
                     self.currentEatingLabel = nil
                     // Force a directory refresh by briefly touching the folder; ShareLink reads a fresh listing.
                     _ = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-                    // Create/refresh a zip archive for this session to simplify sharing
-                    _ = try? self.zipSessionFolder(folder)
                 }
+                if self.guidedModeActive { self.finishGuidedStop(folder: self.lastSessionFolder) }
             }
         }
     }
@@ -309,8 +436,7 @@ final class RecorderController: NSObject, ObservableObject {
                 // Preserve currentEatingLabel so we can reuse it on resume,
                 // but still record metadata for this partial segment.
                 if let folder = self.lastSessionFolder {
-                    let isEating = self.currentEatingLabel ?? false
-                    let labelledValue = !isEating   // Not Eating -> labelled = true, Eating -> labelled = false
+                    let labelledValue = self.currentEatingLabel == false   // Not Eating -> labelled = true, Eating -> labelled = false
                     self.setMetadata(for: folder, labelled: labelledValue, shared: false)
                     // Note: do NOT clear currentEatingLabel here.
                 }
@@ -352,7 +478,8 @@ final class RecorderController: NSObject, ObservableObject {
         guard isRecording else { return }
         isRecording = false
         let isEating = currentEatingLabel ?? true
-        let baseName = isEating ? "Eating-UI-Test" : "Not-eating-UI-Test"
+        let baseName = guidedNamePrefix.map { "\($0)-UI-Test" }
+            ?? (isEating ? "Eating-UI-Test" : "Not-eating-UI-Test")
         guard let documents = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
@@ -369,7 +496,7 @@ final class RecorderController: NSObject, ObservableObject {
             ).write(to: motionURL)
             try CanonicalBundleWriter.writeInitialBundle(
                 videoURL: videoURL,
-                isEating: isEating,
+                isEating: guidedModeActive ? nil : isEating,
                 timing: CaptureTimingSnapshot(
                     videoStartHostTime: 100.0,
                     firstVideoFrameHostTime: 100.0,
@@ -387,13 +514,14 @@ final class RecorderController: NSObject, ObservableObject {
             )
             lastURL = videoURL
             lastSessionFolder = folder
-            setMetadata(for: folder, labelled: !isEating, shared: false)
+            setMetadata(for: folder, labelled: guidedModeActive ? false : !isEating, shared: false)
             statusText = "Saved"
         } catch {
             alert = AppAlert("Test capture failed", error.localizedDescription)
             statusText = "Ready"
         }
         currentEatingLabel = nil
+        if guidedModeActive { finishGuidedStop(folder: lastSessionFolder) }
     }
 
 
@@ -457,16 +585,42 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     @discardableResult
-        func zipSessionFolder(_ folder: URL) throws -> URL {
-            // Note: Foundation does not provide a built-in ZIP API like `FileManager.zipItem`.
-            // If you need real zipping, consider adding a third-party library (e.g., ZIPFoundation),
-            // or implement your own archiving using Compression/Archive. For now, we safely fall back
-            // to returning the folder itself so callers can still share the session contents.
-            //
-            // Previous (invalid) behavior attempted to create `folder.zip`. That API does not exist.
-            // Returning the folder avoids creating a misleading URL to a non-existent file.
-            return folder
+    func zipSessionFolder(_ folder: URL) throws -> URL {
+        guard !isRecording, !isPreparingRecording else {
+            throw Err("Stop and finish the recording before export.")
         }
+        let manifestURL = folder.appendingPathComponent("session.json")
+        let data = try Data(contentsOf: manifestURL)
+        guard let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw Err("Session metadata is invalid.")
+        }
+        for key in ["video", "motion", "audio"] {
+            guard let reference = manifest[key] as? [String: Any] else {
+                if key != "audio" { throw Err("Missing \(key) metadata") }
+                continue
+            }
+            if key == "audio", reference["enabled"] as? Bool != true { continue }
+            guard let path = reference["path"] as? String else { throw Err("Missing \(key) reference") }
+            let media = folder.appendingPathComponent(path).standardizedFileURL
+            guard media.path.hasPrefix(folder.standardizedFileURL.path + "/"),
+                  FileManager.default.fileExists(atPath: media.path) else { throw Err("Missing \(key) media") }
+            if let expected = reference["sha256"] as? String {
+                let actual = try CanonicalCaptureContract.sha256(of: media)
+                guard expected == actual else { throw Err("Export blocked: \(key) hash mismatch") }
+            }
+        }
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(folder.lastPathComponent)-\(UUID().uuidString).zip")
+        var coordinationError: NSError?
+        var copyError: Error?
+        NSFileCoordinator().coordinate(readingItemAt: folder, options: .forUploading, error: &coordinationError) { archive in
+            do { try FileManager.default.copyItem(at: archive, to: destination) }
+            catch { copyError = error }
+        }
+        if let error = coordinationError ?? copyError as NSError? { throw error }
+        guard FileManager.default.fileExists(atPath: destination.path) else { throw Err("Session archive was not created") }
+        return destination
+    }
 
     private func loadMetadata() {
         guard let data = UserDefaults.standard.data(forKey: metadataDefaultsKey) else { return }
@@ -516,6 +670,7 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     deinit {
+        if let audioRouteObserver { NotificationCenter.default.removeObserver(audioRouteObserver) }
         imuCheckTimer?.cancel()
         imuCheckTimer = nil
     }

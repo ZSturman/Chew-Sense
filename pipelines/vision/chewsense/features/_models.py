@@ -1,7 +1,9 @@
 """Tiny helper: download and cache MediaPipe Tasks model files."""
 from __future__ import annotations
 
+import hashlib
 import os
+import tempfile
 import ssl
 import urllib.request
 from pathlib import Path
@@ -24,6 +26,16 @@ _MODEL_URLS = {
 }
 
 
+_MODEL_SHA256 = {
+    "face_landmarker.task": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+    "hand_landmarker.task": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+}
+
+
+def model_provenance() -> dict[str, str]:
+    return {name: f"mediapipe-float16-v1:sha256:{digest}" for name, digest in _MODEL_SHA256.items()}
+
+
 def _cache_dir() -> Path:
     env = os.environ.get("CHEWSENSE_MODELS_DIR")
     if env:
@@ -37,11 +49,22 @@ def get_model(name: str) -> Path:
     d = _cache_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / name
-    if path.exists() and path.stat().st_size > 1024:
+    expected = _MODEL_SHA256[name]
+    if path.exists():
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"model cache hash mismatch: {path}; move the invalid file aside and retry")
         return path
-    url = _MODEL_URLS[name]
-    tmp = path.with_suffix(path.suffix + ".part")
-    with urllib.request.urlopen(url, context=_SSL_CONTEXT) as resp:  # nosec - fixed Google CDN URLs
-        tmp.write_bytes(resp.read())
-    tmp.replace(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=d, suffix=".part", delete=False) as handle:
+            temporary = Path(handle.name)
+            with urllib.request.urlopen(_MODEL_URLS[name], context=_SSL_CONTEXT, timeout=60) as response:
+                while chunk := response.read(1024 * 1024):
+                    handle.write(chunk)
+        if hashlib.sha256(temporary.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"download hash mismatch for {name}")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path

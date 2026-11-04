@@ -22,14 +22,13 @@ struct RecordingsListView: View {
     }
     
     private func zipForFolder(_ folder: URL) -> URL? {
-        if #available(iOS 16.0, *) {
-            return try? controller.zipSessionFolder(folder)
-        } else {
-            // Fallback: return nil to share raw files
+        do { return try controller.zipSessionFolder(folder) }
+        catch {
+            controller.alert = AppAlert("Export blocked", error.localizedDescription)
             return nil
         }
     }
-    
+
     private var labelledFolders: [URL] {
         sessionFolders.filter { folder in
             if let meta = controller.metadata(for: folder) {
@@ -107,7 +106,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -132,7 +132,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -171,7 +172,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -196,7 +198,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -235,7 +238,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -260,7 +264,8 @@ struct RecordingsListView: View {
                                     if let zip = zipForFolder(folder) {
                                         itemsToShare = [zip]
                                     } else {
-                                        itemsToShare = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+                                        itemsToShare = []
+                                        return
                                     }
                                     showShareSheet = true
                                 } label: {
@@ -292,8 +297,8 @@ struct RecordingsListView: View {
                                 if let zip = zipForFolder(f) {
                                     urls.append(zip)
                                 } else {
-                                    let files = (try? FileManager.default.contentsOfDirectory(at: f, includingPropertiesForKeys: nil)) ?? []
-                                    urls.append(contentsOf: files)
+                                    itemsToShare = []
+                                    return
                                 }
                             }
                             itemsToShare = urls

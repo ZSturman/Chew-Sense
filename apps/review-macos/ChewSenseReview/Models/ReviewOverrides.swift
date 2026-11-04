@@ -32,6 +32,30 @@ struct ReviewDraft: Codable, Equatable {
     var addedChews: [AddedChew]
     var addedFoodEntries: [AddedFoodEntry]
     var notes: String?
+    var reviewContext: ExperimentContext?
+
+    struct ExperimentContext: Codable, Equatable {
+        var mode = "assisted"
+        var activeSeconds: Double = 0
+        var syncVerified = false
+        var excludedSpans: [ExcludedSpan] = []
+        enum CodingKeys: String, CodingKey {
+            case mode
+            case activeSeconds = "active_seconds"
+            case syncVerified = "sync_verified"
+            case excludedSpans = "excluded_spans"
+        }
+    }
+    struct ExcludedSpan: Codable, Equatable {
+        var startTS: Double
+        var endTS: Double
+        var disposition: String
+        enum CodingKeys: String, CodingKey {
+            case startTS = "start_ts"
+            case endTS = "end_ts"
+            case disposition
+        }
+    }
 
     struct ChewDecision: Codable, Equatable, Identifiable {
         var candidateID: String
@@ -120,6 +144,7 @@ struct ReviewDraft: Codable, Equatable {
         case addedChews = "added_chews"
         case addedFoodEntries = "added_food_entries"
         case notes
+        case reviewContext = "review_context"
     }
 
     init(
@@ -148,6 +173,7 @@ struct ReviewDraft: Codable, Equatable {
         self.addedChews = addedChews
         self.addedFoodEntries = addedFoodEntries
         self.notes = notes
+        self.reviewContext = nil
     }
 
     init(from decoder: Decoder) throws {
@@ -166,6 +192,7 @@ struct ReviewDraft: Codable, Equatable {
         addedChews = try c.decodeIfPresent([AddedChew].self, forKey: .addedChews) ?? []
         addedFoodEntries = try c.decodeIfPresent([AddedFoodEntry].self, forKey: .addedFoodEntries) ?? []
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        reviewContext = try c.decodeIfPresent(ExperimentContext.self, forKey: .reviewContext)
     }
 
     func validateLineage(bundle: CandidateBundle, computedHash: String) throws {

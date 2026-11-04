@@ -113,3 +113,42 @@ food-entry head is not implemented in the shipping model yet; its independent
 gate/report scaffold cannot enable UI by itself. Food-entry, bite count,
 chews-per-bite, and “not enough chews” remain hidden until the head exists and
 passes that gate. A chewing bout is never presented as a detected bite.
+
+## Phase 0 additive review context
+
+Schema-v2 review drafts/revisions may include `review_context` with `mode`
+(`assisted` or `blind`), `active_seconds`, `sync_verified` and `excluded_spans`
+(`start_ts`, `end_ts`, `disposition` uncertain/unobservable). Historical review
+hashes remain valid: absent context is not inserted into their serialized hash.
+New finalization without explicit synchronization confirmation produces masked
+motion supervision. Visual verification remains independently meaningful.
+
+Blind review requires an empty candidate artifact and manually added events.
+The evaluation command requires frozen independent gold and exact video hash
+provenance; legacy diagnostic copies cannot establish independent evaluation.
+Candidate debug provenance snapshots model/code/config metadata, source video
+and coarse-label hashes, and display-timing/missing-frame metadata. Changing
+coarse labels after inference requires new candidates and a new review.
+
+Projection requires six finite sensor axes and is limited to 40 ms inside valid sensor coverage; interior outages
+over 80 ms cannot receive event impulses. Full-cycle sensor coverage is required
+for phase. Free exclusions and unknown/coarse gaps mask every task; downstream
+resampling cannot borrow mask validity from a distant surviving row. Reports
+and predictions never automatically set review verification or synchronization.
+
+## Guided-session sidecar (`guided_session.json`)
+
+Guided Collect recordings add `guided_session.json` beside `session.json`
+(schema `guided-session/1`, validated by `chewsense.loop.guided`). It records
+the verbatim experiment definition and SHA-256, actual host-clock times of
+every instruction, start, pause, restart and completion, invalid-quality
+intervals, quality fractions and on-device validation. Its
+`video_clock_origin_host_time_s` must equal `session.json`.
+
+It is **intended activity only** (`labels_status: intended_only_not_verified`).
+It never becomes coarse labels, review decisions, training targets or
+evaluation truth, and it is copied only into assisted working copies, never
+blind ones. The only label Collect may add for a guided recording is the
+wearer's explicit whole-recording no-food confirmation, stored in
+`coarse_labels.json` as `human_coarse` with `basis: wearer_no_food_attestation`.
+See [GUIDED_LOOP.md](GUIDED_LOOP.md).

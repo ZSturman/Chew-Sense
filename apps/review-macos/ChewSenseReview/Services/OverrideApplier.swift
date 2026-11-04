@@ -108,6 +108,7 @@ enum OverrideApplier {
         guard let nearest = rows.indices.min(by: {
             abs(rows[$0].videoTS - ts) < abs(rows[$1].videoTS - ts)
         }) else { return }
+        guard abs(rows[nearest].videoTS - ts) <= 0.04 else { return }
         rows[nearest].biteEvent = 1
         rows[nearest].biteID = id
         rows[nearest].videoConfidence = confidence
@@ -117,6 +118,18 @@ enum OverrideApplier {
 enum ReviewContractValidator {
     static func validate(_ draft: ReviewDraft, candidates: CandidateBundle, candidateHash: String) throws {
         try draft.validateLineage(bundle: candidates, computedHash: candidateHash)
+        if let context = draft.reviewContext {
+            guard ["assisted", "blind"].contains(context.mode), context.activeSeconds.isFinite, context.activeSeconds >= 0 else {
+                throw ReviewDraftError.invalidDisposition("experiment context")
+            }
+            if context.mode == "blind", !candidates.chews.isEmpty || !candidates.foodEntries.isEmpty {
+                throw ReviewDraftError.invalidDisposition("blind proposals must be empty")
+            }
+            for span in context.excludedSpans {
+                guard span.startTS.isFinite, span.endTS.isFinite, span.startTS >= 0, span.startTS < span.endTS,
+                      ["uncertain", "unobservable"].contains(span.disposition) else { throw ReviewDraftError.invalidAnchors("excluded span") }
+            }
+        }
 
         let candidateChewIDs = Set(candidates.chews.map(\.id))
         var seenChews = Set<String>()

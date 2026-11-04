@@ -12,11 +12,11 @@ import CoreMedia
 import CoreMotion
 
 
-/// Records a .mov with a video track + a timed-metadata track containing
-/// 10 ms packets of AirPods IMU samples, keyed to the host clock.
+/// Records original video plus a host-clock motion CSV and optional review audio.
 final class VideoIMURecorder: NSObject,
     AVCaptureVideoDataOutputSampleBufferDelegate,
-    AVCaptureAudioDataOutputSampleBufferDelegate {
+    AVCaptureAudioDataOutputSampleBufferDelegate,
+    CMHeadphoneMotionManagerDelegate {
     // Public
     private(set) var outputURL: URL
     var onError: ((Error) -> Void)?
@@ -27,9 +27,16 @@ final class VideoIMURecorder: NSObject,
     /// Used only to materialize a separate coarse-label artifact after capture;
     /// motion events are always saved without truth labels.
     var recordingLabel: Bool? = nil
+    /// Called on the capture queue for every video frame, including preview
+    /// frames. Must return quickly; guided quality analysis throttles itself.
+    var videoFrameObserver: ((CMSampleBuffer) -> Void)?
     
     @objc dynamic private(set) var isMotionAvailable: Bool = false
-    private(set) var isRecording: Bool = false
+    private var recordingActive = false
+    private(set) var isRecording: Bool {
+        get { captureLock.withLock { recordingActive } }
+        set { captureLock.withLock { recordingActive = newValue } }
+    }
     
     // Call this to build the AVCaptureSession without starting the writer yet.
     func configureSessionOnly() throws {
@@ -43,7 +50,7 @@ final class VideoIMURecorder: NSObject,
         enabled: Bool,
         permission: String
     ) throws {
-        guard !isRecording else {
+        guard !isRecording, !isFinishing else {
             throw Err("Review-audio settings cannot change during a recording.")
         }
         reviewAudioPermission = permission
@@ -77,19 +84,35 @@ final class VideoIMURecorder: NSObject,
     }
 
     func startRecording(to url: URL) {
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        guard !isRecording, !isFinishing else {
+            onError?(Err("The previous recording is still finishing."))
+            return
+        }
+        guard hmm.isDeviceMotionAvailable else {
+            onError?(Err("Connect AirPods before recording."))
+            return
+        }
+        guard !FileManager.default.fileExists(atPath: url.path),
+              !FileManager.default.fileExists(atPath: url.deletingPathExtension().appendingPathExtension("csv").path) else {
+            onError?(Err("A recording already exists at this path; choose a new session."))
+            return
+        }
         // Reuse the already-configured capture session; just point the writer at a new URL
         self.outputURL = url
         do {
             // Prepare CSV sidecar file
             let csvURL = url.deletingPathExtension().appendingPathExtension("csv")
             self.csvURL = csvURL
-            FileManager.default.createFile(atPath: csvURL.path, contents: nil, attributes: nil)
+            FileManager.default.createFile(atPath: csvURL.path, contents: Data("timestamp,dtNs,ax,ay,az,gx,gy,gz\n".utf8), attributes: nil)
             csvFileHandle = try FileHandle(forWritingTo: csvURL)
 
             // (Re)create the asset writer for the new URL
             try setupWriter()
 
-            // Start motion capture batching
+            // Producers may run immediately after registration.
+            isRecording = true
             setupMotion()
             startBatchTimer()
 
@@ -101,10 +124,15 @@ final class VideoIMURecorder: NSObject,
             }
             isRecording = true
         } catch {
+            isRecording = false
+            writer?.cancelWriting()
+            audioWriter?.cancelWriting()
+            csvFileHandle?.closeFile()
+            csvFileHandle = nil
             onError?(error)
         }
     }
-    
+
     func startRecording(to url: URL, isEating: Bool) {
         // Store the initial selection for post-processing; events are saved without labels during recording.
         self.recordingLabel = isEating
@@ -114,6 +142,9 @@ final class VideoIMURecorder: NSObject,
     // Private
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
+    private var recordingRotationAngle: CGFloat = 90
     private let audioOutput = AVCaptureAudioDataOutput()
     private var writer: AVAssetWriter!
     private var videoInput: AVAssetWriterInput!
@@ -148,6 +179,8 @@ final class VideoIMURecorder: NSObject,
     private var previousMotionHostTimeSeconds: Double?
     private var motionSampleGapCount: Int = 0
     private var largestMotionSampleGapSeconds: Double?
+    private var motionGapSecondsTotal: Double = 0
+    private var captureInterruptionActive = false
     private let interruptionTracker = CaptureInterruptionTracker()
     private var captureNotificationTokens: [NSObjectProtocol] = []
 
@@ -158,7 +191,12 @@ final class VideoIMURecorder: NSObject,
     private var csvFileHandle: FileHandle?
     private var csvURL: URL?
 
-    private let videoWritingQueue = DispatchQueue(label: "video.writing.queue")
+    // All writer, CSV, motion buffer and lifecycle access shares this lock.
+    // Append synchronously under it: stop cannot finish a writer ahead of queued appends.
+    private let captureLock = NSRecursiveLock()
+    private var isFinishing = false
+    private var motionStreamID = UUID()
+    private var motionHealth = HeadphoneMotionHealth()
     
     private var motionAvailabilityTimer: DispatchSourceTimer?
 
@@ -172,17 +210,15 @@ final class VideoIMURecorder: NSObject,
         self.reviewAudioPermission = reviewAudioPermission
         super.init()
         installCaptureInterruptionObservers()
-        // Start timer to poll isDeviceMotionAvailable every 0.5s
+        hmm.delegate = self
+        hmm.startConnectionStatusUpdates()
+        // Capability alone is not connection/readiness. Watch real samples
+        // and recover a stale subscription even if availability never toggles.
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
         timer.schedule(deadline: .now(), repeating: .milliseconds(500))
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
-            let available = self.hmm.isDeviceMotionAvailable
-            if self.isMotionAvailable != available {
-                DispatchQueue.main.async {
-                    self.isMotionAvailable = available
-                }
-            }
+            self.refreshMotionConnection()
         }
         timer.resume()
         motionAvailabilityTimer = timer
@@ -191,42 +227,32 @@ final class VideoIMURecorder: NSObject,
     deinit {
         motionAvailabilityTimer?.cancel()
         motionAvailabilityTimer = nil
+        hmm.stopDeviceMotionUpdates()
+        hmm.stopConnectionStatusUpdates()
         captureNotificationTokens.forEach(NotificationCenter.default.removeObserver)
     }
 
     func start() {
-        do {
-            try setupSession()
-            
-            let csvURL = outputURL.deletingPathExtension().appendingPathExtension("csv")
-            self.csvURL = csvURL
-            FileManager.default.createFile(atPath: csvURL.path, contents: nil, attributes: nil)
-            csvFileHandle = try FileHandle(forWritingTo: csvURL)
-            
-            try setupWriter()
-            setupMotion()
-            startBatchTimer()
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.session.startRunning()
-            }
-            isRecording = true
-        } catch { onError?(error) }
+        startRecording(to: outputURL)
     }
 
     func stop(completion: @escaping () -> Void) {
+        captureLock.lock()
+        defer { captureLock.unlock() }
         // Prevent double-stop
         guard isRecording else {
             completion()
             return
         }
         isRecording = false
+        isFinishing = true
         let interruptionSummary = interruptionTracker.snapshot()
 
-        // Flush any remaining IMU events before stopping timers and motion updates.
-        flushBatch()
-
         batchTimer?.cancel()
-        hmm.stopDeviceMotionUpdates()
+        batchTimer = nil
+        // Keep the preview/readiness stream alive; ingest stops with isRecording.
+        // Callbacks waiting for this lock now see isRecording=false.
+        flushBatch()
         // Do not stop the session here; keep it running for preview
         // session.stopRunning()
         
@@ -234,6 +260,7 @@ final class VideoIMURecorder: NSObject,
             csvFileHandle?.closeFile()
             csvFileHandle = nil
             self.writeCanonicalBundle(interruptions: interruptionSummary)
+            self.isFinishing = false
             completion()
             return
         }
@@ -256,14 +283,94 @@ final class VideoIMURecorder: NSObject,
             }
         }
         group.notify(queue: .global(qos: .utility)) {
+            self.captureLock.lock()
+            defer { self.captureLock.unlock() }
+            if writer.status == .failed {
+                self.onError?(writer.error ?? Err("Video writer failed."))
+            }
+            if let audioWriter = self.audioWriter, audioWriter.status == .failed {
+                self.onError?(audioWriter.error ?? Err("Review audio writer failed."))
+            }
             self.csvFileHandle?.closeFile()
             self.csvFileHandle = nil
             self.writeCanonicalBundle(interruptions: interruptionSummary)
+            self.isFinishing = false
             completion()
         }
     }
 
+    /// Host-clock seconds now, on the same clock as motion and the writer origin.
+    nonisolated static func hostTimeNow() -> Double {
+        CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+
+    /// Latest recorded headphone sample time (host clock), if recording.
+    var latestMotionHostTime: Double? { captureLock.withLock { lastMotionHostTimeSeconds } }
+
+    var isCaptureInterrupted: Bool { captureLock.withLock { captureInterruptionActive } }
+
+    /// Fraction of the video timeline covered by motion samples with no gap
+    /// above the contract threshold. Uses the recorder's own sample accounting.
+    func motionCoverage(videoDuration: Double) -> Double? {
+        captureLock.withLock {
+            guard videoDuration > 0, let first = firstMotionHostTimeSeconds,
+                  let last = lastMotionHostTimeSeconds, let origin = videoStartHostTimeSeconds else { return nil }
+            let start = max(first, origin)
+            let end = min(last, origin + videoDuration)
+            guard end > start else { return 0 }
+            return max(0, min(1, (end - start - motionGapSecondsTotal) / videoDuration))
+        }
+    }
+
+    /// Guided recordings keep video running when AirPods drop out. Headphone
+    /// updates are re-registered on reconnection; the shared host clock keeps
+    /// the timeline continuous and the gap is recorded, never filled.
+    func restartMotionUpdatesIfNeeded() {
+        captureLock.withLock {
+            guard !isFinishing, hmm.isDeviceMotionAvailable else { return }
+            let now = Self.hostTimeNow()
+            if motionHealth.shouldRestart(at: now) { setupMotion() }
+        }
+    }
+
+    func reconnectMotion() {
+        captureLock.withLock {
+            guard !isFinishing, hmm.isDeviceMotionAvailable else { return }
+            setupMotion()
+        }
+    }
+
+    func refreshMotionConnection() {
+        captureLock.withLock {
+            let now = Self.hostTimeNow()
+            publishMotionReadiness(motionHealth.isFresh(at: now))
+            guard !isFinishing, hmm.isDeviceMotionAvailable else { return }
+            if motionHealth.shouldRestart(at: now) { setupMotion() }
+        }
+    }
+
+    private func publishMotionReadiness(_ ready: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isMotionAvailable != ready else { return }
+            self.isMotionAvailable = ready
+            if !ready { self.deviceMotionHandler?(nil) }
+        }
+    }
+
+    func headphoneMotionManagerDidConnect(_ manager: CMHeadphoneMotionManager) {
+        reconnectMotion()
+    }
+
+    func headphoneMotionManagerDidDisconnect(_ manager: CMHeadphoneMotionManager) {
+        captureLock.withLock {
+            motionHealth.invalidateSamples()
+            publishMotionReadiness(false)
+        }
+    }
+
     func markInterrupted() {
+        captureLock.lock()
+        defer { captureLock.unlock() }
         interruptionTracker.recordMotionInterruption()
     }
 
@@ -301,11 +408,15 @@ final class VideoIMURecorder: NSObject,
             session.commitConfiguration()
             throw error
         }
-        if #available(iOS 17.0, *) {
-            // Set video output rotation to 90 degrees for portrait orientation
-            videoOutput.connection(with: .video)?.videoRotationAngle = 90
-        } else {
-            videoOutput.connection(with: .video)?.videoOrientation = .portrait
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        rotationCoordinator = coordinator
+        rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] _, _ in
+            guard let self else { return }
+            self.captureLock.withLock {
+                // Keep the pixel dimensions fixed for the entire recording.
+                guard !self.isRecording, !self.isFinishing else { return }
+                self.applyCaptureRotation()
+            }
         }
         session.commitConfiguration()
         isSessionConfigured = true
@@ -368,7 +479,9 @@ final class VideoIMURecorder: NSObject,
                 object: session,
                 queue: nil
             ) { [weak self] _ in
-                guard let self, self.isRecording else { return }
+                guard let self else { return }
+                self.captureLock.withLock { self.captureInterruptionActive = true }
+                guard self.isRecording else { return }
                 self.interruptionTracker.avCaptureWasInterrupted()
             },
             center.addObserver(
@@ -376,7 +489,9 @@ final class VideoIMURecorder: NSObject,
                 object: session,
                 queue: nil
             ) { [weak self] _ in
-                self?.interruptionTracker.avCaptureInterruptionEnded()
+                guard let self else { return }
+                self.captureLock.withLock { self.captureInterruptionActive = false }
+                self.interruptionTracker.avCaptureInterruptionEnded()
             },
             center.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification,
@@ -390,18 +505,18 @@ final class VideoIMURecorder: NSObject,
     }
 
     private func setupWriter() throws {
-        try? FileManager.default.removeItem(at: outputURL)
+        applyCaptureRotation()
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
 
         // Video
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: 1080,
-            AVVideoHeightKey: 1920
+            AVVideoWidthKey: Self.captureDimensions(rotationAngle: recordingRotationAngle).width,
+            AVVideoHeightKey: Self.captureDimensions(rotationAngle: recordingRotationAngle).height
         ]
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         videoInput.expectsMediaDataInRealTime = true
-        // Video orientation is now matched by the preview layer for iOS 17+ and no input transform is necessary
+        // Rotation is applied to the pixels before they reach the writer.
         
         guard writer.canAdd(videoInput) else { throw Err("Cannot add video input") }
         writer.add(videoInput)
@@ -411,7 +526,6 @@ final class VideoIMURecorder: NSObject,
         reviewAudioURL = nil
         if captureReviewAudio {
             let audioURL = outputURL.deletingPathExtension().appendingPathExtension("m4a")
-            try? FileManager.default.removeItem(at: audioURL)
             let sidecarWriter = try AVAssetWriter(outputURL: audioURL, fileType: .m4a)
             let audioSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -430,8 +544,12 @@ final class VideoIMURecorder: NSObject,
             reviewAudioURL = audioURL
         }
 
-        writer.startWriting()
-        audioWriter?.startWriting()
+        guard writer.startWriting() else { throw writer.error ?? Err("Cannot start video writer") }
+        if let audioWriter, !audioWriter.startWriting() {
+            throw audioWriter.error ?? Err("Cannot start audio writer")
+        }
+        events.removeAll(keepingCapacity: true)
+        batchStartSeconds = nil
         let origin = CMClockGetTime(hostClock)
         videoStartHostTimeSeconds = CMTimeGetSeconds(origin)
         firstVideoFrameHostTimeSeconds = nil
@@ -441,22 +559,50 @@ final class VideoIMURecorder: NSObject,
         previousMotionHostTimeSeconds = nil
         motionSampleGapCount = 0
         largestMotionSampleGapSeconds = nil
+        motionGapSecondsTotal = 0
         interruptionTracker.reset()
         writer.startSession(atSourceTime: origin)
         audioWriter?.startSession(atSourceTime: origin)
     }
 
+    private func applyCaptureRotation() {
+        guard let coordinator = rotationCoordinator,
+              let connection = videoOutput.connection(with: .video) else { return }
+        let angle = (coordinator.videoRotationAngleForHorizonLevelCapture / 90).rounded() * 90
+        guard connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
+        recordingRotationAngle = angle
+    }
+
+    static func captureDimensions(rotationAngle: CGFloat) -> (width: Int, height: Int) {
+        let quarterTurns = Int((rotationAngle / 90).rounded())
+        return quarterTurns.isMultiple(of: 2) ? (1920, 1080) : (1080, 1920)
+    }
+
     private func setupMotion() {
-        guard hmm.isDeviceMotionAvailable else {
-            onError?(Err("Headphone motion not available. Connect AirPods and try again."))
-            return
-        }
-        // CMHeadphoneMotionManager does not expose deviceMotionUpdateInterval; sample rate is managed by the system (~100 Hz).
+        guard hmm.isDeviceMotionAvailable else { return }
+        motionStreamID = UUID()
+        let streamID = motionStreamID
+        motionHealth.didRestart(at: Self.hostTimeNow())
+        hmm.stopDeviceMotionUpdates()
+        // The system chooses the headphone motion rate; measure it from recorded timestamps.
+        motionQueue.maxConcurrentOperationCount = 1
         motionQueue.qualityOfService = .userInteractive
-        hmm.startDeviceMotionUpdates(to: motionQueue) { [weak self] m, _ in
-            guard let s = self, let m = m else { return }
-            s.ingest(m)
-            s.deviceMotionHandler?(m)
+        hmm.startDeviceMotionUpdates(to: motionQueue) { [weak self] m, error in
+            guard let s = self else { return }
+            s.captureLock.withLock {
+                guard s.motionStreamID == streamID else { return }
+                guard error == nil, let m else {
+                    s.motionHealth.invalidateSamples()
+                    s.publishMotionReadiness(false)
+                    return
+                }
+                let now = Self.hostTimeNow()
+                guard s.motionHealth.didReceive(sampleTime: m.timestamp, at: now) else { return }
+                s.publishMotionReadiness(true)
+                if s.isRecording, m.timestamp >= (s.videoStartHostTimeSeconds ?? .infinity) { s.ingest(m) }
+                s.deviceMotionHandler?(m)
+            }
         }
 #if DEBUG
         print("IMU: started deviceMotion updates")
@@ -482,6 +628,7 @@ final class VideoIMURecorder: NSObject,
             let gap = m.timestamp - previous
             if gap > CanonicalCaptureContract.motionGapThresholdSeconds {
                 motionSampleGapCount += 1
+                motionGapSecondsTotal += gap
                 largestMotionSampleGapSeconds = max(largestMotionSampleGapSeconds ?? 0, gap)
             }
         }
@@ -510,6 +657,8 @@ final class VideoIMURecorder: NSObject,
     }
 
     private func flushBatch() {
+        captureLock.lock()
+        defer { captureLock.unlock() }
         guard !events.isEmpty, let t0 = batchStartSeconds else { return }
         guard let csvFileHandle = csvFileHandle else { return }
         
@@ -553,62 +702,61 @@ final class VideoIMURecorder: NSObject,
 
     // MARK: Video delegate
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output === videoOutput { videoFrameObserver?(sb) }
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        guard isRecording else { return }
+        guard let hostBuffer = Self.sampleBufferOnHostClock(sb, sourceClock: session.masterClock, hostClock: hostClock) else {
+            onError?(Err("Cannot map capture presentation time to the host clock"))
+            return
+        }
+        let seconds = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(hostBuffer))
+        guard seconds.isFinite, seconds >= (videoStartHostTimeSeconds ?? .infinity) else { return }
         if output === audioOutput {
             guard let audioWriter, audioWriter.status == .writing,
                   let audioInput, audioInput.isReadyForMoreMediaData else { return }
-            audioInput.append(sb)
+            if !audioInput.append(hostBuffer) { onError?(audioWriter.error ?? Err("Audio append failed")) }
             return
         }
-        guard let writer = writer,
-              let videoInput = videoInput,
-              writer.status == .writing else { return }
-        videoWritingQueue.async {
-            if self.firstVideoFrameHostTimeSeconds == nil {
-                let presentationTime = CMSampleBufferGetPresentationTimeStamp(sb)
-                let seconds = CMTimeGetSeconds(presentationTime)
-                if seconds.isFinite {
-                    self.firstVideoFrameHostTimeSeconds = seconds
-                }
-            }
-            if videoInput.isReadyForMoreMediaData {
-                videoInput.append(sb)
-            }
+        guard let writer, writer.status == .writing,
+              let videoInput, videoInput.isReadyForMoreMediaData else { return }
+        if videoInput.append(hostBuffer) {
+            if firstVideoFrameHostTimeSeconds == nil { firstVideoFrameHostTimeSeconds = seconds }
+        } else {
+            onError?(writer.error ?? Err("Video append failed"))
         }
     }
 
-    /// Attempts to start device motion and calls the completion with true if a real sample is received within 1.5s.
-    func trialDeviceMotionCheck(completion: @escaping (Bool) -> Void) {
-        // Prevent motion check while recording
-        if isRecording {
-            completion(false)
-            return
-        }
-        
-        guard hmm.isDeviceMotionAvailable else {
-            completion(false)
-            return
-        }
-        var didReceiveMotion = false
-        let checkQueue = OperationQueue()
-        checkQueue.qualityOfService = .userInitiated
-        hmm.startDeviceMotionUpdates(to: checkQueue) { m, _ in
-            if m != nil && !didReceiveMotion {
-                didReceiveMotion = true
-                self.hmm.stopDeviceMotionUpdates()
-                completion(true)
-                self.deviceMotionHandler?(m)
+    /// Explicitly convert capture-clock PTS/DTS to the same host clock as
+    /// CMDeviceMotion and writer.startSession. Physical fidelity still needs markers.
+    static func sampleBufferOnHostClock(_ buffer: CMSampleBuffer, sourceClock: CMClock?, hostClock: CMClock) -> CMSampleBuffer? {
+        guard let sourceClock else { return nil }
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        let mapped = CMSyncConvertTime(pts, from: sourceClock, to: hostClock)
+        guard mapped.isValid, mapped.isNumeric else { return nil }
+        if abs(CMTimeGetSeconds(CMTimeSubtract(mapped, pts))) <= 1e-9 { return buffer }
+        var count = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr else { return nil }
+        var timings = Array(repeating: CMSampleTimingInfo(), count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: count, arrayToFill: &timings, entriesNeededOut: nil) == noErr else { return nil }
+        for index in timings.indices {
+            timings[index].presentationTimeStamp = CMSyncConvertTime(timings[index].presentationTimeStamp, from: sourceClock, to: hostClock)
+            if timings[index].decodeTimeStamp.isValid {
+                timings[index].decodeTimeStamp = CMSyncConvertTime(timings[index].decodeTimeStamp, from: sourceClock, to: hostClock)
             }
         }
-        // Timeout after 1.5 seconds
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-            if !didReceiveMotion {
-                self.hmm.stopDeviceMotionUpdates()
-                completion(false)
-                self.deviceMotionHandler?(nil)
-            }
-        }
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: buffer,
+            sampleTimingEntryCount: count, sampleTimingArray: &timings, sampleBufferOut: &copy) == noErr else { return nil }
+        return copy
     }
-    
+
+    /// Checks the sustained stream without interrupting an active recording.
+    func checkMotionReadiness(completion: @escaping (Bool) -> Void) {
+        refreshMotionConnection()
+        completion(captureLock.withLock { motionHealth.isFresh(at: Self.hostTimeNow()) })
+    }
+
     private func writeCanonicalBundle(interruptions: CaptureInterruptionSnapshot) {
         do {
             try CanonicalBundleWriter.writeInitialBundle(
@@ -638,5 +786,45 @@ final class VideoIMURecorder: NSObject,
         } catch {
             onError?(error)
         }
+    }
+}
+
+/// Distinguishes support for motion from actual recent sample delivery. A
+/// capability flag can stay true throughout a disconnect/reconnect.
+nonisolated struct HeadphoneMotionHealth {
+    private(set) var lastSampleTime: Double?
+    private(set) var lastArrivalTime: Double?
+    private(set) var lastRestartTime: Double?
+    static let freshSeconds = 0.5
+    static let retrySeconds = 2.5
+
+    func isFresh(at now: Double) -> Bool {
+        guard let sample = lastSampleTime, let arrival = lastArrivalTime, now.isFinite else { return false }
+        return now - sample >= -0.05 && now - sample <= Self.freshSeconds
+            && now - arrival >= 0 && now - arrival <= Self.freshSeconds
+    }
+
+    func shouldRestart(at now: Double) -> Bool {
+        !isFresh(at: now) && (lastRestartTime.map { now - $0 >= Self.retrySeconds } ?? true)
+    }
+
+    mutating func didRestart(at now: Double) {
+        lastRestartTime = now
+        invalidateSamples()
+    }
+
+    @discardableResult
+    mutating func didReceive(sampleTime: Double, at now: Double) -> Bool {
+        guard sampleTime.isFinite, now.isFinite, now - sampleTime >= -0.05,
+              now - sampleTime <= Self.freshSeconds,
+              lastSampleTime.map({ sampleTime > $0 }) ?? true else { return false }
+        lastSampleTime = sampleTime
+        lastArrivalTime = now
+        return true
+    }
+
+    mutating func invalidateSamples() {
+        lastSampleTime = nil
+        lastArrivalTime = nil
     }
 }

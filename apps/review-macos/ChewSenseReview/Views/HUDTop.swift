@@ -7,100 +7,59 @@ struct HUDTop: View {
     let toggleSidebar: () -> Void
     let toggleHelp: () -> Void
     let toggleReviewQueue: () -> Void
+    let toggleSections: () -> Void
+    let toggleSignals: () -> Void
+
+    @State private var showExperiment = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: toggleSidebar) {
-                Image(systemName: "sidebar.left")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button(action: toggleSidebar) { Image(systemName: "sidebar.left") }
+                    .help("Sessions (⌘1)")
+                saveDot
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.selectedSession?.id ?? "Choose a recording")
+                        .font(.headline).lineLimit(1).truncationMode(.middle)
+                    Text(state.isBlindReview ? "Independent benchmark · predictions hidden" : "Assisted review · automatic proposals")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(state.verifiedCount)/\(state.candidateChewCount) reviewed")
+                    .font(.caption.monospacedDigit()).fixedSize()
+                Button("Save", systemImage: "square.and.arrow.down") { state.saveOverrides() }
+                    .disabled(state.selectedSession == nil)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
-            .help("Toggle sidebar (⌘1)")
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    saveDot
-                    Text(state.selectedSession?.id ?? "—")
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                    if state.overrides.verified {
-                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    Button("Sections", systemImage: "list.bullet") { toggleSections() }
+                    Button("Review chews", systemImage: "checklist") { toggleReviewQueue() }
+                    Button(state.isBlindReview ? "Benchmark tools" : "Review tools", systemImage: "timer") { showExperiment.toggle() }
+                        .popover(isPresented: $showExperiment) { ExperimentReviewPanel() }
+                    Button(state.overrides.fullVideoPassCompleted ? "Full pass checked" : "Full pass", systemImage: "film") {
+                        state.toggleFullVideoPassCompleted()
                     }
+                    Button(state.overrides.verified ? "Verified" : "Verify", systemImage: "checkmark.seal") { state.toggleVerified() }
+                        .disabled(!state.overrides.verified && !state.canFinalizeReview)
+                        .help(state.completionStatus)
+                    Menu {
+                        Button("Rotate video right") { playback.rotateDisplay(by: 1) }
+                        Button("Rotate video left") { playback.rotateDisplay(by: -1) }
+                        Divider()
+                        Button("Show / hide signal charts") { toggleSignals() }.disabled(state.isBlindReview)
+                        Button("Show / hide annotated video") { state.useAnnotatedVideo.toggle() }
+                            .disabled(state.isBlindReview || state.selectedSession?.annotatedVideoURL == nil)
+                        Button("Help") { toggleHelp() }
+                    } label: { Label("More", systemImage: "ellipsis.circle") }
                 }
-                Text(state.statusMessage.isEmpty ? "Drag to add a chew. 1/2/3 sets Closed start / Maximum open / Closed end." : state.statusMessage)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
-
-            Spacer(minLength: 12)
-
-            counterPill
-            verifiedPill
-            statsBadge
-
-            Spacer(minLength: 12)
-
-            Button {
-                if state.selectedSession?.annotatedVideoURL != nil {
-                    state.useAnnotatedVideo.toggle()
-                }
-            } label: {
-                Label(state.useAnnotatedVideo ? "Annotated" : "Raw",
-                      systemImage: state.useAnnotatedVideo ? "eye.fill" : "eye")
-            }
-            .buttonStyle(.plain)
-            .disabled(state.selectedSession?.annotatedVideoURL == nil)
-            .help(state.selectedSession?.annotatedVideoURL == nil
-                  ? "No annotated_video.mp4 for this session"
-                  : "Toggle annotated reference video (O)")
-
-            Button(action: toggleReviewQueue) {
-                Label("Queue", systemImage: "list.bullet.rectangle.portrait")
-            }
-            .buttonStyle(.plain)
-            .help("Open review queue (M)")
-
-            Button {
-                state.toggleFullVideoPassCompleted()
-            } label: {
-                Label(
-                    state.overrides.fullVideoPassCompleted ? "Full Pass Done" : "Full Pass",
-                    systemImage: state.overrides.fullVideoPassCompleted
-                        ? "film.fill"
-                        : "film"
-                )
-            }
-            .buttonStyle(.plain)
-            .help("Acknowledge the final full-video check after reviewing misses")
-
-            Button {
-                state.toggleVerified()
-            } label: {
-                Label(state.overrides.verified ? "Verified" : "Mark Verified",
-                      systemImage: state.overrides.verified ? "checkmark.seal.fill" : "checkmark.seal")
-            }
-            .buttonStyle(.plain)
-            .disabled(!state.overrides.verified && !state.canFinalizeReview)
-            .help(state.completionStatus)
-
-            Button { state.saveOverrides() } label: {
-                Label("Save", systemImage: "square.and.arrow.down.fill")
-            }
-            .buttonStyle(.plain)
-            .help("Save overrides (⌘S)")
-            .disabled(state.selectedSession == nil)
-
-            Button(action: toggleHelp) {
-                Image(systemName: "questionmark.circle")
-            }
-            .buttonStyle(.plain)
-            .help("Help (⌘/)")
+            Text(state.statusMessage).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .font(.callout)
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .controlSize(.small)
+        .padding(12)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var saveDot: some View {
@@ -150,5 +109,52 @@ struct HUDTop: View {
         }
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(Color.white.opacity(0.08), in: Capsule())
+    }
+}
+
+
+private struct ExperimentReviewPanel: View {
+    @EnvironmentObject var state: ReviewerState
+    @EnvironmentObject var playback: PlaybackController
+    @State private var start = 0.0
+    @State private var end = 0.0
+    @State private var disposition = "uncertain"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(state.isBlindReview ? "Independent blind annotation" : "Assisted annotation").font(.headline)
+            Text("Count each chew at its closed end. Mark invisible or uncertain ranges before completing the full pass.")
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+            Button(state.reviewTimerRunning ? "Pause labeling timer" : "Start labeling timer") { state.toggleReviewTimer() }
+            Text("Saved active time: \(Int(state.overrides.reviewContext?.activeSeconds ?? 0)) s").font(.caption)
+            HStack {
+                TextField("Start seconds", value: $start, format: .number).frame(width: 90)
+                Button("Use playhead") { start = playback.currentTime }
+            }
+            HStack {
+                TextField("End seconds", value: $end, format: .number).frame(width: 90)
+                Button("Use playhead") { end = playback.currentTime }
+            }
+            Picker("Exclude as", selection: $disposition) {
+                Text("Uncertain").tag("uncertain")
+                Text("Unobservable").tag("unobservable")
+            }
+            Button("Exclude range") { state.excludeSpan(start: start, end: end, disposition: disposition) }
+            ForEach(Array((state.overrides.reviewContext?.excludedSpans ?? []).enumerated()), id: \.offset) { _, span in
+                Text(String(format: "%.2f–%.2f s: %@", span.startTS, span.endTS, span.disposition)).font(.caption)
+            }
+            Button("Remove last exclusion") { state.removeLastExclusion() }
+            Toggle("Beginning and end sync markers checked", isOn: Binding(
+                get: { state.overrides.reviewContext?.syncVerified ?? false },
+                set: { state.confirmSynchronization($0) }
+            ))
+            Text("Leave unchecked if timing is uncertain. Visual reviews can still be saved; motion training targets stay masked. For blind review, check alignment only after the independent annotation pass.")
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+            Button("Save review draft") { state.saveOverrides() }
+                .keyboardShortcut("s", modifiers: .command)
+            Text(state.statusMessage).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding().frame(width: 380)
     }
 }

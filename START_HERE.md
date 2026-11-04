@@ -1,5 +1,9 @@
 # Start Here
 
+For the first recording, use [the Phase 0 protocol](docs/PHASE0.md). Work on
+separate copies and complete independent blind annotation before viewing CV
+proposals. Physical clock accuracy remains unvalidated.
+
 ## The Three Apps
 
 1. `apps/collect-ios`: paired video, AirPods motion, shared-clock metadata,

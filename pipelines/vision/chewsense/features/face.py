@@ -98,7 +98,7 @@ class FaceExtractor:
             ),
         )
         self._lm = mp_vision.FaceLandmarker.create_from_options(opts)
-        self._frame_idx = 0
+        self._last_timestamp_ms = -1
         # Which blendshape category names to extract (subset of the 52 ARKit
         # blendshapes that MediaPipe outputs). Order doesn't matter; we map by
         # category_name. `jawOpen` is the headline mouth-aperture signal.
@@ -127,13 +127,13 @@ class FaceExtractor:
     def __exit__(self, *a):
         self.close()
 
-    def process(self, bgr) -> FaceFrameFeatures:
+    def process(self, bgr, timestamp_s: float) -> FaceFrameFeatures:
         h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         # Tasks API requires a monotonically increasing timestamp in ms
-        ts_ms = self._frame_idx * 33  # arbitrary monotonic stride; not used downstream
-        self._frame_idx += 1
+        ts_ms = max(self._last_timestamp_ms + 1, round(timestamp_s * 1000))
+        self._last_timestamp_ms = ts_ms
         try:
             res = self._lm.detect_for_video(mp_image, ts_ms)
         except Exception:

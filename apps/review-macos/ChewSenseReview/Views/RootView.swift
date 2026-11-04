@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import AVKit
 
-/// Root composition: full-bleed video with overlaid HUD/deck, optional sidebar
-/// and help slide-out. All keyboard input flows through the focusable root.
+/// Dedicated video area, toolbar, section navigator and optional evidence panels.
+/// All keyboard input flows through the focusable root.
 struct RootView: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
@@ -12,8 +12,8 @@ struct RootView: View {
     @State private var showSidebar: Bool = true
     @State private var showHelp: Bool = false
     @State private var showReviewQueue: Bool = false
-    @State private var hudVisible: Bool = true
-    @State private var hudFadeTask: Task<Void, Never>?
+    @State private var showSections = true
+    @State private var showSignals = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -29,6 +29,9 @@ struct RootView: View {
                 ReviewQueuePanel(onClose: { withAnimation { showReviewQueue = false } })
                     .frame(width: 360)
                     .transition(.move(edge: .trailing))
+            } else if showSections, state.selectedSession != nil {
+                Divider()
+                ReviewSectionsPanel().frame(width: 250)
             }
         }
         .overlay(alignment: .trailing) {
@@ -56,14 +59,12 @@ struct RootView: View {
         }
         .onChange(of: playback.isPlaying) { _, playing in
             if playing {
-                scheduleHUDFade()
                 viewport.snapToPlayhead(playback.currentTime, duration: max(playback.duration, 1))
-            } else {
-                revealHUD()
             }
         }
         .onChange(of: state.selectedSession?.id) { _, _ in
             loadEffectiveVideo(preserveTime: false)
+            if state.selectedSession != nil { showSidebar = false }
         }
         .onChange(of: state.useAnnotatedVideo) { _, _ in
             loadEffectiveVideo(preserveTime: true)
@@ -116,44 +117,35 @@ struct RootView: View {
     }
 
     private var videoStage: some View {
-        ZStack {
-            VideoSurface()
-                .background(Color.black)
-                .onTapGesture { revealHUD(); scheduleHUDFade() }
-                .onContinuousHover { _ in revealHUD(); scheduleHUDFade() }
-
-            VStack {
-                if hudVisible {
-                    HUDTop(toggleSidebar: { showSidebar.toggle() },
-                           toggleHelp: { showHelp.toggle() },
-                           toggleReviewQueue: { showReviewQueue.toggle() })
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .transition(.opacity)
-                }
-                ReviewGuidanceView(
-                    stage: state.canFinalizeReview
-                        ? .finalize
-                        : .decisions(remainingStatus: state.completionStatus.lowercased())
-                )
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
-                Spacer()
-                if state.selectedChew != nil {
-                    CycleShapeChart()
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 6)
-                        .transition(.opacity)
-                }
-                BottomDeck()
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+        VStack(spacing: 8) {
+            HUDTop(toggleSidebar: { showSidebar.toggle() },
+                   toggleHelp: { showHelp.toggle() },
+                   toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false } },
+                   toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false } },
+                   toggleSignals: { showSignals.toggle() })
+            Text(state.isBlindReview
+                 ? "Independent benchmark: add actual chews in the phone-labeled sections, then check for misses elsewhere. Routine recordings use automatic proposals."
+                 : "Phone intervals are already imported. Jump to a section, check the automatic proposals, and correct mistakes. Instructions are navigation context, not labels.")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            GeometryReader { geometry in
+                let sideways = playback.displayQuarterTurns % 2 != 0
+                VideoSurface()
+                    .frame(width: sideways ? geometry.size.height : geometry.size.width,
+                           height: sideways ? geometry.size.width : geometry.size.height)
+                    .rotationEffect(.degrees(Double(playback.displayQuarterTurns) * 90))
+                    .frame(width: geometry.size.width, height: geometry.size.height)
             }
-
-            KeyCaptureView(handler: handleKey)
-                .frame(width: 0, height: 0)
+            .background(Color.black).clipped()
+            if showSignals && !state.isBlindReview {
+                    CycleShapeChart()
+                        .frame(height: 110)
+            }
+            BottomDeck()
         }
-        .animation(.easeInOut(duration: 0.15), value: hudVisible)
+        .padding(10)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay { KeyCaptureView(handler: handleKey).frame(width: 0, height: 0) }
     }
 
     // MARK: - Helpers
@@ -166,20 +158,6 @@ struct RootView: View {
         panel.prompt = "Select ChewSense workspace"
         if panel.runModal() == .OK, let url = panel.url {
             state.setWorkspaceRoot(url)
-        }
-    }
-
-    private func revealHUD() {
-        hudFadeTask?.cancel()
-        if !hudVisible { hudVisible = true }
-    }
-
-    private func scheduleHUDFade() {
-        hudFadeTask?.cancel()
-        guard playback.isPlaying else { return }
-        hudFadeTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            if !Task.isCancelled, playback.isPlaying { hudVisible = false }
         }
     }
 
@@ -199,8 +177,12 @@ struct RootView: View {
     /// missing. When `preserveTime` is true the playhead is restored after
     /// the swap so the reviewer can compare frames at the same timestamp.
     private func loadEffectiveVideo(preserveTime: Bool) {
-        guard let session = state.selectedSession else { return }
-        let url: URL? = (state.useAnnotatedVideo ? session.annotatedVideoURL : nil)
+        guard let session = state.selectedSession else {
+            playback.pause()
+            playback.clearLoop()
+            return
+        }
+        let url: URL? = (state.useAnnotatedVideo && !state.isBlindReview ? session.annotatedVideoURL : nil)
             ?? session.videoURL
         guard let url else { return }
         let savedTime = preserveTime ? playback.currentTime : 0
@@ -298,7 +280,7 @@ struct RootView: View {
             state.loopSelectedChew.toggle(); return nil
         case ("o", _), ("O", _):
             if state.selectedSession?.annotatedVideoURL != nil {
-                state.useAnnotatedVideo.toggle()
+                if !state.isBlindReview { state.useAnnotatedVideo.toggle() }
             } else {
                 state.statusMessage = "No annotated_video.mp4 for this session"
             }
@@ -443,6 +425,71 @@ private struct ReviewGuidanceView: View {
 }
 
 // MARK: - Video surface (custom AVPlayerLayer-backed view)
+
+private struct ReviewSectionsPanel: View {
+    @EnvironmentObject var state: ReviewerState
+    @EnvironmentObject var playback: PlaybackController
+    @EnvironmentObject var viewport: TimelineViewport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recording sections").font(.headline)
+            Toggle("Phone labels", isOn: $state.showPhoneSections)
+            Toggle("Requested actions", isOn: $state.showInstructionSections)
+            Toggle("Chewing sections only", isOn: $state.chewingSectionsOnly)
+            if state.isBlindReview {
+                Text("Detector predictions stay hidden for this benchmark. Optional requested actions help navigation; check what actually happened in the video.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Blue: your reviewed phone labels. Purple: requested actions, never verified labels.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Whole recording") {
+                state.focusedSectionID = nil
+                playback.clearLoop()
+                viewport.fit()
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(state.visibleReviewSections) { section in
+                        Button {
+                            playback.pause()
+                            state.selectChew(id: nil)
+                            state.focusedSectionID = section.id
+                            playback.setLoop(start: section.start, end: section.end, enabled: false)
+                            playback.seek(to: section.start)
+                            viewport.center = (section.start + section.end) / 2
+                            viewport.zoom = max(1, playback.duration / max(1, section.end - section.start + 1))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(section.title).font(.callout.weight(.semibold))
+                                Text(String(format: "%.1f–%.1f s · %@", section.start, section.end,
+                                            section.source == .phone ? "Phone label" : "Requested"))
+                                    .font(.caption.monospacedDigit())
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                            .background((section.source == .phone ? Color.blue : Color.purple).opacity(state.focusedSectionID == section.id ? 0.3 : 0.1),
+                                        in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if state.focusedReviewSection != nil {
+                Text("The chew queue is focused on this section. Other events stay pending; filtering never verifies or excludes them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !state.isBlindReview {
+                    Button("Accept proposals I reviewed here") { state.acceptReviewedSectionProposals() }
+                        .disabled(state.reviewQueueChews.allSatisfy { state.disposition(for: $0.id) != nil })
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(14)
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
 
 private struct VideoSurface: NSViewRepresentable {
     @EnvironmentObject var playback: PlaybackController

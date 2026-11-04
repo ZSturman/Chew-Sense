@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +155,33 @@ def evaluate_model(
         metrics = _evaluate_binary(y, output, config)
     metrics["split"] = split_name
     metrics["split_manifest_path"] = str(split_manifest_path) if split_manifest_path else None
+
+    if mode == "temporal_tcn" and session_ids_arr is not None:
+        manifest_path = features_dir / "dataset_manifest.json"
+        if manifest_path.exists():
+            records = {str(s["session_id"]): s for s in json.loads(manifest_path.read_text())["sessions"]}
+            activity_map = {sid: row.get("activity", "unknown") for sid, row in records.items()}
+            breakdown = {}
+            for activity in sorted(set(activity_map.values())):
+                mask = np.array([activity_map.get(str(sid)) == activity for sid in session_ids_arr])
+                if mask.any() and np.any(y[mask, MASK_EATING] >= 0.5):
+                    breakdown[activity] = _evaluate_temporal(
+                        y[mask], output[mask], X[mask], config,
+                        session_ids=session_ids_arr[mask],
+                        timestamps=timestamps_arr[mask] if timestamps_arr is not None else None,
+                        hard_negative_mask=hard_negative_arr[mask] if hard_negative_arr is not None else None)
+            metrics["per_activity"] = breakdown
+            food_map = {sid: row.get("food_category") for sid, row in records.items()}
+            food_breakdown = {}
+            for food in sorted({v for v in food_map.values() if v}):
+                mask = np.array([food_map.get(str(sid)) == food for sid in session_ids_arr])
+                if mask.any() and np.any(y[mask, MASK_EATING] >= 0.5):
+                    food_breakdown[food] = _evaluate_temporal(
+                        y[mask], output[mask], X[mask], config,
+                        session_ids=session_ids_arr[mask],
+                        timestamps=timestamps_arr[mask] if timestamps_arr is not None else None,
+                        hard_negative_mask=hard_negative_arr[mask] if hard_negative_arr is not None else None)
+            metrics["per_food_category"] = food_breakdown
 
     # Per-activity breakdown — only when we have session_ids and a curated dir
     if (
@@ -336,9 +364,9 @@ def _evaluate_binary(
     
     acc = accuracy_score(y, preds)
     try:
-        auc = roc_auc_score(y, probs)
+        auc = float(roc_auc_score(y, probs)) if np.unique(y).size == 2 else None
     except ValueError:
-        auc = float("nan")
+        auc = None
     prec = precision_score(y, preds, zero_division=0)
     rec = recall_score(y, preds, zero_division=0)
     f1 = f1_score(y, preds, zero_division=0)
@@ -352,7 +380,7 @@ def _evaluate_binary(
     print("\nEVALUATION RESULTS (Binary Classification)")
     print("-------------------------------------------")
     print(f"Accuracy:   {acc:.4f}")
-    print(f"ROC AUC:    {auc:.4f}")
+    print(f"ROC AUC:    {auc:.4f}" if auc is not None else "ROC AUC:    unavailable (one class)")
     print(f"Precision:  {prec:.4f}")
     print(f"Recall:     {rec:.4f}")
     print(f"F1 Score:   {f1:.4f}")
@@ -362,7 +390,7 @@ def _evaluate_binary(
     return {
         "mode": "binary",
         "accuracy": float(acc),
-        "roc_auc": float(auc),
+        "roc_auc": auc,
         "precision": float(prec),
         "recall": float(rec),
         "f1": float(f1),
