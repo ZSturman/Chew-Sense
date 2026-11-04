@@ -1657,6 +1657,24 @@ def cmd_assist_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pipeline_status(args: argparse.Namespace) -> int:
+    """Write the one-file summary Review shows: recordings, labels, splits, model, errors, next steps."""
+
+    from pipeline.eating.status import build_status, summarize, write_status
+
+    workspace = get_workspace_root()
+    try:
+        status = build_status(workspace=workspace, repo=get_repo_root())
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Pipeline status failed: {exc}")
+        return 1
+    path = write_status(status, Path(args.output) if args.output else workspace / "experiments" / "eating" / "pipeline_status.json")
+    for line in summarize(status):
+        print(line)
+    print(f"Wrote {path}")
+    return 0
+
+
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
@@ -2066,6 +2084,13 @@ Examples:
     p_assist_eval.add_argument("--run", help="Eating run for motion predictions (default: latest locked-test run)")
     p_assist_eval.add_argument("--vision-root", action="append", help="Folder(s) of Vision outputs by session ID")
     p_assist_eval.set_defaults(func=cmd_assist_eval)
+
+    p_status_file = subparsers.add_parser(
+        "pipeline-status",
+        help="Summarize recordings, labels, splits, model, errors and next steps for Review",
+    )
+    p_status_file.add_argument("--output", help="Default: <workspace>/experiments/eating/pipeline_status.json")
+    p_status_file.set_defaults(func=cmd_pipeline_status)
 
     p_video_teacher = subparsers.add_parser(
         "video-teacher-eval",

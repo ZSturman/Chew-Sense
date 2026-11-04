@@ -5,6 +5,7 @@ import SwiftUI
 struct PipelineView: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var store = PipelineStore()
 
     var body: some View {
@@ -283,10 +284,13 @@ struct PipelineView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    if let path = eating["report_path"] as? String {
-                        Button("Open experiment report") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                            .padding(.top, 4)
+                    HStack {
+                        Button("Training and evaluation…") { openWindow(id: "training") }
+                        if let path = eating["report_path"] as? String {
+                            Button("Open experiment report") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                        }
                     }
+                    .padding(.top, 4)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

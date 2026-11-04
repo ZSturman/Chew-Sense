@@ -113,3 +113,24 @@ final class CoarseAssistTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: raw.appending(path: "annotations/coarse-review-v0002.json").path))
     }
 }
+
+/// Review must decode what `chewsense-motion pipeline-status` writes. The
+/// fixture is produced from a synthetic workspace and checked against the
+/// Python builder by `test_eating_status.py`.
+final class TrainingStatusDecodingTests: XCTestCase {
+    func testDecodesSyntheticPipelineStatus() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/pipeline_status_synthetic.json")
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let status = try decoder.decode(PipelineStatus.self, from: Data(contentsOf: url))
+        XCTAssertEqual(status.data.usableRecordings, 6)
+        XCTAssertTrue(status.recordings.contains { !$0.usable && $0.reason != nil })
+        XCTAssertTrue(status.model.trained)
+        XCTAssertNotNil(status.model.development?.f1)
+        let timeline = try XCTUnwrap(status.model.timelines?.values.first)
+        XCTAssertEqual(timeline.tEnd.count, timeline.probability.count)
+        XCTAssertFalse(timeline.humanIntervals.isEmpty)
+        XCTAssertEqual(timeline.humanIntervals[0][2].string.map { ["chewing", "not_chewing"].contains($0) }, true)
+    }
+}

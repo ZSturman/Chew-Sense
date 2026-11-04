@@ -24,6 +24,12 @@ struct ChewSenseReviewApp: App {
                 .environmentObject(playback)
         }
         .keyboardShortcut("p", modifiers: [.command, .shift])
+
+        Window("Training and Evaluation", id: "training") {
+            TrainingStatusView()
+                .environmentObject(state)
+        }
+        .keyboardShortcut("t", modifiers: [.command, .shift])
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .undoRedo) {

@@ -28,7 +28,10 @@
 		A1000025 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000025 /* PipelineView.swift */; };
 		A1000026 /* CoarseAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000026 /* CoarseAssistStore.swift */; };
 		A1000027 /* CoarseAssistPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000027 /* CoarseAssistPanel.swift */; };
+		A1000028 /* TrainingStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000028 /* TrainingStatusStore.swift */; };
+		A1000029 /* TrainingStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000029 /* TrainingStatusView.swift */; };
 		A2000002 /* CoarseAssistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* CoarseAssistTests.swift */; };
+		A2000003 /* ReviewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* ReviewSnapshotTests.swift */; };
 		A1000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000012 /* Assets.xcassets */; };
 		A1000020 /* TimelineViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000020 /* TimelineViewport.swift */; };
 		A1000021 /* ReviewQueueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000021 /* ReviewQueueSheet.swift */; };
@@ -70,7 +73,10 @@
 		B1000024 /* PipelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineStore.swift; sourceTree = "<group>"; };
 		B1000026 /* CoarseAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoarseAssistStore.swift; sourceTree = "<group>"; };
 		B1000027 /* CoarseAssistPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoarseAssistPanel.swift; sourceTree = "<group>"; };
+		B1000028 /* TrainingStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingStatusStore.swift; sourceTree = "<group>"; };
+		B1000029 /* TrainingStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingStatusView.swift; sourceTree = "<group>"; };
 		B2000002 /* CoarseAssistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoarseAssistTests.swift; sourceTree = "<group>"; };
+		B2000003 /* ReviewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSnapshotTests.swift; sourceTree = "<group>"; };
 		B1000025 /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
 		B1000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -179,6 +185,8 @@
 				B1000024 /* PipelineStore.swift */,
 				B1000025 /* PipelineView.swift */,
 				B1000027 /* CoarseAssistPanel.swift */,
+				B1000028 /* TrainingStatusStore.swift */,
+				B1000029 /* TrainingStatusView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -188,6 +196,7 @@
 			children = (
 				B2000001 /* ReviewContractTests.swift */,
 				B2000002 /* CoarseAssistTests.swift */,
+				B2000003 /* ReviewSnapshotTests.swift */,
 			);
 			path = ChewSenseReviewTests;
 			sourceTree = "<group>";
@@ -308,6 +317,8 @@
 				A1000023 /* CycleShapeChart.swift in Sources */,
 				A1000026 /* CoarseAssistStore.swift in Sources */,
 				A1000027 /* CoarseAssistPanel.swift in Sources */,
+				A1000028 /* TrainingStatusStore.swift in Sources */,
+				A1000029 /* TrainingStatusView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -317,6 +328,7 @@
 			files = (
 				A2000001 /* ReviewContractTests.swift in Sources */,
 				A2000002 /* CoarseAssistTests.swift in Sources */,
+				A2000003 /* ReviewSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

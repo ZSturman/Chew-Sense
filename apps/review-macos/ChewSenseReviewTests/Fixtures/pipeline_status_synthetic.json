@@ -1,0 +1,991 @@
+{
+ "artifact_type": "eating_pipeline_status",
+ "generated_at": "2026-11-04T02:53:43.862716+00:00",
+ "workspace": "/synthetic/workspace",
+ "recordings": [
+  {
+   "session_id": "Broken-1",
+   "recorded_at": null,
+   "source": "workspace",
+   "usable": false,
+   "reason": "no schema-v2 session.json (unmigrated or corrupt capture)",
+   "role": null,
+   "split": null,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s0-20261100-100000-AAAA",
+   "recorded_at": "2026-11-00T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 15.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 1
+   },
+   "windows": {
+    "labelled": 53,
+    "chewing": 21
+   },
+   "split": "dev",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s1-20261101-100000-AAAA",
+   "recorded_at": "2026-11-01T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 0.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 0
+   },
+   "windows": {
+    "labelled": 71,
+    "chewing": 0
+   },
+   "split": "dev",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s2-20261102-100000-AAAA",
+   "recorded_at": "2026-11-02T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 15.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 1
+   },
+   "windows": {
+    "labelled": 53,
+    "chewing": 21
+   },
+   "split": "dev",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s3-20261103-100000-AAAA",
+   "recorded_at": "2026-11-03T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 0.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 0
+   },
+   "windows": {
+    "labelled": 71,
+    "chewing": 0
+   },
+   "split": "dev",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s4-20261104-100000-AAAA",
+   "recorded_at": "2026-11-04T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 15.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 1
+   },
+   "windows": {
+    "labelled": 53,
+    "chewing": 21
+   },
+   "split": "test",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  },
+  {
+   "session_id": "Guided-s5-20261105-100000-AAAA",
+   "recorded_at": "2026-11-05T10:00:00",
+   "source": "canonical",
+   "activity": "unknown",
+   "duration_s": 40.0,
+   "video": false,
+   "role": null,
+   "sync": {
+    "clock": "shared_host_clock",
+    "sync_check": "shared host clock (not marker-verified)",
+    "sync_detail": null,
+    "sensor_coverage": null,
+    "motion_gaps": null,
+    "quality_checks": "not run (recorded before guided quality checks)"
+   },
+   "labels": {
+    "labelled_s": 40.0,
+    "chewing_s": 0.0,
+    "by_tier_s": {
+     "human_coarse": 40.0
+    },
+    "assisted_s": 0,
+    "latest_assisted_review": null,
+    "chewing_bouts": 0
+   },
+   "windows": {
+    "labelled": 71,
+    "chewing": 0
+   },
+   "split": "test",
+   "usable": true,
+   "proposals": null,
+   "attention": null
+  }
+ ],
+ "data": {
+  "usable_recordings": 6,
+  "rejected_recordings": 1,
+  "participants": 1,
+  "labelled_minutes": 4.0,
+  "chewing_minutes": 0.8,
+  "verified_clock_chewing_minutes": 0.8,
+  "labelled_minutes_by_tier": {
+   "human_coarse": 4.0
+  },
+  "labelled_windows": 372,
+  "chewing_windows": 63,
+  "by_split": {
+   "dev": {
+    "recordings": 4,
+    "with_chewing": 2,
+    "labelled_windows": 248,
+    "chewing_windows": 42
+   },
+   "test": {
+    "recordings": 2,
+    "with_chewing": 1,
+    "labelled_windows": 124,
+    "chewing_windows": 21
+   }
+  },
+  "awaiting_assisted_review": []
+ },
+ "model": {
+  "trained": true,
+  "live": {
+   "exported_detector": {
+    "model_id": "eating-hgb-20261104-015911-2e8f13fa",
+    "status": "experimental_candidate",
+    "run_id": "eating-20261104-015911",
+    "threshold": 0.71,
+    "mode_in_live": "shadow by default (logged to eating_detector.csv); drives Live only when the experimental mode is chosen in Settings"
+   },
+   "chewnet": {
+    "model_id": null,
+    "role": "drives Live by default; trained May 2026 on 6 field tests; test F1 0.50 in the November audit"
+   },
+   "physical_device_validation": "none recorded"
+  },
+  "run_id": "eating-20261104-025343",
+  "finished_at": "2026-11-04T02:53:43.820170+00:00",
+  "git_commit": null,
+  "selected_model": "logreg",
+  "selection_rule": "highest development out-of-fold AUC-PR, prior excluded",
+  "threshold": 0.95,
+  "dataset_fingerprint": "f8961fc848bef469a0cf21b89aa2ff0615db4fc11086bd6618e55ab967b13ed9",
+  "current_dataset_fingerprint": "f8961fc848bef469a0cf21b89aa2ff0615db4fc11086bd6618e55ab967b13ed9",
+  "trained_on_current_data": true,
+  "recordings_not_in_run": [],
+  "development": {
+   "f1": 1.0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "false_positive_rate": 0.0,
+   "auc_pr": 1.0,
+   "auc_roc": 1.0,
+   "f1_ci95": [
+    1.0,
+    1.0
+   ],
+   "recordings": 4,
+   "chewing_windows": 42,
+   "non_chewing_windows": 206,
+   "bouts_detected": 2,
+   "bouts_reference": 2,
+   "false_bouts": 0,
+   "false_bouts_per_hour": 0.0,
+   "onset_latency_median_s": 5.5
+  },
+  "test": {
+   "f1": 1.0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "false_positive_rate": 0.0,
+   "auc_pr": 1.0,
+   "auc_roc": 1.0,
+   "f1_ci95": [
+    1.0,
+    1.0
+   ],
+   "recordings": 2,
+   "chewing_windows": 21,
+   "non_chewing_windows": 103,
+   "bouts_detected": 1,
+   "bouts_reference": 1,
+   "false_bouts": 0,
+   "false_bouts_per_hour": 0.0,
+   "onset_latency_median_s": 5.5
+  },
+  "comparison": [
+   {
+    "model": "logreg",
+    "selected": true,
+    "dev_f1": 1.0,
+    "dev_auc_pr": 1.0,
+    "test_f1": 1.0,
+    "latency_ms": 0.04
+   },
+   {
+    "model": "prior",
+    "selected": false,
+    "dev_f1": 0.2897,
+    "dev_auc_pr": 0.1694,
+    "test_f1": 0.2897,
+    "latency_ms": 0.0
+   }
+  ],
+  "test_consultations": 1,
+  "report_path": "/synthetic/workspace/experiments/eating/runs/eating-20261104-025343/report.html",
+  "errors_by_recording": [
+   {
+    "session_id": "Guided-s0-20261100-100000-AAAA",
+    "split": "dev",
+    "recall": 1.0,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 21,
+    "non_chewing_windows": 32,
+    "false_bouts": 0,
+    "bouts_detected": 1,
+    "bouts_reference": 1
+   },
+   {
+    "session_id": "Guided-s1-20261101-100000-AAAA",
+    "split": "dev",
+    "recall": null,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 0,
+    "non_chewing_windows": 71,
+    "false_bouts": 0,
+    "bouts_detected": 0,
+    "bouts_reference": 0
+   },
+   {
+    "session_id": "Guided-s2-20261102-100000-AAAA",
+    "split": "dev",
+    "recall": 1.0,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 21,
+    "non_chewing_windows": 32,
+    "false_bouts": 0,
+    "bouts_detected": 1,
+    "bouts_reference": 1
+   },
+   {
+    "session_id": "Guided-s3-20261103-100000-AAAA",
+    "split": "dev",
+    "recall": null,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 0,
+    "non_chewing_windows": 71,
+    "false_bouts": 0,
+    "bouts_detected": 0,
+    "bouts_reference": 0
+   },
+   {
+    "session_id": "Guided-s4-20261104-100000-AAAA",
+    "split": "test",
+    "recall": 1.0,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 21,
+    "non_chewing_windows": 32,
+    "false_bouts": 0,
+    "bouts_detected": 1,
+    "bouts_reference": 1
+   },
+   {
+    "session_id": "Guided-s5-20261105-100000-AAAA",
+    "split": "test",
+    "recall": null,
+    "false_positive_rate": 0.0,
+    "chewing_windows": 0,
+    "non_chewing_windows": 71,
+    "false_bouts": 0,
+    "bouts_detected": 0,
+    "bouts_reference": 0
+   }
+  ],
+  "errors_by_context": [
+   {
+    "context": "unknown",
+    "split": "dev",
+    "false_positive_rate": 0.0,
+    "recall": 1.0,
+    "negatives": 206,
+    "positives": 42
+   },
+   {
+    "context": "unknown",
+    "split": "test",
+    "false_positive_rate": 0.0,
+    "recall": 1.0,
+    "negatives": 103,
+    "positives": 21
+   }
+  ],
+  "review_queue": [],
+  "timelines": {
+   "Guided-s0-20261100-100000-AAAA": {
+    "split": "dev",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.003,
+     0.003,
+     0.002,
+     0.002,
+     0.003,
+     0.004,
+     0.003,
+     0.002,
+     0.002,
+     0.002,
+     0.003,
+     0.003
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [
+     [
+      15.5,
+      27.5
+     ]
+    ],
+    "human_intervals": [
+     [
+      0.0,
+      10.0,
+      "not_chewing",
+      "human_coarse"
+     ],
+     [
+      10.0,
+      25.0,
+      "chewing",
+      "human_coarse"
+     ],
+     [
+      25.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   },
+   "Guided-s1-20261101-100000-AAAA": {
+    "split": "dev",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.003,
+     0.003,
+     0.003,
+     0.002,
+     0.001,
+     0.002,
+     0.003,
+     0.002,
+     0.003,
+     0.003,
+     0.002,
+     0.003
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [],
+    "human_intervals": [
+     [
+      0.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   },
+   "Guided-s2-20261102-100000-AAAA": {
+    "split": "dev",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.003,
+     0.003,
+     0.002,
+     0.002,
+     0.003,
+     0.003,
+     0.002,
+     0.003,
+     0.003,
+     0.004,
+     0.003,
+     0.002
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [
+     [
+      15.5,
+      27.0
+     ]
+    ],
+    "human_intervals": [
+     [
+      0.0,
+      10.0,
+      "not_chewing",
+      "human_coarse"
+     ],
+     [
+      10.0,
+      25.0,
+      "chewing",
+      "human_coarse"
+     ],
+     [
+      25.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   },
+   "Guided-s3-20261103-100000-AAAA": {
+    "split": "dev",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.006,
+     0.004,
+     0.002,
+     0.002,
+     0.002,
+     0.003,
+     0.003,
+     0.003,
+     0.003,
+     0.002,
+     0.004,
+     0.005
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [],
+    "human_intervals": [
+     [
+      0.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   },
+   "Guided-s4-20261104-100000-AAAA": {
+    "split": "test",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.002,
+     0.001,
+     0.001,
+     0.001,
+     0.001,
+     0.002,
+     0.003,
+     0.002,
+     0.001,
+     0.002,
+     0.002,
+     0.002
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [
+     [
+      15.5,
+      27.5
+     ]
+    ],
+    "human_intervals": [
+     [
+      0.0,
+      10.0,
+      "not_chewing",
+      "human_coarse"
+     ],
+     [
+      10.0,
+      25.0,
+      "chewing",
+      "human_coarse"
+     ],
+     [
+      25.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   },
+   "Guided-s5-20261105-100000-AAAA": {
+    "split": "test",
+    "t_end": [
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5
+    ],
+    "probability": [
+     0.001,
+     0.001,
+     0.001,
+     0.001,
+     0.002,
+     0.002,
+     0.002,
+     0.002,
+     0.001,
+     0.001,
+     0.001,
+     0.001
+    ],
+    "label": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "decoded": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "bouts": [],
+    "human_intervals": [
+     [
+      0.0,
+      40.0,
+      "not_chewing",
+      "human_coarse"
+     ]
+    ],
+    "guided_context": [],
+    "false_positive_windows": 0,
+    "false_negative_windows": 0
+   }
+  },
+  "parity": null
+ },
+ "assisted_labeling": null,
+ "history": [
+  {
+   "run_id": "eating-20261104-025343",
+   "finished_at": "2026-11-04T02:53:43.820170+00:00",
+   "test_evaluated": true,
+   "selected_model": "logreg",
+   "dataset_fingerprint": "f8961fc848be",
+   "recordings": 6,
+   "note": "",
+   "dev_f1": 1.0,
+   "test_f1": 1.0
+  }
+ ],
+ "next": [
+  {
+   "title": "Guided chewing with a verified clock",
+   "reason": "Only 63 chewing windows come from recordings with a shared video/motion clock; most positives are 2025 labels whose alignment cannot be checked.",
+   "experiment_id": "baseline-90s"
+  },
+  {
+   "title": "Talking without eating",
+   "reason": "Only 0 labelled windows of talking; too few to estimate its false-positive rate.",
+   "experiment_id": "talking"
+  },
+  {
+   "title": "Drinking",
+   "reason": "Only 0 labelled windows of drinking; too few to estimate its false-positive rate.",
+   "experiment_id": "drinking"
+  },
+  {
+   "title": "Walking without eating",
+   "reason": "Only 0 labelled windows of walking; too few to estimate its false-positive rate.",
+   "experiment_id": "walking-no-food"
+  },
+  {
+   "title": "Head movement",
+   "reason": "Only 0 labelled windows of head movement; too few to estimate its false-positive rate.",
+   "experiment_id": "head-movement"
+  },
+  {
+   "title": "A natural meal (manual Eating capture, then mark chewing spans)",
+   "reason": "No natural, uninstructed meal longer than five minutes exists; guided takes cannot show real-world bout lengths, pauses or conversation during eating.",
+   "experiment_id": null
+  },
+  {
+   "title": "Talking while eating",
+   "reason": "No recording mixes chewing with speech, as real meals do.",
+   "experiment_id": "talking-while-eating"
+  },
+  {
+   "title": "Chewing gum",
+   "reason": "Gum is chewing without eating; whether motion can separate it is untested.",
+   "experiment_id": "gum-chewing"
+  },
+  {
+   "title": "Slow and fast chewing",
+   "reason": "All chewing is at one self-selected pace; cadence work needs a range.",
+   "experiment_id": "chewing-pace"
+  },
+  {
+   "title": "Smiling, yawning and expressions",
+   "reason": "Non-eating mouth movements are absent as negatives.",
+   "experiment_id": "facial-expressions"
+  }
+ ],
+ "commands": {
+  "refresh": "chewsense-motion pipeline-status",
+  "development_check": "chewsense-motion eating-experiment --dev-only",
+  "locked_test_run": "chewsense-motion eating-experiment   (consults the locked test; run only to confirm)",
+  "export": "chewsense-motion eating-export --install-live",
+  "parity": "chewsense-motion eating-parity",
+  "proposals": "chewsense-motion assist-propose --loop",
+  "assist_evaluation": "chewsense-motion assist-eval"
+ },
+ "limitations": [
+  "One wearer: no cross-person result exists.",
+  "Locked test: few recordings contain chewing; intervals are wide.",
+  "Most chewing labels have unverified clocks (2025 legacy).",
+  "No physical-device validation of the exported detector yet."
+ ]
+}
