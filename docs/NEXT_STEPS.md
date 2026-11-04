@@ -20,15 +20,24 @@ the Phase 2 calibration. 64 tests passed.
 | MediaPipe telemetry | agent | done (above) |
 | Dev-only experiment rerun + `pipeline-status` | agent | waiting for new reviewed data; a rerun now would reproduce `eating-20261104-030715` |
 | Assisted review of the two proposal sets | you (Mac, Review) | open |
-| Service restart (publishes Natural Meal, enables automatic proposals) | you decide | open; not needed for the privacy fix |
+| Service restart (publishes Natural Meal, enables automatic proposals) | agent | done Nov 4 |
 | Live shadow test with AirPods | you (iPhone) | open |
 | Natural Meal, talking, head-movement, drinking, gum recordings | you (iPhone) | open |
 | Pace cue, drinking attestation | agent, on your approval | needs a Collect build and an explicit v2 publish |
 | Pin `mediapipe<=0.10.21` instead of sandboxing | you decide | not done; changes the inference binary behind all stored Vision outputs |
 | Merge/push the branch | you decide | open |
 
-Note: the service's in-process steps still run pre-Phase-2 code, so it adds
-no automatic proposals. Its Vision subprocess loads current code from disk.
+**Service restarted** (Nov 4, 03:24, after commit `eb9ae80`): same port and
+certificate, idle, nothing pending. Seeded Natural Meal, chewing-pace,
+facial-expressions, gum-chewing and talking-while-eating. `loop analyze`
+published catalog v8 (13 experiments); no training ran. The privacy override
+was removed: nothing bypasses the sandbox. All 242 pre-restart hashes match
+except runtime timestamps, the catalog and the analysis report. A non-media
+state copy is in `workspace/backups/loop-state-20261104-pre-restart/`. Other
+packages were audited: no automatic telemetry. LM Studio is loopback-only.
+
+Review still runs the Nov 2 build (no Chewing spans panel or Training window).
+Finish the blind review in it, quit, then rebuild with the README command.
 
 ---
 
