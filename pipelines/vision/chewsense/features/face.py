@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ._models import get_model
+from .offline import require_offline
 
 try:
     import mediapipe as mp
@@ -75,6 +76,7 @@ class FaceExtractor:
     def __init__(self, cfg: dict):
         if not _HAS_MP:
             raise RuntimeError("mediapipe is not installed.")
+        require_offline("FaceLandmarker")
         self.cfg = cfg
         model_path = get_model("face_landmarker.task")
         face_cfg = cfg["face"]

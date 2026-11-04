@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..canonical import utc_now
+from ..features.offline import offline_command, prefetch_models
 from ..session_bundle import load_session_manifest
 from .experiments import ExperimentRegistry
 from .guided import (
@@ -79,7 +80,7 @@ class StepInterrupted(Exception):
 
 
 class VisionRunner:
-    """Runs the existing batch script for one session in a subprocess."""
+    """Runs the existing batch script for one session in a subprocess without network access."""
 
     def __init__(self, timeout_s: float = 3600):
         self.timeout_s = timeout_s
@@ -89,13 +90,14 @@ class VisionRunner:
 
     def __call__(self, workspace: Path, session_id: str, log_path: Path) -> None:
         env = dict(os.environ, CHEWSENSE_WORKSPACE=str(workspace),
-                   CHEWSENSE_LOOP_PARENT_PID=str(os.getpid()))
+                   CHEWSENSE_LOOP_PARENT_PID=str(os.getpid()),
+                   CHEWSENSE_MODELS_DIR=str(prefetch_models()))
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a") as log:
             with self._lock:
                 self.interrupted = False
                 self._process = subprocess.Popen(
-                    [sys.executable, str(RUN_ON_SESSIONS), "--only", session_id],
+                    offline_command([sys.executable, str(RUN_ON_SESSIONS), "--only", session_id]),
                     env=env, stdout=log, stderr=subprocess.STDOUT,
                     cwd=RUN_ON_SESSIONS.parent, start_new_session=True,
                 )

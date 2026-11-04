@@ -1,3 +1,37 @@
+# MediaPipe privacy fix — November 4, 2026
+
+Details: [PRIVACY_MEDIAPIPE_2026-11-04.md](PRIVACY_MEDIAPIPE_2026-11-04.md).
+Same branch.
+
+**Done:** MediaPipe 0.10.35 contains Google's Clearcut usage reporter, and
+Google offers no switch to disable it. Its schema holds metadata (task, mode,
+latencies, frame counts, versions), not frames. Earlier runs probably sent
+reports. Landmarkers now run only in a process with all sockets and DNS
+denied; outside one they refuse to start. This takes effect for the running
+service's Vision step without a restart, because that step starts
+`run_on_sessions.py` from disk and the script re-runs itself sandboxed.
+Vision output is unchanged: the 30 s timing check is bit-identical apart from
+the Phase 2 calibration. 64 tests passed.
+
+**Triage of the Phase 2 outstanding items:**
+
+| Item | Who | State |
+| --- | --- | --- |
+| MediaPipe telemetry | agent | done (above) |
+| Dev-only experiment rerun + `pipeline-status` | agent | waiting for new reviewed data; a rerun now would reproduce `eating-20261104-030715` |
+| Assisted review of the two proposal sets | you (Mac, Review) | open |
+| Service restart (publishes Natural Meal, enables automatic proposals) | you decide | open; not needed for the privacy fix |
+| Live shadow test with AirPods | you (iPhone) | open |
+| Natural Meal, talking, head-movement, drinking, gum recordings | you (iPhone) | open |
+| Pace cue, drinking attestation | agent, on your approval | needs a Collect build and an explicit v2 publish |
+| Pin `mediapipe<=0.10.21` instead of sandboxing | you decide | not done; changes the inference binary behind all stored Vision outputs |
+| Merge/push the branch | you decide | open |
+
+Note: the service's in-process steps still run pre-Phase-2 code, so it adds
+no automatic proposals. Its Vision subprocess loads current code from disk.
+
+---
+
 # Phase 2 checkpoint — November 3, 2026
 
 Details: [PHASE2_2026-11-03.md](PHASE2_2026-11-03.md). Branch
@@ -27,8 +61,8 @@ Details: [PHASE2_2026-11-03.md](PHASE2_2026-11-03.md). Branch
   assisted-review time.
 - The loop service still runs pre-Phase-2 code (no restart was made). A
   restart publishes Natural Meal to Collect and enables automatic proposals.
-- MediaPipe attempted "clearcut" usage logging during a Vision run.
-  Investigate and disable it before processing more face video.
+- ~~MediaPipe attempted "clearcut" usage logging during a Vision run.~~
+  Resolved on November 4 (see above).
 - Not implemented: a chewing-pace target or metronome (needs a Collect build
   plus an explicit v2 publish) and a drinking "no chewing" attestation.
 - Branch not merged or pushed.

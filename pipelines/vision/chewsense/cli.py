@@ -29,7 +29,10 @@ def cli():
               default=None, help="Optional config YAML to override defaults.")
 def run(video: Path, out_dir: Path, config_path: Path | None):
     """Run the pipeline on VIDEO and write outputs to --out."""
+    from .features.offline import reexec_offline
     from .pipeline import run as run_pipeline
+
+    reexec_offline()
 
     cfg = load_config(config_path)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -48,6 +51,9 @@ def run(video: Path, out_dir: Path, config_path: Path | None):
 def extract_features_cmd(video: Path, out_path: Path, config_path: Path | None):
     """Extract per-frame feature parquet from VIDEO (no detection)."""
     from .features.extract import write_features
+    from .features.offline import reexec_offline
+
+    reexec_offline()
     cfg = load_config(config_path)
     p = write_features(video, out_path, cfg)
     click.echo(f"features -> {p}")

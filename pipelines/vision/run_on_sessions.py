@@ -22,6 +22,7 @@ import sys
 import time
 from pathlib import Path
 
+from chewsense.features.offline import reexec_offline
 from chewsense.loop.process_lifetime import watch_service_parent
 
 from chewsense.config import load_config
@@ -219,5 +220,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    reexec_offline()
     watch_service_parent()
     sys.exit(main())
