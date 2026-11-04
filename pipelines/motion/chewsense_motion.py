@@ -1423,7 +1423,7 @@ def cmd_eating_report(args: argparse.Namespace) -> int:
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
-    from pipeline.eating.video_teacher import evaluate_video_teacher
+    from pipeline.eating.video_teacher import cadence_consistency, evaluate_video_teacher
 
     workspace = get_workspace_root()
     eating_root = workspace / "experiments" / "eating"
@@ -1451,6 +1451,7 @@ def cmd_video_teacher(args: argparse.Namespace) -> int:
         print(f"Video-teacher evaluation failed: {exc}")
         return 1
     result["motion_run"] = run_dir.name if run_dir else None
+    result["cadence_consistency"] = cadence_consistency(workspace=workspace, vision_root=Path(args.vision_root))
     out = Path(args.output) if args.output else Path(args.vision_root).parent / "video_teacher.json"
     out.write_text(json.dumps(result, indent=2, sort_keys=True, default=float) + "\n")
     video = result["video_cycle_rate"]
@@ -1460,6 +1461,10 @@ def cmd_video_teacher(args: argparse.Namespace) -> int:
     if agreement:
         print(f"Video and motion agree on {agreement['agree_fraction']:.0%} of windows; "
               f"accuracy when they agree {agreement['accuracy_when_agree']:.0%}")
+    cadence = result["cadence_consistency"]
+    if cadence.get("windows"):
+        print(f"Cadence (exploratory): motion vs video dominant chewing frequency differ by a median "
+              f"{cadence['median_abs_difference_hz']:.2f} Hz over {cadence['windows']} windows")
     print(f"Wrote {out}")
     return 0
 
