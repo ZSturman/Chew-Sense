@@ -1,0 +1,12 @@
+#!/bin/sh
+# Compile the Mac parity tool from Live's eating-detector sources.
+# Usage: tools/eating-parity/build [output-binary]
+set -eu
+root=$(cd "$(dirname "$0")/../.." && pwd)
+out=${1:-"$root/build/eating-parity/eating-parity"}
+mkdir -p "$(dirname "$out")"
+swiftc -O -module-name EatingParity -o "$out" \
+  "$root/tools/eating-parity/main.swift" \
+  "$root"/apps/live-ios/ChewSenseLive/EatingDetector/*.swift \
+  "$root/apps/live-ios/ChewSenseLive/Managers/ChewDetector.swift"
+echo "$out"

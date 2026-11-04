@@ -51,6 +51,10 @@ final class DetectionConfiguration: ObservableObject {
         didSet { UserDefaults.standard.set(mealTexture.rawValue, forKey: "config.mealTexture") }
     }
 
+    @Published var eatingDetectorMode: EatingDetectorMode {
+        didSet { UserDefaults.standard.set(eatingDetectorMode.rawValue, forKey: EatingDetectorMode.defaultsKey) }
+    }
+
     // MARK: - Init
 
     init() {
@@ -63,6 +67,7 @@ final class DetectionConfiguration: ObservableObject {
         self.goldLockCandidate = defaults.bool(forKey: "config.goldLockCandidate")
         self.mealTexture = defaults.string(forKey: "config.mealTexture")
             .flatMap(MealTexture.init(rawValue:)) ?? .unknown
+        self.eatingDetectorMode = EatingDetectorMode.stored
     }
 
     // MARK: - Derived values
@@ -220,6 +225,10 @@ struct DetectionConfigurationInspector: View {
                 Divider()
 
                 BundledModelSection()
+
+                Divider()
+
+                ExportedEatingDetectorSection(config: config, isEditable: isEditable)
             }
             .padding()
         }
@@ -427,6 +436,52 @@ struct BundledModelSection: View {
                 value: wandbRunID,
                 description: "Weights & Biases run id, when training logged to W&B."
             )
+        }
+    }
+}
+
+/// The exported motion-only eating detector and the flag that decides
+/// whether it drives Live or only runs in shadow.
+struct ExportedEatingDetectorSection: View {
+    @ObservedObject var config: DetectionConfiguration
+    let isEditable: Bool
+    private var spec: Result<EatingDetectorSpec, Error> { EatingDetectorSpec.bundled }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Motion-Only Eating Detector")
+                .font(.headline)
+            switch spec {
+            case .success(let spec):
+                Picker("Detector", selection: $config.eatingDetectorMode) {
+                    ForEach(EatingDetectorMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .disabled(!isEditable)
+                Text(config.eatingDetectorMode.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                InspectorValueRow(
+                    title: "Model ID",
+                    value: spec.modelId,
+                    description: "Exported by `chewsense-motion eating-export` from experiment \(spec.provenance.runId)."
+                )
+                InspectorValueRow(
+                    title: "Status",
+                    value: spec.status,
+                    description: "Not promoted. Python and Swift outputs match on recorded sessions; device validation is outstanding."
+                )
+                InspectorValueRow(
+                    title: "Decision",
+                    value: String(format: "p ≥ %.2f, every %.1f s", spec.decision.threshold, spec.decision.strideS),
+                    description: "Threshold chosen on development data; EMA \(spec.decision.decoder.alpha), start after \(spec.decision.decoder.minStartWindows) windows, end after \(spec.decision.decoder.minEndWindows)."
+                )
+            case .failure(let error):
+                Text("Unavailable: \(error.localizedDescription)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
     }
 }

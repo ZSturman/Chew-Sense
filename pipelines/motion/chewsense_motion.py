@@ -1420,6 +1420,119 @@ def cmd_eating_report(args: argparse.Namespace) -> int:
     return 0
 
 
+LIVE_EATING_SPEC = Path("apps/live-ios/ChewSenseLive/EatingDetector/eating-detector.json")
+LIVE_EATING_FIXTURE = Path("apps/live-ios/ChewSenseLiveTests/Fixtures/eating_detector_parity.json")
+
+
+def _eating_root(args: argparse.Namespace) -> Path:
+    return Path(args.output) if getattr(args, "output", None) else get_workspace_root() / "experiments" / "eating"
+
+
+def _eating_run_dir(root: Path, run: str | None) -> Path:
+    if run:
+        return root / "runs" / run
+    latest = root / "latest.json"
+    if not latest.exists():
+        raise FileNotFoundError(f"no locked-test eating run exists yet ({latest} is missing)")
+    return Path(json.loads(latest.read_text())["run_dir"])
+
+
+def cmd_eating_export(args: argparse.Namespace) -> int:
+    """Export a run's selected model as a deployable on-device specification."""
+
+    from pipeline.eating.runtime import export_spec, write_spec
+
+    root = _eating_root(args)
+    try:
+        run_dir = _eating_run_dir(root, args.run)
+        spec = export_spec(run_dir)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Export failed: {exc}")
+        return 1
+    target = root / "deploy" / spec["model_id"] / "eating-detector.json"
+    digest = write_spec(spec, target)
+    record = {
+        "model_id": spec["model_id"],
+        "run_id": spec["provenance"]["run_id"],
+        "spec_path": str(target),
+        "spec_sha256": digest,
+        "exported_at": datetime.now().astimezone().isoformat(),
+        "status": spec["status"],
+    }
+    (target.parent / "export.json").write_text(json.dumps(record, indent=2) + "\n")
+    print(f"Exported {spec['model_id']} -> {target}")
+    if args.install_live:
+        live = get_repo_root() / LIVE_EATING_SPEC
+        live_digest = write_spec(spec, live)
+        print(f"Bundled in Live as {live} (sha256 {live_digest[:12]}); Live keeps its existing detector "
+              "unless the experimental mode is chosen in Settings.")
+    return 0
+
+
+def cmd_eating_parity(args: argparse.Namespace) -> int:
+    """Check the Swift runtime against the Python reference on recorded sessions."""
+
+    import subprocess
+
+    import pandas as pd
+
+    from pipeline.eating.dataset import discover_sessions
+    from pipeline.eating.parity import run_parity
+    from pipeline.eating.runtime import load_spec
+
+    workspace = get_workspace_root()
+    repo = get_repo_root()
+    spec_path = Path(args.spec) if args.spec else repo / LIVE_EATING_SPEC
+    try:
+        spec = load_spec(spec_path)
+    except (OSError, ValueError) as exc:
+        print(f"Cannot read specification {spec_path}: {exc}")
+        return 1
+    if args.write_live_fixture:
+        from pipeline.eating.parity import live_fixture
+
+        fixture = repo / LIVE_EATING_FIXTURE
+        fixture.write_text(json.dumps(live_fixture(spec), separators=(",", ":")) + "\n")
+        print(f"Wrote synthetic Live XCTest fixture {fixture}")
+    tool = Path(args.swift_tool) if args.swift_tool else repo / "build" / "eating-parity" / "eating-parity"
+    if not args.swift_tool:
+        built = subprocess.run([str(repo / "tools" / "eating-parity" / "build"), str(tool)],
+                               capture_output=True, text=True)
+        if built.returncode != 0:
+            print(f"Building the Swift parity tool failed:\n{built.stderr}")
+            return 1
+    sessions, rejected = discover_sessions(
+        canonical_roots=[workspace / "sessions" / "raw", workspace / "loop" / "assisted" / "sessions" / "raw"],
+        field_test_roots=[workspace / "sessions" / "field-tests"],
+        loop_root=workspace / "loop",
+    )
+    run_dir = workspace / "experiments" / "eating" / "runs" / spec["provenance"]["run_id"]
+    frame = pd.read_csv(run_dir / "predictions.csv.gz") if (run_dir / "predictions.csv.gz").exists() else None
+    out_dir = workspace / "experiments" / "eating" / "deploy" / spec["model_id"]
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    try:
+        summary = run_parity(spec=spec, sessions=sessions, swift_tool=tool,
+                             work_dir=Path(args.work_dir) if args.work_dir else Path("/tmp") / f"chewsense-parity-{stamp}",
+                             run_frame=frame)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Parity check failed to run: {exc}")
+        return 1
+    summary["spec_path"] = str(spec_path)
+    summary["rejected_recordings"] = rejected
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report = out_dir / f"parity-{stamp}.json"
+    report.write_text(json.dumps(summary, indent=2, default=float) + "\n")
+    (out_dir / "parity-latest.json").write_text(json.dumps(summary, indent=2, default=float) + "\n")
+    print(f"Parity {summary['status'].upper()}: {summary['recordings_passed']}/{summary['recordings']} recordings, "
+          f"{summary['scored_windows']} scored windows")
+    print(f"  features bit-identical: {summary['feature_values_bit_identical']:.6f}; "
+          f"max probability difference {summary['max_probability_abs_diff']:.3g}; "
+          f"state disagreements {summary['state_disagreements']}")
+    print(f"  Swift: {summary['swift_runtime']['ms_per_window']:.3f} ms per window on this Mac (simulated stream)")
+    print(f"Wrote {report}")
+    return 0 if summary["status"] == "pass" else 1
+
+
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
@@ -1789,6 +1902,27 @@ Examples:
     p_eating_report.add_argument("--run", help="Run ID under <root>/runs/")
     p_eating_report.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
     p_eating_report.set_defaults(func=cmd_eating_report)
+
+    p_eating_export = subparsers.add_parser(
+        "eating-export",
+        help="Export a run's selected eating detector as a versioned on-device specification",
+    )
+    p_eating_export.add_argument("--run", help="Run ID (default: latest run with a locked-test result)")
+    p_eating_export.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
+    p_eating_export.add_argument("--install-live", action="store_true",
+                                 help="Also bundle the specification in the Live app source (not promoted)")
+    p_eating_export.set_defaults(func=cmd_eating_export)
+
+    p_eating_parity = subparsers.add_parser(
+        "eating-parity",
+        help="Compare Live's Swift eating-detector runtime with the Python reference on recordings",
+    )
+    p_eating_parity.add_argument("--spec", help="Specification (default: the one bundled in Live)")
+    p_eating_parity.add_argument("--swift-tool", help="Prebuilt parity tool (default: build from Live sources)")
+    p_eating_parity.add_argument("--work-dir", help="Scratch folder for binary inputs/outputs (default: /tmp)")
+    p_eating_parity.add_argument("--write-live-fixture", action="store_true",
+                                 help="Also regenerate Live's synthetic XCTest parity fixture for this specification")
+    p_eating_parity.set_defaults(func=cmd_eating_parity)
 
     p_video_teacher = subparsers.add_parser(
         "video-teacher-eval",

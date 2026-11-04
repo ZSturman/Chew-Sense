@@ -99,6 +99,11 @@ final class MotionManager: ObservableObject {
     let mealMetrics = MealMetricsTracker()
     private let model = ChewModel.shared
     private let baselineStore = PersonalBaselineStore.shared
+    /// Exported motion-only detector (`EatingDetector/eating-detector.json`).
+    /// Runs in shadow unless the experimental mode is selected.
+    private let eatingRuntime: EatingDetectorRuntime? = try? EatingDetectorRuntime(spec: EatingDetectorSpec.bundled.get())
+    private var eatingMode: EatingDetectorMode = .bundledChewNetWithShadow
+    private var eatingFileHandle: FileHandle?
     private let motionQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.name = "com.chewsense.debugging-model.motion"
@@ -147,6 +152,9 @@ final class MotionManager: ObservableObject {
     @Published var recentSamples: [MotionSample] = []
     /// Latest AirPod quaternion for the 3D head orientation view.
     @Published var latestAttitude: HeadAttitude = .identity
+    /// Latest state of the exported detector (shadow or driving).
+    @Published var exportedDetectorChewing: Bool = false
+    @Published var exportedDetectorProbability: Double?
     #if os(iOS)
     @Published var captureSession: AVCaptureSession?
     #endif
@@ -304,6 +312,7 @@ final class MotionManager: ObservableObject {
         detector.updateConfig(activeDetectorConfig)
         detector.reset()
         resetRuntimeState()
+        eatingMode = eatingRuntime == nil ? .bundledChewNetWithShadow : EatingDetectorMode.stored
         let coachingGoals = baselineStore.goals(
             for: metadata.mealTexture,
             capabilities: model.capabilities
@@ -689,6 +698,7 @@ final class MotionManager: ObservableObject {
 
         writeMotionSample(sample)
         samples.append(sample)
+        runExportedDetector(sample)
 
         let cutoff = now - windowDuration
         samples.removeAll { $0.timestamp < cutoff }
@@ -762,11 +772,12 @@ final class MotionManager: ObservableObject {
             let chewBand = features.indices.contains(7) ? features[7] : 0.0
             strokeCounter.push(timestamp: windowEnd, bandpower: chewBand)
         }
-        if detResult.startedEpisode {
+        let legacyDrivesLive = eatingMode == .bundledChewNetWithShadow
+        if legacyDrivesLive, detResult.startedEpisode {
             boutSegmenter.episodeStarted(at: windowEnd)
         }
         var emittedBout: ChewingBout?
-        if detResult.endedEpisode {
+        if legacyDrivesLive, detResult.endedEpisode {
             emittedBout = boutSegmenter.episodeEnded(
                 at: windowEnd,
                 smoothedProb: detResult.smoothedProb,
@@ -787,10 +798,12 @@ final class MotionManager: ObservableObject {
         )
 
         DispatchQueue.main.async {
-            self.latestProb = probability
-            self.latestSmoothed = detResult.smoothedProb
-            self.isChewing = (detResult.state == .chewing)
-            self.statusText = "Running (\(stateStr))"
+            if legacyDrivesLive {
+                self.latestProb = probability
+                self.latestSmoothed = detResult.smoothedProb
+                self.isChewing = (detResult.state == .chewing)
+                self.statusText = "Running (\(stateStr))"
+            }
             if self.model.isTemporalMode {
                 let confident = prediction.gapCoverage >= RuntimeConfig.minGapCoverage
                     && (prediction.phaseConfidence ?? 0) >= 0.5
@@ -812,6 +825,57 @@ final class MotionManager: ObservableObject {
         }
     }
 
+    /// Streams one sample through the exported detector and logs every window
+    /// it evaluates. In the experimental mode its state also drives Live.
+    private func runExportedDetector(_ sample: MotionSample) {
+        guard let eatingRuntime else { return }
+        let outputs = eatingRuntime.push(EatingMotionSample(
+            timestamp: sample.timestamp,
+            ax: sample.ax, ay: sample.ay, az: sample.az,
+            gx: sample.gx, gy: sample.gy, gz: sample.gz
+        ))
+        guard !outputs.isEmpty else { return }
+        let drives = eatingMode == .exportedDetectorExperimental
+        let origin = canonicalVideoOriginHostTime
+        for output in outputs {
+            let line = [
+                String(format: "%.6f", output.windowEnd),
+                String(format: "%.6f", output.windowEnd - origin),
+                String(format: "%.6f", output.validFraction),
+                output.probability.map { String(format: "%.8f", $0) } ?? "",
+                String(format: "%.8f", output.decoderInput),
+                String(format: "%.8f", output.smoothed),
+                output.chewing ? "chewing" : "idle",
+                drives ? "1" : "0",
+            ].joined(separator: ",") + "\n"
+            appendLine(line, to: eatingFileHandle)
+            if drives {
+                if output.startedBout { boutSegmenter.episodeStarted(at: output.windowEnd) }
+                if output.endedBout {
+                    let bout = boutSegmenter.episodeEnded(
+                        at: output.windowEnd,
+                        smoothedProb: output.smoothed,
+                        chewStrokes: activeChewStrokes
+                    )
+                    if let bout {
+                        DispatchQueue.main.async { self.mealMetrics.recordDiagnosticBout(bout) }
+                    }
+                }
+            }
+        }
+        guard let last = outputs.last else { return }
+        DispatchQueue.main.async {
+            self.exportedDetectorChewing = last.chewing
+            self.exportedDetectorProbability = last.probability
+            if drives {
+                self.latestProb = last.probability ?? 0
+                self.latestSmoothed = last.smoothed
+                self.isChewing = last.chewing
+                self.statusText = "Running (\(last.chewing ? "chewing" : "idle"), exported detector)"
+            }
+        }
+    }
+
     private var activeChewStrokes: [ChewStroke] {
         model.isTemporalMode ? eventDecoder.decodedEvents : strokeCounter.strokes
     }
@@ -825,7 +889,10 @@ final class MotionManager: ObservableObject {
         motionQueue.addOperation { [weak self] in
             guard let self else { return }
 
-            let predictedState = self.lastWindow?.state ?? fallbackPredictedState
+            // Record the state the wearer was shown.
+            let predictedState = self.eatingMode == .exportedDetectorExperimental
+                ? fallbackPredictedState
+                : (self.lastWindow?.state ?? fallbackPredictedState)
             let correctedState = eventType.correctedState(predictedState: predictedState)
             let tsStr = ISO8601DateFormatter().string(from: Date())
 
@@ -960,6 +1027,12 @@ final class MotionManager: ObservableObject {
             sessionURL.appendingPathComponent("feedback.csv"),
             header: "timestamp,event_type,predicted_state,corrected_state,window_start,window_end,note\n"
         )
+        if eatingRuntime != nil {
+            eatingFileHandle = openFile(
+                sessionURL.appendingPathComponent("eating_detector.csv"),
+                header: "window_end,window_end_video_ts,valid_fraction,probability,decoder_input,smoothed,state,drives_live\n"
+            )
+        }
 
         if let configJSON {
             try? configJSON.write(
@@ -1039,6 +1112,12 @@ final class MotionManager: ObservableObject {
             "wandb_run_url": NormalizationConstants.WANDB_RUN_URL,
             "model_mode": NormalizationConstants.MODE,
             "runtime_config": runtime,
+            "eating_detector": [
+                "mode": eatingMode.rawValue,
+                "model_id": eatingRuntime?.modelID ?? "",
+                "drives_live": eatingMode == .exportedDetectorExperimental,
+                "log": eatingRuntime == nil ? "" : "eating_detector.csv",
+            ] as [String: Any],
             "test_scenario": metadata.testScenario,
             "activity": metadata.activitySlug,
             "activity_label": metadata.activityLabel,
@@ -1121,13 +1200,14 @@ final class MotionManager: ObservableObject {
     }
 
     private func closeSessionFiles() {
-        [motionFileHandle, predictionsFileHandle, feedbackFileHandle].forEach { handle in
+        [motionFileHandle, predictionsFileHandle, feedbackFileHandle, eatingFileHandle].forEach { handle in
             try? handle?.synchronize()
             try? handle?.close()
         }
         motionFileHandle = nil
         predictionsFileHandle = nil
         feedbackFileHandle = nil
+        eatingFileHandle = nil
     }
 
     private func resetRuntimeState() {
@@ -1148,6 +1228,9 @@ final class MotionManager: ObservableObject {
         strokeCounter.reset()
         eventDecoder.reset()
         boutSegmenter.reset()
+        eatingRuntime?.reset()
+        exportedDetectorChewing = false
+        exportedDetectorProbability = nil
         DispatchQueue.main.async { [weak self] in self?.mealMetrics.reset() }
         logLines.removeAll()
         feedbackCount = 0
