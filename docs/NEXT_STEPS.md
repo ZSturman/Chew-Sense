@@ -27,7 +27,9 @@ ignored `workspace/checkpoints/resume-20261106/`.
   Hardened the privacy probe's resource-exhaustion fail-open case; sandbox and
   no-override policy unchanged. 14 privacy tests passed.
 - Fixed data integrity: reject hash mismatches, escaped motion paths, malformed
-  numeric CSVs and incomplete guided takes even after review. The Phase 2 run
+  numeric CSVs, wrong-session phone/assisted labels, and incomplete guided takes
+  even after review. Identity hardening preserved all 32 eligible recordings;
+  33 affected data/assistance/end-to-end tests pass. The Phase 2 run
   had accidentally included **46 negative development windows** from incomplete
   Quiet Sitting. Its historical results and original data are retained.
 - Trained all five candidates development-only in `eating-20261107-011934`

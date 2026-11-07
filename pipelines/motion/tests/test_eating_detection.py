@@ -159,6 +159,25 @@ def test_motion_reference_cannot_escape_its_session(tmp_path):
         load_canonical_motion(folder)
 
 
+@pytest.mark.parametrize("foreign_id", ["another-recording", None])
+@pytest.mark.parametrize("artifact", ["phone", "assisted"])
+def test_labels_must_be_bound_to_the_recording(tmp_path, foreign_id, artifact):
+    folder = make_canonical(tmp_path, "expected", intervals=[_span(0, 60, "not_chewing")])
+    if artifact == "phone":
+        path = folder / "annotations/coarse_labels.json"
+        payload = json.loads(path.read_text())
+    else:
+        path = folder / "annotations/coarse-review-v0001.json"
+        payload = {
+            "artifact_type": "coarse_label_review", "schema_version": 1,
+            "intervals": [{"start_ts": 0, "end_ts": 60, "label": "chewing", "decision": "accepted"}],
+        }
+    payload["session_id"] = foreign_id
+    path.write_text(json.dumps(payload))
+    with pytest.raises(SessionRejected, match="session_id does not match"):
+        load_canonical_session(folder)
+
+
 def test_reusing_or_rejecting_sessions_does_not_rewrite_locked_splits(tmp_path):
     folder = make_canonical(tmp_path / "raw", "split", intervals=[_span(0, 60, "not_chewing")])
     session = load_canonical_session(folder)

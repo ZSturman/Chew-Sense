@@ -114,6 +114,7 @@ def test_review_only_session_loads_with_assisted_tiers(tmp_path):
     (folder / "annotations" / "coarse_labels.json").unlink()
     (folder / "annotations" / "coarse-review-v0001.json").write_text(json.dumps({
         "artifact_type": "coarse_label_review", "schema_version": 1, "revision": 1,
+        "session_id": folder.name,
         "intervals": [
             {"start_ts": 0, "end_ts": 20, "label": "not_chewing", "decision": "batch_accepted", "boundary_adjusted": False},
             {"start_ts": 20, "end_ts": 40, "label": "chewing", "decision": "accepted"},

@@ -72,11 +72,17 @@ The eating-data loader previously accepted a CSV whose declared manifest hash
 was wrong, and accepted incomplete guided takes once labels existed. It now:
 
 - validates supplied motion hashes and confines media references to the bundle;
+- binds both phone labels and assisted reviews to the actual session ID, rejecting
+  wrong/missing identities instead of applying labels from a different take;
 - rejects malformed numeric CSV data per recording, preserving other sessions;
 - excludes guided takes whose completion is false or unverified, while allowing
   their motion to be replayed diagnostically and proposals to be generated;
 - reports missing historical hashes as unverified integrity;
 - reuses locked split files without rewriting them when no assignments change.
+
+Wrong-session phone and assisted labels were separately reproduced as accepted
+before the identity fix. All existing 32 eligible recordings still load afterward;
+33 affected data/assistance/end-to-end tests pass.
 
 The historical Phase 2 run actually included **46 negative development windows**
 from incomplete Quiet Sitting, despite the review-task UI excluding that take.

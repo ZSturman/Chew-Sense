@@ -304,13 +304,15 @@ def load_canonical_motion(session_dir: Path) -> CanonicalMotion:
     )
 
 
-def latest_coarse_review(session_dir: Path) -> tuple[Path, dict[str, Any]] | None:
+def latest_coarse_review(session_dir: Path, *, session_id: str) -> tuple[Path, dict[str, Any]] | None:
     revisions = sorted((Path(session_dir) / "annotations").glob("coarse-review-v*.json"))
     if not revisions:
         return None
     payload = _read_json(revisions[-1])
     if payload.get("artifact_type") != "coarse_label_review":
         raise SessionRejected(f"{revisions[-1].name} is not a coarse-label review")
+    if payload.get("session_id") != session_id:
+        raise SessionRejected(f"{revisions[-1].name} session_id does not match the recording")
     return revisions[-1], payload
 
 
@@ -389,12 +391,14 @@ def load_canonical_session(
     origin, method, duration = motion.origin, motion.method, motion.duration
 
     coarse_path = session_dir / "annotations" / "coarse_labels.json"
-    review = latest_coarse_review(session_dir)
+    review = latest_coarse_review(session_dir, session_id=session_id)
     if not coarse_path.exists() and review is None:
         raise SessionRejected("no human coarse labels (coarse review missing)")
     raw_intervals: list[Any] = []
     if coarse_path.exists():
         coarse = _read_json(coarse_path)
+        if coarse.get("session_id") != session_id:
+            raise SessionRejected("coarse_labels.json session_id does not match the recording")
         raw_intervals = coarse.get("intervals")
         if not isinstance(raw_intervals, list):
             raise SessionRejected("coarse labels have no interval list")
