@@ -14,9 +14,11 @@ final class ExperimentCatalogStore: ObservableObject {
     enum Source: Equatable { case bundledSeed, synchronized(Date) }
 
     private let cacheURL: URL
+    private let defaults: UserDefaults
     private let localCountsKey = "GuidedLocalCompleted"
 
-    init(directory: URL = ExperimentCatalogStore.defaultDirectory()) {
+    init(directory: URL = ExperimentCatalogStore.defaultDirectory(), defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         cacheURL = directory.appendingPathComponent("experiment-catalog.json")
         if let data = try? Data(contentsOf: cacheURL), let cached = try? ExperimentCatalog.parse(data) {
             catalog = cached
@@ -27,7 +29,7 @@ final class ExperimentCatalogStore: ObservableObject {
             catalog = Self.bundledSeed()
             source = .bundledSeed
         }
-        localCompleted = UserDefaults.standard.dictionary(forKey: localCountsKey) as? [String: Int] ?? [:]
+        localCompleted = defaults.dictionary(forKey: localCountsKey) as? [String: Int] ?? [:]
     }
 
     static func defaultDirectory() -> URL {
@@ -57,7 +59,7 @@ final class ExperimentCatalogStore: ObservableObject {
             lastSyncError = nil
             // The Mac's progress now includes everything it has received.
             localCompleted = [:]
-            UserDefaults.standard.set(localCompleted, forKey: localCountsKey)
+            defaults.set(localCompleted, forKey: localCountsKey)
             return parsed
         } catch {
             lastSyncError = error.localizedDescription
@@ -67,7 +69,7 @@ final class ExperimentCatalogStore: ObservableObject {
 
     func recordLocalCompletion(of experimentID: String) {
         localCompleted[experimentID, default: 0] += 1
-        UserDefaults.standard.set(localCompleted, forKey: localCountsKey)
+        defaults.set(localCompleted, forKey: localCountsKey)
     }
 
     func remaining(for entry: CatalogEntry) -> Int {

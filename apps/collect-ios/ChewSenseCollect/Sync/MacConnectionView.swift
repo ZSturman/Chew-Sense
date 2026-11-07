@@ -39,7 +39,18 @@ struct MacConnectionView: View {
                         .font(.footnote)
                 }
                 Section("Macs on this network") {
-                    if connection.discovered.isEmpty {
+                    if let discoveryError = connection.discoveryError {
+                        Text(discoveryError).font(.footnote).foregroundStyle(.red)
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        Button("Retry discovery") {
+                            connection.stopDiscovery()
+                            connection.startDiscovery()
+                        }
+                    } else if connection.discovered.isEmpty {
                         Label("Searching… make sure the Mac service is running", systemImage: "antenna.radiowaves.left.and.right")
                             .font(.footnote).foregroundStyle(.secondary)
                     }

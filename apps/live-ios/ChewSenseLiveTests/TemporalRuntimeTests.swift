@@ -57,9 +57,8 @@ final class TemporalRuntimeTests: XCTestCase {
     }
 
     func testPythonSwiftGoldenProbabilityAndDecoderParity() throws {
-        let fixtureURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/temporal_replay_v2.json")
+        let fixtureURL = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: "temporal_replay_v2", withExtension: "json"))
         let golden = try JSONDecoder().decode(
             Golden.self,
             from: Data(contentsOf: fixtureURL)

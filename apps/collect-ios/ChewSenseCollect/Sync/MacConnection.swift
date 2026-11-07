@@ -51,6 +51,7 @@ final class MacConnection: NSObject, ObservableObject {
     @Published private(set) var paired: Paired?
     @Published private(set) var state: State = .unpaired
     @Published private(set) var discovered: [Discovered] = []
+    @Published private(set) var discoveryError: String?
     @Published private(set) var lastSync: Date?
     @Published private(set) var pipeline: PipelineStatus?
 
@@ -119,11 +120,30 @@ final class MacConnection: NSObject, ObservableObject {
 
     // MARK: Discovery
 
+    static func discoveryFailureDescription(_ error: NWError) -> String {
+        // kDNSServiceErr_PolicyDenied from Apple's dns_sd.h.
+        if case .dns(-65570) = error {
+            return "Local Network access is blocked. Open Settings and enable Local Network for Chew Sense Collect and Label, then return here."
+        }
+        return "Mac discovery is unavailable: \(error.localizedDescription). Check that the iPhone and Mac are on the same Wi-Fi, or enter the Mac's address below."
+    }
+
     func startDiscovery() {
         guard browser == nil, !CollectionTestMode.isEnabled else { return }
+        discoveryError = nil
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = false
         let browser = NWBrowser(for: .bonjour(type: "_chewsense._tcp", domain: nil), using: parameters)
+        browser.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .waiting(let error), .failed(let error):
+                self?.discoveryError = Self.discoveryFailureDescription(error)
+            case .ready:
+                self?.discoveryError = nil
+            default:
+                break
+            }
+        }
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             let found = results.compactMap { result -> Discovered? in
                 if case let .service(name, _, _, _) = result.endpoint { return Discovered(name: name, endpoint: result.endpoint) }

@@ -1,10 +1,20 @@
 import Foundation
 import Testing
+import Network
 @testable import ChewSenseCollect
 
 /// Guided experiment parsing, timing semantics, interruption policies,
 /// validation and the sidecar contract shared with the Mac.
 struct GuidedCollectionTests {
+    @Test func deniedLocalNetworkDiscoveryExplainsTheProtectedPermission() {
+        let denied = MacConnection.discoveryFailureDescription(.dns(-65570))
+        #expect(denied.contains("Local Network access is blocked"))
+        #expect(denied.contains("Settings"))
+        let unreachable = MacConnection.discoveryFailureDescription(.posix(.ENETDOWN))
+        #expect(unreachable.contains("same Wi-Fi"))
+        #expect(!unreachable.contains("access is blocked"))
+    }
+
     @Test func staleHeadphoneStreamRetriesWithoutACapabilityChange() {
         var health = HeadphoneMotionHealth()
         #expect(health.shouldRestart(at: 100))
@@ -109,11 +119,12 @@ struct GuidedCollectionTests {
         #expect(status.nextExperimentId == "baseline-90s")
     }
 
-    private static let repo = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent()
-    private static let seedURL = repo.appendingPathComponent(
-        "apps/collect-ios/ChewSenseCollect/Resources/SeedExperimentCatalog.json")
+    private static var seedURL: URL {
+        get throws {
+            try #require(Bundle(for: ExperimentCatalogStore.self)
+                .url(forResource: "SeedExperimentCatalog", withExtension: "json"))
+        }
+    }
 
     /// Rows in the bundled catalog, counted without the parser under test.
     private static var seedExperimentCount: Int {
@@ -173,13 +184,23 @@ struct GuidedCollectionTests {
     @Test func invalidCatalogNeverReplacesCache() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let store = ExperimentCatalogStore(directory: directory)
+        let suite = "ChewSenseCatalogTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let originalCounts = UserDefaults.standard.dictionary(forKey: "GuidedLocalCompleted") as NSDictionary?
+        defaults.set(["baseline-90s": 3], forKey: "GuidedLocalCompleted")
+        let store = ExperimentCatalogStore(directory: directory, defaults: defaults)
+        #expect(store.localCompleted["baseline-90s"] == 3)
         try store.apply(Data(contentsOf: Self.seedURL))
         #expect(throws: (any Error).self) { try store.apply(Data("{\"schema_version\":1}".utf8)) }
         #expect(store.catalog.entries.count == Self.seedExperimentCount)
-        let reopened = ExperimentCatalogStore(directory: directory)
+        let reopened = ExperimentCatalogStore(directory: directory, defaults: defaults)
         #expect(reopened.catalog.entries.count == Self.seedExperimentCount)
         #expect(reopened.source != .bundledSeed)
+        #expect((UserDefaults.standard.dictionary(forKey: "GuidedLocalCompleted") as NSDictionary?) == originalCounts)
     }
 
     @Test func goodQualityFollowsScheduleWithActualTimestamps() throws {
@@ -303,9 +324,12 @@ struct GuidedCollectionTests {
             #expect(object[key] != nil, "missing \(key)")
         }
         #expect(object["labels_status"] as? String == "intended_only_not_verified")
-        // Hand the file to the Python contract test (pipelines/vision/tests/test_loop.py).
-        let out = Self.repo.appendingPathComponent("build/contract/guided_session.swift.json")
-        try? FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: out)
+        // Export from device tmp/ to build/contract/ for the Python contract test.
+        // A physical device cannot write into the Mac's source checkout.
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChewSenseContract/guided_session.swift.json")
+        try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: out, options: .atomic)
+        print("CHEWSENSE_SWIFT_CONTRACT_PATH \(out.path)")
     }
 }
