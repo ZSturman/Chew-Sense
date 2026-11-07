@@ -80,3 +80,20 @@ def test_review_fixture_matches_status_schema(tmp_path):
     assert set(fixture) == set(status)
     for key in ("data", "model"):
         assert set(fixture[key]) <= set(status[key]), key
+
+
+def test_latest_development_check_is_visible_without_reusing_historical_test_scores(tmp_path):
+    workspace = synthetic_workspace(tmp_path / "workspace")
+    run_experiment(workspace=workspace, config=ExperimentConfig(models=("prior", "logreg"), folds=2,
+                                                                bootstrap_resamples=20))
+    export_pointer = (workspace / "experiments/eating/latest.json").read_bytes()
+    run = run_experiment(workspace=workspace, config=ExperimentConfig(models=("prior", "logreg"), folds=2,
+                                                                     bootstrap_resamples=20, evaluate_test=False))
+    status = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    assert status["model"]["run_id"] == run.name
+    assert status["model"]["trained_on_current_data"]
+    assert status["model"]["development"] is not None
+    assert status["model"]["test"] is None
+    assert status["model"]["test_consultations"] == 1
+    assert not any("development check" in item["title"] for item in status["next"])
+    assert (workspace / "experiments/eating/latest.json").read_bytes() == export_pointer

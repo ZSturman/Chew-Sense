@@ -123,13 +123,19 @@ def _has_video(session: EatingSession) -> bool:
     return folder.is_dir() and any(p.suffix.lower() in {".mov", ".mp4"} for p in folder.iterdir())
 
 
-def _live_models(repo: Path) -> dict[str, Any]:
+def _live_models(repo: Path, workspace: Path | None = None) -> dict[str, Any]:
     spec = _read(repo / "apps/live-ios/ChewSenseLive/EatingDetector/eating-detector.json") or {}
     constants = repo / "apps/live-ios/ChewSenseLive/Generated/NormalizationConstants.swift"
     chewnet = None
     if constants.exists():
         match = re.search(r'MODEL_ID\s*(?::\s*String\s*)?=\s*"([^"]*)"', constants.read_text())
         chewnet = match.group(1) if match else None
+    validation = None
+    if workspace is not None and spec.get("model_id"):
+        validation = _read(workspace / "experiments/eating/deploy" / spec["model_id"] / "physical-validation.json")
+    physical_status = "none recorded"
+    if validation and validation.get("model_id") == spec.get("model_id"):
+        physical_status = validation.get("summary") or physical_status
     return {
         "exported_detector": {
             "model_id": spec.get("model_id"),
@@ -143,7 +149,7 @@ def _live_models(repo: Path) -> dict[str, Any]:
             "model_id": chewnet,
             "role": "drives Live by default; trained May 2026 on 6 field tests; test F1 0.50 in the November audit",
         },
-        "physical_device_validation": "none recorded",
+        "physical_device_validation": physical_status,
     }
 
 
@@ -194,6 +200,18 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
     run_dir = Path(latest["run_dir"]) if latest.get("run_dir") else None
     metrics = _read(run_dir / "metrics.json") if run_dir else None
     index = _read(eating_root / "index.json") or {"runs": []}
+    # latest.json deliberately pins the last test-evaluated export candidate.
+    # The dashboard must instead show the newest completed experiment, including
+    # dev-only checks, with its own (possibly absent) test scores.
+    for run in reversed(index.get("runs") or []):
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str) or Path(run_id).name != run_id:
+            continue
+        candidate_dir = eating_root / "runs" / run_id
+        candidate_metrics = _read(candidate_dir / "metrics.json")
+        if candidate_metrics:
+            run_dir, metrics = candidate_dir, candidate_metrics
+            break
 
     windows = build_windows(sessions) if sessions else None
     window_counts: dict[str, dict[str, int]] = {}
@@ -271,7 +289,7 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         ),
     }
 
-    model: dict[str, Any] = {"trained": bool(metrics), "live": _live_models(repo)}
+    model: dict[str, Any] = {"trained": bool(metrics), "live": _live_models(repo, workspace)}
     if metrics:
         selected = metrics.get("selected_model")
         result = (metrics.get("results") or {}).get(selected) or {}
@@ -453,7 +471,7 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
             "One wearer: no cross-person result exists.",
             "Locked test: few recordings contain chewing; intervals are wide.",
             "Most chewing labels have unverified clocks (2025 legacy).",
-            "No physical-device validation of the exported detector yet.",
+            "Wearer shadow-mode accuracy and battery use remain unverified; physical fixture execution alone cannot validate them.",
         ],
     }
 
