@@ -172,8 +172,11 @@ def _read_motion(path: Path) -> tuple[np.ndarray, np.ndarray, int]:
     missing = [c for c in ("timestamp", *MOTION_COLUMNS) if c not in frame.columns]
     if missing:
         raise SessionRejected(f"motion file missing columns {missing}")
-    t = frame["timestamp"].to_numpy(dtype=np.float64)
-    imu = frame[list(MOTION_COLUMNS)].to_numpy(dtype=np.float32)
+    try:
+        t = frame["timestamp"].to_numpy(dtype=np.float64)
+        imu = frame[list(MOTION_COLUMNS)].to_numpy(dtype=np.float32)
+    except (TypeError, ValueError) as exc:
+        raise SessionRejected(f"non-numeric motion data: {exc}") from exc
     finite = np.isfinite(t) & np.isfinite(imu).all(axis=1)
     t, imu = t[finite], imu[finite]
     if len(t) < 2:
@@ -259,6 +262,7 @@ class CanonicalMotion:
     manifest: dict[str, Any]
     session_id: str
     motion_path: Path
+    motion_sha256: str
     video_t: np.ndarray
     imu: np.ndarray
     dropped: int
@@ -275,7 +279,15 @@ def load_canonical_motion(session_dir: Path) -> CanonicalMotion:
     motion_ref = manifest.get("motion") or {}
     if not motion_ref.get("path"):
         raise SessionRejected("manifest has no motion reference")
-    motion_path = session_dir / str(motion_ref["path"])
+    motion_path = (session_dir / str(motion_ref["path"])).resolve()
+    if not motion_path.is_relative_to(session_dir.resolve()):
+        raise SessionRejected("motion reference escapes the session bundle")
+    if not motion_path.is_file():
+        raise SessionRejected(f"missing motion file {motion_path.name}")
+    motion_sha256 = _sha256(motion_path)
+    expected_hash = motion_ref.get("sha256")
+    if expected_hash is not None and str(expected_hash).lower() != motion_sha256:
+        raise SessionRejected("motion SHA-256 does not match the session manifest")
     t, imu, dropped = _read_motion(motion_path)
     clock = manifest.get("clock_sync") or {}
     origin = clock.get("video_clock_origin_host_time_s")
@@ -286,7 +298,8 @@ def load_canonical_motion(session_dir: Path) -> CanonicalMotion:
     capture = manifest.get("capture") or {}
     duration = float(capture.get("duration_s") or video_t[-1])
     return CanonicalMotion(
-        manifest=manifest, session_id=session_id, motion_path=motion_path, video_t=video_t, imu=imu,
+        manifest=manifest, session_id=session_id, motion_path=motion_path, motion_sha256=motion_sha256,
+        video_t=video_t, imu=imu,
         dropped=dropped, origin=origin, method=str(clock.get("method") or "unknown"), duration=duration,
     )
 
@@ -364,8 +377,14 @@ def load_canonical_session(
     *,
     loop_roles: Mapping[str, str] | None = None,
 ) -> EatingSession:
+    guided_path = session_dir / "guided_session.json"
+    if guided_path.exists():
+        guided = _read_json(guided_path)
+        validation = guided.get("validation") or {}
+        if validation.get("complete") is not True:
+            raise SessionRejected("guided recording incomplete or completion unverified; review remains diagnostic")
     motion = load_canonical_motion(session_dir)
-    manifest, session_id, motion_path = motion.manifest, motion.session_id, motion.motion_path
+    manifest, session_id = motion.manifest, motion.session_id
     video_t, imu, dropped = motion.video_t, motion.imu, motion.dropped
     origin, method, duration = motion.origin, motion.method, motion.duration
 
@@ -386,6 +405,8 @@ def load_canonical_session(
     )
     intervals: list[LabeledInterval] = []
     notes: list[str] = []
+    if not (manifest.get("motion") or {}).get("sha256"):
+        notes.append("motion SHA-256 absent from manifest; source integrity unverified")
     for item in raw_intervals:
         label = str(item.get("label", ""))
         source = str(item.get("source", ""))
@@ -442,7 +463,7 @@ def load_canonical_session(
         created_at=recorded_at(session_id, str(manifest.get("created_at") or "")),
         motion_t=video_t,
         imu=imu,
-        motion_sha256=_sha256(motion_path),
+        motion_sha256=motion.motion_sha256,
         intervals=_sorted_intervals(intervals),
         clock="shared_host_clock" if method == "shared_host_clock" else "first_motion_fallback",
         activity=session_activity,

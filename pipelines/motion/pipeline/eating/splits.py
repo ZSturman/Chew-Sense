@@ -78,6 +78,10 @@ def assign_splits(
         }
 
     new = [s for s in sessions if s.session_id not in assignments]
+    if not first_creation and not new:
+        # A reproducibility/development run must not rewrite the locked file
+        # merely to update a timestamp, including when recordings are rejected.
+        return payload
     for session in new:
         if session.loop_role == "evaluation":
             record(session, TEST, "loop_evaluation_role")

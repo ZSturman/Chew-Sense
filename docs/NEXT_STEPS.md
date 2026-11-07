@@ -17,6 +17,35 @@ results but has not inspected assisted event/proposal artifacts. Automated
 event suggestions must not be inserted into this blind workspace or called
 human truth. Finish/freeze independent review before assisted review.
 
+Integrity fix checkpoint: the canonical eating-data loader now checks declared
+motion hashes, confines media references to their session, isolates non-numeric
+CSV failures, and rejects explicitly incomplete/unverified guided completion
+even if human labels exist. Missing historical hashes remain eligible but are
+reported as unverified integrity. Diagnostic motion replay/proposal generation
+remains possible. Split reuse no longer rewrites the locked file's timestamp.
+
+Actual consequence: the Phase 2 reference run included 46 negative development
+windows from the incomplete Quiet Sitting take. Corrected discovery yields
+31 eligible recordings (previously 32). Historical results and bundled models
+are retained as historical, not revalidated. A new development-only run is
+needed; no new test consultation is justified.
+
+Physical checks: Collect 1.2 (7) built/installed/launched in place on the iPhone
+16 Pro Max (iOS 27.2); Live also built and installed in place. Review rebuilt:
+25 passed, 1 optional render skipped; actual UI confirms blind predictions stay
+hidden and Chewing spans is disabled. Initial focused Python group: 83 passed;
+affected integrity/runtime/assistance/status/end-to-end group: 36 passed before
+the additional split no-rewrite regression. Local Network permission is waiting
+on the wearer before pairing. No wearer activity was simulated.
+
+An existing phone recording, `Not-eating-20261026-174428-C27C9380`, was copied
+over USB to ignored `workspace/experiments/device-20261106/received/`. This is
+25.255 s of actual prior capture with 1,249 motion samples and existing wearer
+coarse not-chewing labels, not a new human activity or newly verified labels.
+Its structural/media-hash audit passes and it is not already in the dataset.
+Next: process this new-to-Mac recording through the real sandboxed loop and
+inspect privacy and completeness evidence; retain the phone original.
+
 Immediate work: validate service/catalog, protected hashes, sandbox tests and
 focused pipeline tests; rebuild Review with blindness intact; build/install
 Collect and Live in place on the physical iPhone, then inspect actual runtime

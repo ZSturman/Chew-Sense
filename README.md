@@ -59,6 +59,13 @@ dashboard:
 .venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
 ```
 
+Data-integrity update (November 6): training rejects incomplete guided takes,
+checks declared motion hashes, and reports corrupt recordings individually.
+The Phase 2 reference accidentally included 46 development windows from the
+shortened Quiet Sitting diagnostic; its historical scores and bundled detector
+are retained, pending a corrected development-only comparison. Assisted review
+cannot make that incomplete take eligible. The locked test is unchanged.
+
 Start with [START_HERE.md](START_HERE.md) for the broader repository.
 
 ## Main Products

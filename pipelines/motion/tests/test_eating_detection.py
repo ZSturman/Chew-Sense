@@ -7,6 +7,7 @@ about real-world detection performance.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pipeline.eating.dataset import (  # noqa: E402
     build_windows,
     discover_sessions,
+    load_canonical_motion,
     load_canonical_session,
     load_field_test,
     SessionRejected,
@@ -106,6 +108,68 @@ def test_canonical_tiers_ignore_non_human_sources(tmp_path):
     assert [(i.label, i.tier) for i in session.intervals] == [("not_chewing", "human_coarse")]
     assert any("non-human source" in note for note in session.notes)
     assert session.created_at.startswith("2026-11-01T12:00")
+
+
+def test_manifest_motion_hash_is_checked_before_using_labels(tmp_path):
+    folder = make_canonical(tmp_path, "hashed", intervals=[_span(0, 60, "not_chewing")])
+    motion = folder / "hashed.csv"
+    manifest_path = folder / "session.json"
+    manifest = json.loads(manifest_path.read_text())
+    expected = hashlib.sha256(motion.read_bytes()).hexdigest()
+    manifest["motion"]["sha256"] = expected
+    manifest_path.write_text(json.dumps(manifest))
+    assert load_canonical_session(folder).motion_sha256 == expected
+    # Even a valid CSV change must invalidate the original manifest binding.
+    motion.write_text(motion.read_text().replace(",0.", ",1.", 1))
+    with pytest.raises(SessionRejected, match="SHA-256"):
+        load_canonical_session(folder)
+
+
+@pytest.mark.parametrize("complete", [False, None])
+def test_incomplete_guided_take_cannot_become_training_data_after_review(tmp_path, complete):
+    folder = make_canonical(tmp_path, "incomplete", intervals=[_span(0, 60, "not_chewing")])
+    (folder / "guided_session.json").write_text(json.dumps({
+        "validation": {"complete": complete}, "definition": {"activities": []},
+    }))
+    with pytest.raises(SessionRejected, match="completion unverified"):
+        load_canonical_session(folder)
+    # Motion remains available for diagnostic replay and assisted proposals.
+    assert len(load_canonical_motion(folder).video_t) > 0
+    sessions, rejected = discover_sessions(canonical_roots=[tmp_path])
+    assert not sessions and "guided recording incomplete" in rejected[0]["reason"]
+
+
+def test_corrupt_motion_is_rejected_without_hiding_other_recordings(tmp_path):
+    good = make_canonical(tmp_path, "good", intervals=[_span(0, 60, "not_chewing")])
+    bad = make_canonical(tmp_path, "bad", intervals=[_span(0, 60, "not_chewing")])
+    motion = bad / "bad.csv"
+    motion.write_text(motion.read_text().replace("1000.000000", "corrupt", 1))
+    sessions, rejected = discover_sessions(canonical_roots=[tmp_path])
+    assert [s.session_id for s in sessions] == [good.name]
+    assert len(rejected) == 1 and "non-numeric motion data" in rejected[0]["reason"]
+
+
+def test_motion_reference_cannot_escape_its_session(tmp_path):
+    folder = make_canonical(tmp_path, "escape", intervals=[_span(0, 60, "not_chewing")])
+    path = folder / "session.json"
+    manifest = json.loads(path.read_text())
+    manifest["motion"]["path"] = "../other.csv"
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(SessionRejected, match="escapes"):
+        load_canonical_motion(folder)
+
+
+def test_reusing_or_rejecting_sessions_does_not_rewrite_locked_splits(tmp_path):
+    folder = make_canonical(tmp_path / "raw", "split", intervals=[_span(0, 60, "not_chewing")])
+    session = load_canonical_session(folder)
+    path = tmp_path / "splits.json"
+    expected = assign_splits([session], path)
+    original = path.read_bytes()
+    assert assign_splits([session], path) == expected
+    assert path.read_bytes() == original
+    # Rejecting a recording must not delete its historical assignment either.
+    assert assign_splits([], path) == expected
+    assert path.read_bytes() == original
 
 
 def test_legacy_negative_capture_is_session_declared(tmp_path):
