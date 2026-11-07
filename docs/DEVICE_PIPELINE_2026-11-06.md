@@ -10,8 +10,8 @@ in ignored `workspace/checkpoints/resume-20261106/`.
 
 | Surface | Actually executed | Limits |
 | --- | --- | --- |
-| iPhone 16 Pro Max, iOS 27.2 | Collect 1.2 (7) and Live built, installed in place and launched | No new human activity was recorded |
-| Physical Live tests | 11 tests passed; exact Python/Swift synthetic-stream parity, invalid/gap windows, decoder and CPU benchmark | Synthetic input on physical hardware; not real chewing accuracy |
+| iPhone 16 Pro Max, iOS 27.2 | Collect 1.2 (7) and Live built, installed in place and launched. Real meal and Live motion-only takes saved | The meal ended intentionally before the final marker. The Live take is unlabelled |
+| Physical Live tests | 22 tests passed; Python/Swift synthetic-stream parity, gap handling, session metadata, saved-check status and CPU benchmark | Fixture input on physical hardware |
 | Physical Collect tests | 18 guided tests passed after fixing Mac-only fixture paths | Guided timers/quality are fixtures, not physical guided capture |
 | Physical → Python contract | Copied the device-generated guided sidecar from app tmp/, validated it in Python | Synthetic sidecar, not a real recording |
 | macOS Review | Rebuilt; 25 tests passed, 1 opt-in render skipped; opened actual blind baseline with zero proposals and assisted panel disabled | No human review was completed |
@@ -24,7 +24,7 @@ copy it to `build/contract/` before the Python cross-language check. The catalog
 cache test now injects an isolated preferences suite, so applying its fixture
 cannot reset the wearer's local collection counts.
 
-### Real recording processed
+### Real recordings processed
 
 An existing, previously unimported phone recording,
 `Not-eating-20261026-174428-C27C9380`, was copied over USB to
@@ -48,6 +48,15 @@ was **prior physical capture**, not a new wearer session or new ground truth.
 Evidence: `workspace/loop/reports/sessions/Not-eating-20261026-174428-C27C9380/`,
 `workspace/loop/state/sessions/Not-eating-20261026-174428-C27C9380.json` and
 `workspace/experiments/device-20261106/received-source-hashes.json`.
+
+The wearer then recorded `Guided-natural-meal-20261106-174058-8029B059` and
+intentionally ended it at 210.59 s. The saved bundle contained 10,518 samples
+at about 50 Hz, 99.869% motion coverage, one 240 ms gap and about 99% reported
+face visibility. The running service took 521.2 s for Vision and produced 159
+automatic chew cycles, 15 food-entry proposals and coarse chewing proposals.
+The final nod and remaining periods are missing. The take stays diagnostic,
+with inconclusive synchronization and zero new human-verified labels. Natural
+Meal v1 supplies only two marker windows; the automatic clock check needs three.
 
 ### Privacy verified in the running service
 
@@ -144,11 +153,31 @@ all exported-detector inference features use only AirPods acceleration and
 rotation (six channels plus sample validity).
 
 On the physical iPhone, the Debug runtime processed the synthetic parity stream
-exactly as Python. Across 234 valid benchmark windows: median **13.871 ms**,
-p95 **14.169 ms**, maximum **14.354 ms**, against a 500 ms stride. This includes
-resampling/features/trees/decoder; it excludes capture delivery, camera cost,
-end-to-end sensor latency, sustained thermal behavior and battery measurement.
-It establishes CPU feasibility, not a successful real AirPods session.
+exactly as Python. The updated build's 234-window benchmark measured **17.668 ms**
+median and **19.799 ms** p95 against a 500 ms stride. This measures resampling,
+features, trees and decoding. Battery, thermals and end-to-end delay still need
+separate measurements.
+
+Three earlier foreground checks saved header-only CSVs. After Live gained the
+shared Collect connection panel and stopped requiring video, the wearer selected
+the AirPods, played the test sound, and retried. CoreMotion reported an active,
+authorized stream and fresh callbacks. No single cause was isolated for the
+earlier failures. On November 7 the wearer completed an unlabelled check and
+AirDropped the saved folder to the Mac. The export and USB copy matched byte for
+byte, and the canonical motion hash matched.
+
+| Live check `FieldTest-20261107-023850-E7978B9B` | Measured |
+| --- | --- |
+| Input | 32.13 s, 1,590 samples, six axes, 50 Hz median; two gaps, largest 290 ms |
+| Reference media | Video and audio off; no camera file, no benchmark candidacy |
+| ChewNet | 313 windows, 19 reported chewing |
+| Experimental detector | 59 scored shadow windows, all idle |
+| Mac replay of exported motion | Same validity and all 59 decisions; max probability difference 4.97e-9 |
+
+The two models disagreed during the take. Its activity was unlabelled, so the
+outputs measure runtime and transfer integrity only. Neither model's output is
+an accuracy result. The receipt is in
+`workspace/experiments/device-20261106/real-live-shadow-validation.json`.
 
 Evidence: `build/Device-Live.xcresult`, `build/Device-Collect.xcresult`,
 `workspace/experiments/device-20261106/runtime-benchmark.json`, and the matching
@@ -162,11 +191,8 @@ Review's training status displays that scoped physical evidence.
    `8da810cf23f6f689…`, and catalog/status sync succeeded. No security/VPN
    workaround was used. Camera and Motion & Fitness were already enabled.
    Natural Meal was staged without recording. Apple then explicitly reported
-   that the iPhone camera is unavailable from the Mac while mirrored; Mirroring
-   was closed. The wearer elected to record the meal and was given only the
-   AirPods/phone-placement/Start/nod/meal actions. A real take is now in progress:
-   `Guided-natural-meal-20261106-174058-8029B059`. Completion/quality are pending;
-   a read-only file watcher waits for session.json plus the final guided sidecar.
+   that the iPhone camera is unavailable from the Mac while mirrored. The wearer
+   recorded the meal on the phone and the bundle was processed after USB transfer.
 2. **Independent baseline:** saved blind draft has zero events, zero timer
    seconds, no full pass, no verification and no clock confirmation. Review is
    open on it with predictions hidden; use existing phone sections 24.1–44.2 s
@@ -175,14 +201,13 @@ Review's training status displays that scoped physical evidence.
    here. There is no evidence of exposure in the saved human draft/UI; a human
    blind review is still available. Finish/freeze it before the baseline's
    assisted workflow. A new negative blind take is also available.
-3. **Physical wearer session:** retrieve and audit the completed meal, preserving
-   its device original. Process locally through the normal sandboxed service,
-   then prepare the smallest useful follow-up confound recording if warranted.
-4. **Review and measurement:** retain incomplete Quiet Sitting diagnostically;
+3. **Review and measurement:** retain incomplete Quiet Sitting diagnostically;
    after independent review, use assisted proposals with the existing active-time
    counters. No measured review-time saving or new human-verified labels exists.
-5. **Live shadow:** prepare a genuine wearer session and compare exported logs
-   to independent ground truth; measure sustained runtime/battery separately.
+4. **Next collection:** revise the Natural Meal marker schedule in a new version.
+   Collect completed hard negatives for talking, drinking, gum and head movement,
+   followed by talking while eating. Compare a labelled Live shadow check to
+   independent ground truth and measure sustained runtime separately.
 
 Native and real-source processing are complete to the gates above. A full new
 wearer collection → verified labeling → training → live shadow accuracy cycle
@@ -223,7 +248,7 @@ xcrun devicectl device copy from --device 00008140-000538120A43801C \
   pipelines/vision/tests/test_loop.py::test_swift_generated_sidecar_satisfies_mac_contract -q
 ```
 
-Expected: 18 Collect fixture tests, 11 focused Live tests, and one physical-sidecar
+Expected: 18 Collect fixture tests, 22 focused Live tests, and one physical-sidecar
 Python contract check pass. These commands are recorded for reproducibility;
 Codex has already performed them, so no developer build or command action is
 needed to resume.

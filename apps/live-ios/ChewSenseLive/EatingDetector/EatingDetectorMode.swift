@@ -21,17 +21,17 @@ enum EatingDetectorMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .bundledChewNetWithShadow: return "Bundled ChewNet (default)"
-        case .exportedDetectorExperimental: return "Exported detector (experimental)"
+        case .bundledChewNetWithShadow: return "ChewNet + shadow comparison"
+        case .exportedDetectorExperimental: return "AirPods detector (experimental)"
         }
     }
 
     var explanation: String {
         switch self {
         case .bundledChewNetWithShadow:
-            return "Live uses the bundled ChewNet. The exported motion-only detector runs alongside and is only recorded, so both can be compared after the session."
+            return "ChewNet supplies the displayed prediction. The experimental AirPods detector runs alongside it and is saved for comparison."
         case .exportedDetectorExperimental:
-            return "The exported detector decides chewing. It matched the Python reference on recorded sessions but has no physical AirPods validation yet."
+            return "The experimental AirPods detector supplies the displayed prediction. Its real-world accuracy is still being evaluated."
         }
     }
 

@@ -44,8 +44,8 @@ dashboard:
 - **On-device detector.** The selected gradient-boosting model is exported as
   `apps/live-ios/ChewSenseLive/EatingDetector/eating-detector.json`. Live's
   Swift runtime matches the Python reference exactly on all recorded sessions.
-  It runs in shadow by default; Settings can make it drive Live
-  (experimental, not yet tested on a physical device).
+  It runs alongside ChewNet by default and records its own results. Select the
+  experimental model in **New model check** to display its predictions live.
 - **Training and Evaluation window** in Review (⇧⌘T): recordings, checks,
   labels, splits, model, metrics, prediction timelines, errors and what to
   record next, from `workspace/experiments/eating/pipeline_status.json`.
@@ -60,12 +60,17 @@ dashboard:
 ```
 
 November 6 [physical-device and pipeline validation](docs/DEVICE_PIPELINE_2026-11-06.md):
-Collect and Live were built/installed/launched on iPhone; 18 guided Collect and
-11 Live fixture tests passed on the physical device. The exported detector's
-Debug CPU median was 13.9 ms/window. An existing real iPhone recording completed
-the running Mac loop, with MediaPipe telemetry attempts confirmed blocked by
-its DNS/network sandbox. A real wearer shadow trial and battery measurement
-remain outstanding.
+Collect and Live were installed on iPhone. Eighteen Collect and 22 Live fixture
+tests passed on the phone. Two real recordings, including a short Natural Meal,
+completed the running Mac loop. System logs confirmed that MediaPipe telemetry
+attempts were blocked. The intentionally shortened meal remains diagnostic.
+
+Live now opens on **Connect AirPods**, **New model check**, and **Recent checks**.
+The connection panel is shared with Collect and includes the iOS audio picker,
+a test sound, and a fresh-motion indicator. In a physical camera-free check on
+November 7, Live saved 1,590 motion samples and 59 experimental model windows.
+All 59 decisions matched Mac replay and the AirDropped export matched the phone
+copy. Recognition accuracy and battery use still need separate measurements.
 
 Training now rejects incomplete guided takes and declared motion-hash mismatches.
 The Phase 2 experiment accidentally included 46 windows from incomplete Quiet
@@ -75,8 +80,8 @@ No new locked-test evaluation or deployment was performed. The dashboard shows
 this development run separately from Live's installed experimental detector.
 
 Collect's Mac connection reports denied Local Network permission and offers
-**Open Settings**, rather than silently searching forever. Independent baseline
-review and real wearer data remain required; see [current next steps](docs/NEXT_STEPS.md).
+**Open Settings**. See [current next steps](docs/NEXT_STEPS.md) for the independent
+baseline and the next recordings to collect.
 
 Start with [START_HERE.md](START_HERE.md) for the broader repository.
 

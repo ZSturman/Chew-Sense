@@ -82,7 +82,7 @@ private struct LastPredictionWindow {
 }
 
 /// Manages motion data collection and chewing detection
-final class MotionManager: ObservableObject {
+final class MotionManager: NSObject, ObservableObject, CMHeadphoneMotionManagerDelegate {
 
     // MARK: - Configuration
 
@@ -92,6 +92,18 @@ final class MotionManager: ObservableObject {
     // MARK: - Dependencies
 
     private let headphoneManager = CMHeadphoneMotionManager()
+    private var motionHealth = HeadphoneMotionHealth()
+    private var motionStreamID = UUID()
+    private var motionCaptureActive = false
+    private var motionMonitoringActive = false
+    private var motionRetryTimer: DispatchSourceTimer?
+    private var motionCallbackCount = 0
+    private var motionSubscriptionCount = 0
+    private var lastCallbackSampleTime: Double?
+    #if os(iOS)
+    private var audioRouteObserver: NSObjectProtocol?
+    private var connectionTestPlayer: AVAudioPlayer?
+    #endif
     private let detector: ChewDetector
     private let strokeCounter = ChewStrokeCounter()
     private let eventDecoder = ChewEventDecoder()
@@ -155,6 +167,11 @@ final class MotionManager: ObservableObject {
     /// Latest state of the exported detector (shadow or driving).
     @Published var exportedDetectorChewing: Bool = false
     @Published var exportedDetectorProbability: Double?
+    @Published private(set) var hasChewNetPrediction = false
+    @Published private(set) var hasFreshMotion = false
+    @Published private(set) var capturedMotionSamples = 0
+    @Published private(set) var audioRouteName = "No audio output selected"
+    @Published private(set) var airPodsMessage = "Wear your AirPods and choose them as the audio output."
     #if os(iOS)
     @Published var captureSession: AVCaptureSession?
     #endif
@@ -172,6 +189,27 @@ final class MotionManager: ObservableObject {
 
     init(detectorConfig: ChewDetectorConfig = .default) {
         detector = ChewDetector(config: detectorConfig)
+        super.init()
+        headphoneManager.delegate = self
+        headphoneManager.startConnectionStatusUpdates()
+        #if os(iOS)
+        updateAudioRoute()
+        audioRouteObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.updateAudioRoute()
+            self?.motionQueue.addOperation { [weak self] in self?.restartMotionSubscription() }
+        }
+        #endif
+    }
+
+    deinit {
+        motionRetryTimer?.cancel()
+        headphoneManager.stopDeviceMotionUpdates()
+        headphoneManager.stopConnectionStatusUpdates()
+        #if os(iOS)
+        if let audioRouteObserver { NotificationCenter.default.removeObserver(audioRouteObserver) }
+        #endif
     }
 
     // MARK: - Control
@@ -230,14 +268,62 @@ final class MotionManager: ObservableObject {
     private func activateAudioSession() {
         let audio = AVAudioSession.sharedInstance()
         do {
-            try audio.setCategory(.playback, options: [.mixWithOthers])
+            if !isRunning { try audio.setCategory(.playback, options: [.mixWithOthers]) }
             try audio.setActive(true)
+            updateAudioRoute()
         } catch {
             statusText = "Audio route setup failed: \(error.localizedDescription)"
         }
     }
 
+    private func updateAudioRoute() {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName)
+        audioRouteName = outputs.isEmpty ? "No audio output selected" : outputs.joined(separator: ", ")
+    }
+
+    func playAirPodsTestSound() {
+        activateAudioSession()
+        do {
+            let player = try AVAudioPlayer(data: AirPodsConnectionTone.data())
+            player.volume = 0.35
+            connectionTestPlayer = player
+            player.prepareToPlay()
+            guard player.play() else { throw NSError(domain: "AirPods", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Test sound could not start."]) }
+            airPodsMessage = "Test sound plays through \(audioRouteName). Select your AirPods if you hear it from the phone."
+        } catch { airPodsMessage = error.localizedDescription }
+    }
+
     #endif
+
+    func prepareAirPodsConnection() {
+        guard !isRunning, !isStartingSession, !isFinalizingSession, !hasFreshMotion else { return }
+        #if os(iOS)
+        activateAudioSession()
+        #endif
+        beginMotionUpdates(recording: false)
+    }
+
+    func retryAirPodsMotion() {
+        #if os(iOS)
+        activateAudioSession()
+        #endif
+        airPodsMessage = "Retrying motion. Wear your AirPods and select them under Choose AirPods if needed."
+        if !isRunning { beginMotionUpdates(recording: false) }
+        else { motionQueue.addOperation { [weak self] in self?.restartMotionSubscription() } }
+    }
+
+    func endAirPodsConnectionCheck() {
+        guard !isRunning, !isStartingSession else { return }
+        motionQueue.addOperation { [weak self] in
+            self?.motionMonitoringActive = false
+            self?.headphoneManager.stopDeviceMotionUpdates()
+            self?.motionRetryTimer?.cancel()
+            self?.motionRetryTimer = nil
+            self?.motionHealth.invalidateSamples()
+            DispatchQueue.main.async { self?.hasFreshMotion = false }
+        }
+    }
 
     /// Session-level metadata captured at recording start. Detection
     /// parameters are NOT exposed here — they always come from the bundled
@@ -258,12 +344,19 @@ final class MotionManager: ObservableObject {
         /// Required pre-meal texture choice. Unknown still permits cadence
         /// metrics but can never enable a chew-count goal.
         var mealTexture: MealTexture = .unknown
+        /// Optional offline reference; neither detector consumes camera input.
+        var recordReferenceVideo: Bool = true
     }
 
     func start(metadata: SessionMetadataInput) {
         guard !isRunning, !isStartingSession, !isFinalizingSession else { return }
 
         #if os(iOS)
+        if !metadata.recordReferenceVideo {
+            stopCameraPreview()
+            startSession(metadata: metadata)
+            return
+        }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             startSession(metadata: metadata)
@@ -348,32 +441,155 @@ final class MotionManager: ObservableObject {
         #if !os(iOS)
         beginMotionUpdates()
         #else
-        statusText = "Starting synchronized recording..."
+        if metadata.recordReferenceVideo {
+            statusText = "Starting synchronized recording..."
+        } else {
+            beginMotionUpdates()
+        }
         #endif
     }
 
     /// Starts AirPods capture only after the video delegate has frozen the
     /// host-clock origin. This prevents negative or first-motion-shifted video
     /// timestamps in evaluation bundles.
-    private func beginMotionUpdates() {
-        headphoneManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
+    private func beginMotionUpdates(recording: Bool = true) {
+        motionQueue.addOperation { [weak self] in
             guard let self else { return }
+            if recording {
+                self.motionCaptureActive = true
+                self.motionCallbackCount = 0
+                self.motionSubscriptionCount = 0
+                self.lastCallbackSampleTime = nil
+            } else {
+                guard !self.motionCaptureActive else { return }
+                self.motionMonitoringActive = true
+            }
+            self.motionHealth = HeadphoneMotionHealth()
+            self.restartMotionSubscription()
+            guard self.motionRetryTimer == nil else { return }
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+            timer.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
+            timer.setEventHandler { [weak self] in
+                self?.motionQueue.addOperation { [weak self] in
+                    guard let self, self.motionCaptureActive || self.motionMonitoringActive else { return }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    guard !self.motionHealth.isFresh(at: now) else { return }
+                    DispatchQueue.main.async {
+                        self.hasFreshMotion = false
+                        self.hasChewNetPrediction = false
+                        self.exportedDetectorProbability = nil
+                        self.statusText = "Waiting for fresh AirPods motion"
+                        self.airPodsMessage = "No fresh motion yet. Select your AirPods and retry the connection."
+                    }
+                    if self.motionHealth.shouldRestart(at: now) { self.restartMotionSubscription() }
+                }
+            }
+            self.motionRetryTimer = timer
+            timer.resume()
+        }
+        guard recording else { return }
+        DispatchQueue.main.async {
+            self.hasFreshMotion = false
+            self.capturedMotionSamples = 0
+            self.isStartingSession = false
+            self.isRunning = true
+            self.statusText = "Waiting for fresh AirPods motion"
+            self.recordingStartedAt = Date()
+        }
+    }
+
+    /// Serialized with sample handling; retries preserve the session clock and gaps.
+    private func restartMotionSubscription() {
+        guard motionCaptureActive || motionMonitoringActive else { return }
+        motionSubscriptionCount += 1
+        motionStreamID = UUID()
+        let streamID = motionStreamID
+        motionHealth.didRestart(at: ProcessInfo.processInfo.systemUptime)
+        headphoneManager.stopDeviceMotionUpdates()
+        headphoneManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
+            guard let self, self.motionCaptureActive || self.motionMonitoringActive,
+                  self.motionStreamID == streamID else { return }
+            self.motionCallbackCount += 1
             if let error {
+                self.motionHealth.invalidateSamples()
                 self.motionInterruptionCount += 1
                 DispatchQueue.main.async {
+                    self.hasFreshMotion = false
+                    self.hasChewNetPrediction = false
+                    self.exportedDetectorProbability = nil
                     self.statusText = "Motion interruption: \(error.localizedDescription)"
+                    self.airPodsMessage = error.localizedDescription
                 }
+                self.writeMotionConnectionDiagnostics(reason: "callback_error")
                 return
             }
             guard let motion else { return }
-            self.handleMotion(motion)
+            self.lastCallbackSampleTime = motion.timestamp
+            let now = ProcessInfo.processInfo.systemUptime
+            let wasFresh = self.motionHealth.isFresh(at: now)
+            guard self.lastMotionHostTime.map({ motion.timestamp > $0 }) ?? true,
+                  [motion.userAcceleration.x, motion.userAcceleration.y, motion.userAcceleration.z,
+                   motion.rotationRate.x, motion.rotationRate.y, motion.rotationRate.z].allSatisfy(\.isFinite),
+                  self.motionHealth.didReceive(sampleTime: motion.timestamp, at: now)
+            else { return }
+            if self.motionCaptureActive { self.handleMotion(motion) }
+            if !wasFresh {
+                DispatchQueue.main.async {
+                    self.hasFreshMotion = true
+                    self.statusText = self.isRunning ? "Running" : "AirPods motion is ready"
+                    self.airPodsMessage = "Fresh AirPods motion is arriving. You can start a model check."
+                }
+                self.writeMotionConnectionDiagnostics(reason: "fresh_motion")
+            }
         }
+        writeMotionConnectionDiagnostics(reason: "subscription_started")
+    }
 
-        DispatchQueue.main.async {
-            self.isStartingSession = false
-            self.isRunning = true
-            self.statusText = "Running"
-            self.recordingStartedAt = Date()
+    private func writeMotionConnectionDiagnostics(reason: String) {
+        let directory: URL
+        if motionCaptureActive, let currentSessionURL { directory = currentSessionURL }
+        else {
+            directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("AirPodsConnection")
+        }
+        let payload: [String: Any] = [
+            "reason": reason,
+            "authorization_status": CMHeadphoneMotionManager.authorizationStatus().rawValue,
+            "motion_available": headphoneManager.isDeviceMotionAvailable,
+            "motion_active": headphoneManager.isDeviceMotionActive,
+            "subscriptions": motionSubscriptionCount,
+            "callbacks": motionCallbackCount,
+            "captured_samples": motionCaptureActive ? motionSampleCount : 0,
+            "capture_active": motionCaptureActive,
+            "host_time": ProcessInfo.processInfo.systemUptime,
+            "last_callback_sample_time": lastCallbackSampleTime.map { $0 as Any } ?? NSNull(),
+            "last_arrival_time": motionHealth.lastArrivalTime.map { $0 as Any } ?? NSNull(),
+            "source": "CoreMotion; no synthetic sample generation",
+        ]
+        var result = payload
+        #if os(iOS)
+        result["audio_route"] = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName)
+        #endif
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try CanonicalCaptureContract.writeJSON(result,
+                to: directory.appendingPathComponent("motion-connection.json"))
+        } catch { print("[MotionManager] connection diagnostics failed: \(error)") }
+    }
+
+    func headphoneMotionManagerDidConnect(_ manager: CMHeadphoneMotionManager) {
+        motionQueue.addOperation { [weak self] in self?.restartMotionSubscription() }
+    }
+
+    func headphoneMotionManagerDidDisconnect(_ manager: CMHeadphoneMotionManager) {
+        motionQueue.addOperation { [weak self] in
+            self?.motionHealth.invalidateSamples()
+            DispatchQueue.main.async {
+                self?.hasFreshMotion = false
+                self?.hasChewNetPrediction = false
+                self?.exportedDetectorProbability = nil
+                self?.statusText = "AirPods disconnected; waiting for motion"
+            }
         }
     }
 
@@ -384,6 +600,16 @@ final class MotionManager: ObservableObject {
         statusText = "Finishing video..."
 
         headphoneManager.stopDeviceMotionUpdates()
+        motionQueue.addOperation { [weak self] in
+            self?.writeMotionConnectionDiagnostics(reason: "capture_stopped")
+            self?.motionCaptureActive = false
+            self?.motionMonitoringActive = false
+            self?.motionStreamID = UUID()
+            self?.headphoneManager.stopDeviceMotionUpdates()
+            self?.motionRetryTimer?.cancel()
+            self?.motionRetryTimer = nil
+            self?.motionHealth.invalidateSamples()
+        }
 
         let finishedSessionURL = currentSessionURL
         let finish: () -> Void = { [weak self] in
@@ -391,8 +617,10 @@ final class MotionManager: ObservableObject {
             self.isRunning = false
             self.isStartingSession = false
             self.isFinalizingSession = false
+            self.hasFreshMotion = false
             self.recordingStartedAt = nil
-            self.statusText = "Stopped"
+            self.statusText = self.motionSampleCount > 0
+                ? "Stopped" : "No AirPods samples captured. Check motion access and reconnect your AirPods."
             self.latestCompletedSessionURL = finishedSessionURL
             #if os(iOS)
             // Keep the recorder configured but stop the running preview so the
@@ -710,7 +938,9 @@ final class MotionManager: ObservableObject {
             let capturedSample = sample
             let q = motion.attitude.quaternion
             let attitude = HeadAttitude(w: q.w, x: q.x, y: q.y, z: q.z)
+            let count = motionSampleCount
             DispatchQueue.main.async {
+                self.capturedMotionSamples = count
                 var buf = self.recentSamples
                 buf.append(capturedSample)
                 if buf.count > 200 { buf.removeFirst(buf.count - 200) }
@@ -799,6 +1029,7 @@ final class MotionManager: ObservableObject {
 
         DispatchQueue.main.async {
             if legacyDrivesLive {
+                self.hasChewNetPrediction = true
                 self.latestProb = probability
                 self.latestSmoothed = detResult.smoothedProb
                 self.isChewing = (detResult.state == .chewing)
@@ -1002,7 +1233,7 @@ final class MotionManager: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        let id = "FieldTest-\(formatter.string(from: Date()))"
+        let id = "FieldTest-\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(8))"
         sessionID = id
         activeSessionMetadata = metadata
         sessionCreatedAt = ISO8601DateFormatter().string(from: Date())
@@ -1049,34 +1280,36 @@ final class MotionManager: ObservableObject {
         )
 
         #if os(iOS)
-        let recorder = videoRecorder ?? DebugVideoRecorder()
-        let videoURL = sessionURL.appendingPathComponent("\(id).mov")
-        // startRecording() calls configureIfNeededLocked() internally on sessionQueue;
-        // a separate configureSessionOnly() (sessionQueue.sync from main) would cause
-        // a priority inversion via AVFoundation's internal default-QoS queues.
-        captureSession = recorder.exposedSession
-        recorder.startRecording(to: videoURL) { [weak self] error in
-            if let error {
-                DispatchQueue.main.async {
-                    self?.closeSessionFiles()
-                    self?.isStartingSession = false
-                    self?.currentSessionURL = nil
-                    self?.statusText = "Camera recording failed: \(error.localizedDescription)"
+        if metadata.recordReferenceVideo {
+            let recorder = videoRecorder ?? DebugVideoRecorder()
+            let videoURL = sessionURL.appendingPathComponent("\(id).mov")
+            // startRecording() calls configureIfNeededLocked() internally on sessionQueue;
+            // a separate configureSessionOnly() (sessionQueue.sync from main) would cause
+            // a priority inversion via AVFoundation's internal default-QoS queues.
+            captureSession = recorder.exposedSession
+            recorder.startRecording(to: videoURL) { [weak self] error in
+                if let error {
+                    DispatchQueue.main.async {
+                        self?.closeSessionFiles()
+                        self?.isStartingSession = false
+                        self?.currentSessionURL = nil
+                        self?.statusText = "Camera recording failed: \(error.localizedDescription)"
+                    }
+                    print("[MotionManager] startRecording failed: \(error)")
+                    return
                 }
-                print("[MotionManager] startRecording failed: \(error)")
-                return
+                self?.writeCanonicalSessionManifest(at: sessionURL, finalized: false)
+                self?.beginMotionUpdates()
             }
-            self?.writeCanonicalSessionManifest(at: sessionURL, finalized: false)
-            self?.beginMotionUpdates()
+            videoRecorder = recorder
         }
-        videoRecorder = recorder
         #endif
 
         writeSessionMetadata(
             metadata: metadata,
             detectorConfig: detectorConfig,
             sessionURL: sessionURL,
-            videoFileName: "\(id).mov"
+            videoFileName: metadata.recordReferenceVideo ? "\(id).mov" : nil
         )
         writeCanonicalSessionManifest(at: sessionURL, finalized: false)
         appendLogLine("timestamp,probability,smoothed,state")
@@ -1086,7 +1319,7 @@ final class MotionManager: ObservableObject {
         metadata: SessionMetadataInput,
         detectorConfig: ChewDetectorConfig,
         sessionURL: URL,
-        videoFileName: String
+        videoFileName: String?
     ) {
         let runtime: [String: Any] = [
             "alpha": detectorConfig.alpha,
@@ -1121,10 +1354,11 @@ final class MotionManager: ObservableObject {
             "test_scenario": metadata.testScenario,
             "activity": metadata.activitySlug,
             "activity_label": metadata.activityLabel,
-            "expected_label_class": metadata.expectedLabelClass,
-            "gold_lock_candidate": metadata.goldLockCandidate,
+            "expected_label_class": metadata.recordReferenceVideo ? metadata.expectedLabelClass : "unknown",
+            "gold_lock_candidate": metadata.recordReferenceVideo && metadata.goldLockCandidate,
             "meal_texture": metadata.mealTexture.rawValue,
-            "video_file": videoFileName,
+            "video_file": videoFileName as Any? ?? NSNull(),
+            "record_reference_video": metadata.recordReferenceVideo,
             "review_status": "unreviewed"
         ]
 
@@ -1158,7 +1392,7 @@ final class MotionManager: ObservableObject {
             sessionID: sessionID,
             createdAt: createdAt,
             activity: metadata.activitySlug,
-            videoFileName: "\(sessionID).mov",
+            videoFileName: metadata.recordReferenceVideo ? "\(sessionID).mov" : nil,
             motionFileName: "motion.csv",
             videoClockOriginHostTime: canonicalVideoOriginHostTime,
             usedConfirmedVideoOrigin: hasConfirmedVideoOrigin,
@@ -1231,6 +1465,7 @@ final class MotionManager: ObservableObject {
         eatingRuntime?.reset()
         exportedDetectorChewing = false
         exportedDetectorProbability = nil
+        hasChewNetPrediction = false
         DispatchQueue.main.async { [weak self] in self?.mealMetrics.reset() }
         logLines.removeAll()
         feedbackCount = 0

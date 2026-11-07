@@ -2,6 +2,39 @@ import XCTest
 @testable import ChewSenseLive
 
 final class LiveSessionContractTests: XCTestCase {
+    func testMotionOnlyManifestCannotClaimVideoOrConfirmedVideoTiming() throws {
+        let session = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MotionOnlyContract-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: session) }
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try Data("timestamp,ax,ay,az,gx,gy,gz\n100.2,0,0,0,0,0,0\n101.2,0,0,0,0,0,0\n".utf8)
+            .write(to: session.appendingPathComponent("motion.csv"))
+        let snapshot = LiveCaptureSnapshot(
+            sessionID: session.lastPathComponent, createdAt: "2026-11-07T00:00:00Z",
+            activity: "shadow_validation", videoFileName: nil, motionFileName: "motion.csv",
+            videoClockOriginHostTime: 100, usedConfirmedVideoOrigin: true,
+            firstMotionHostTime: 100.2, lastMotionHostTime: 101.2,
+            motionSampleCount: 2, motionSampleGapCount: 0, largestMotionSampleGapSec: 0,
+            interrupted: false, interruptionCount: 0, finalized: true,
+            modelID: "test", modelMode: "test"
+        )
+        try LiveCanonicalSessionWriter.write(snapshot: snapshot, sessionURL: session, sourceAppVersion: "test")
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: session.appendingPathComponent("session.json"))) as? [String: Any])
+        XCTAssertTrue(payload["video"] is NSNull)
+        let capture = try XCTUnwrap(payload["capture"] as? [String: Any])
+        XCTAssertTrue(capture["fps"] is NSNull)
+        let clock = try XCTUnwrap(payload["clock_sync"] as? [String: Any])
+        XCTAssertEqual(clock["method"] as? String, "capture_clock_fallback")
+        XCTAssertEqual(clock["confidence"] as? String, "low")
+        XCTAssertNil(clock["video_start_host_time_s"])
+        let quality = try XCTUnwrap(payload["quality"] as? [String: Any])
+        XCTAssertEqual(quality["video_present"] as? Bool, false)
+        XCTAssertEqual(quality["motion_present"] as? Bool, true)
+        let motion = try XCTUnwrap(payload["motion"] as? [String: Any])
+        XCTAssertEqual((motion["sha256"] as? String)?.count, 64)
+    }
+
     func testCanonicalManifestFreezesClockAndMediaHashes() throws {
         let session = FileManager.default.temporaryDirectory
             .appendingPathComponent("LiveSessionContractTests-\(UUID().uuidString)")

@@ -1,56 +1,54 @@
-//
-//  RecordingComposerView.swift
-//  ChewSenseLive
-//
-//  Photo-Booth-style camera surface used to compose a new recording. Shows
-//  a live front-camera preview before the user presses Record, then overlays
-//  a recording HUD (timer, prediction, probability bars) while recording.
-//
-
 import SwiftUI
 import AVFoundation
 import Combine
-import Charts
 
+/// A model check has one setup, one start/stop control and an honest signal state.
 struct RecordingComposerView: View {
     @ObservedObject var motionManager: MotionManager
     @ObservedObject var config: DetectionConfiguration
-
-    /// Notes the user can edit while composing or recording.
     @Binding var sessionNotes: String
-
-    /// Called when the composer should close (e.g. user cancels). The parent
-    /// is responsible for routing to the review pane after a successful stop;
-    /// it observes `motionManager.latestCompletedSessionURL` for that.
     let onCancel: () -> Void
 
-    @State private var nowTick: Date = Date()
-    @State private var showSensorPanel: Bool = false
-    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    @State private var nowTick = Date()
+    @State private var showAirPods = false
+    @Environment(\.scenePhase) private var scenePhase
+    private let timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    private var active: Bool {
+        motionManager.isRunning || motionManager.isStartingSession || motionManager.isFinalizingSession
+    }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea(edges: [])
-
-            cameraSurface
-
-            VStack {
-                topBar
-                Spacer()
-                recordingHUD
-                controlBar
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                connectionCard
+                if active {
+                    predictionCard
+                    signalDetails
+                } else {
+                    setup
+                }
+                if config.recordReferenceVideo { referencePreview }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(20)
         }
-        .navigationTitle("New Recording")
+        .background(Color.gray.opacity(0.06))
+        .navigationTitle("Model check")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(
-            motionManager.isRunning || motionManager.isStartingSession || motionManager.isFinalizingSession
-        )
+        .navigationBarBackButtonHidden(active)
+        .toolbar {
+            if !active {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("AirPods", systemImage: "airpodspro") { showAirPods = true }
+            }
+        }
+        .safeAreaInset(edge: .bottom) { recordingControl }
+        .sheet(isPresented: $showAirPods) { LiveAirPodsConnectionSheet(motionManager: motionManager) }
         .onAppear {
+            motionManager.prepareAirPodsConnection()
             #if os(iOS)
-            motionManager.prepareCameraPreview()
+            if config.recordReferenceVideo { motionManager.prepareCameraPreview() }
             #endif
         }
         .onDisappear {
@@ -58,317 +56,185 @@ struct RecordingComposerView: View {
             motionManager.stopCameraPreview()
             #endif
         }
-        .onReceive(timer) { date in
-            nowTick = date
+        .onReceive(timer) { nowTick = $0 }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { motionManager.prepareAirPodsConnection() }
+        }
+        .onChange(of: config.recordReferenceVideo) { _, enabled in
+            guard !active else { return }
+            #if os(iOS)
+            if enabled { motionManager.prepareCameraPreview() }
+            else { motionManager.stopCameraPreview() }
+            #endif
         }
     }
 
-    // MARK: - Subviews
+    private var connectionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(motionManager.hasFreshMotion ? "AirPods motion connected" : "Connect your AirPods",
+                      systemImage: motionManager.hasFreshMotion ? "checkmark.circle.fill" : "airpodspro")
+                    .font(.headline)
+                    .foregroundStyle(motionManager.hasFreshMotion ? .green : .orange)
+                Spacer()
+                if motionManager.isRunning { Text(elapsed).monospacedDigit() }
+            }
+            Text(motionManager.hasFreshMotion ? "Fresh samples are arriving from your AirPods." : motionManager.airPodsMessage)
+                .font(.subheadline).foregroundStyle(.secondary)
+            if !motionManager.hasFreshMotion {
+                Button("Connect or retry AirPods") { showAirPods = true }
+                    .buttonStyle(.bordered)
+            }
+            if active {
+                Text("\(motionManager.capturedMotionSamples.formatted()) motion samples saved")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 16))
+    }
 
-    @ViewBuilder
-    private var cameraSurface: some View {
+    private var setup: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("See what the model detects").font(.title2.bold())
+                Text("Start a short test, then compare the predictions with what you actually did. The app saves the motion and both model outputs.")
+                    .foregroundStyle(.secondary)
+            }
+            Picker("Model under test", selection: $config.eatingDetectorMode) {
+                ForEach(EatingDetectorMode.allCases) { Text($0.title).tag($0) }
+            }
+            Text(config.eatingDetectorMode.explanation).font(.caption).foregroundStyle(.secondary)
+            Picker("Activity (optional)", selection: $config.activityPreset) {
+                Text("Unspecified / other").tag(ActivityPreset.custom)
+                ForEach(ActivityPreset.allCases.filter { $0 != .custom }) { Text($0.displayName).tag($0) }
+            }
+            if config.activityPreset == .custom {
+                TextField("Optional activity note", text: $config.customActivity)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Toggle("Save reference video", isOn: $config.recordReferenceVideo)
+            Text("Detection uses only AirPods motion. Video is optional evidence for later label review.")
+                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Research options") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Food texture", selection: $config.mealTexture) {
+                        ForEach(MealTexture.allCases) { Text($0.title).tag($0) }
+                    }
+                    Toggle("Benchmark candidate", isOn: Binding(
+                        get: { config.recordReferenceVideo && config.goldLockCandidate },
+                        set: { config.goldLockCandidate = $0 }))
+                        .disabled(!config.recordReferenceVideo)
+                    TextField("Session notes", text: $sessionNotes, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Activity selections are context, not verified labels. Motion-only checks stay unlabelled.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(.top, 10)
+            }
+        }
+        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var predictionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Model prediction").font(.subheadline).foregroundStyle(.secondary)
+            if !motionManager.hasFreshMotion {
+                Label("Waiting for motion", systemImage: "pause.circle")
+                    .font(.title2.bold())
+                Text("No prediction is valid while the motion stream is missing.")
+                    .foregroundStyle(.secondary)
+            } else if !hasDrivingPrediction {
+                ProgressView("Gathering enough motion…")
+            } else {
+                Label(motionManager.isChewing ? "Chewing detected" : "No chewing detected",
+                      systemImage: motionManager.isChewing ? "waveform" : "circle")
+                    .font(.title2.bold())
+                    .foregroundStyle(motionManager.isChewing ? .orange : .primary)
+                Text(config.eatingDetectorMode.title).font(.caption).foregroundStyle(.secondary)
+                if config.eatingDetectorMode == .bundledChewNetWithShadow,
+                   motionManager.exportedDetectorProbability != nil {
+                    LabeledContent("Experimental shadow", value: motionManager.exportedDetectorChewing ? "Chewing" : "No chewing")
+                        .font(.subheadline)
+                }
+            }
+            Text("Predictions are unverified until compared with independent labels.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var hasDrivingPrediction: Bool {
+        switch config.eatingDetectorMode {
+        case .bundledChewNetWithShadow: return motionManager.hasChewNetPrediction
+        case .exportedDetectorExperimental: return motionManager.exportedDetectorProbability != nil
+        }
+    }
+
+    private var signalDetails: some View {
+        DisclosureGroup("Signal details") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(motionManager.statusText).font(.caption)
+                MotionWaveformView(samples: motionManager.recentSamples).frame(height: 100)
+                LabeledContent("Model score", value: String(format: "%.3f", motionManager.latestSmoothed))
+                if let score = motionManager.exportedDetectorProbability {
+                    LabeledContent("Experimental score", value: String(format: "%.3f", score))
+                }
+            }.padding(.top, 12)
+        }
+        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder private var referencePreview: some View {
         #if os(iOS)
         if let session = motionManager.captureSession {
             CameraPreviewView(session: session)
-                .ignoresSafeArea(edges: [])
-        } else if AVCaptureDevice.authorizationStatus(for: .video) == .denied ||
-                  AVCaptureDevice.authorizationStatus(for: .video) == .restricted {
-            VStack(spacing: 16) {
-                Image(systemName: "video.slash")
-                    .font(.largeTitle)
-                    .foregroundColor(.white.opacity(0.7))
-                #if targetEnvironment(macCatalyst)
-                Text("Camera access was denied.\nGo to System Settings → Privacy & Security → Camera and enable ChewSenseLive.")
-                    .font(.callout)
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                Button("Open System Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
-                        UIApplication.shared.open(url)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                #else
-                Text("Camera access is required to record sessions.")
-                    .font(.callout)
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                Button("Open Settings") {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                #endif
-            }
-            .padding()
+                .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 16))
         } else {
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(motionManager.statusText)
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-        }
-        #else
-        VStack(spacing: 12) {
-            Image(systemName: "video.slash")
-                .font(.largeTitle)
-                .foregroundColor(.white.opacity(0.7))
-            Text("Camera preview is unavailable on this platform.")
-                .foregroundColor(.white.opacity(0.7))
+            Text("Reference video: \(motionManager.statusText)").font(.caption).foregroundStyle(.secondary)
         }
         #endif
     }
 
-    private var topBar: some View {
-        HStack {
-            if motionManager.isRunning {
-                Label("REC", systemImage: "record.circle.fill")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.red.opacity(0.85))
-                    .clipShape(Capsule())
-
-                Text(elapsedString)
-                    .font(.title3.monospacedDigit().weight(.semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(Capsule())
-            } else {
-                Text(motionManager.statusText)
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.45))
-                    .clipShape(Capsule())
-            }
-
-            Spacer()
-
-            Button {
-                onCancel()
-            } label: {
-                Image(systemName: "xmark")
-                    .foregroundColor(.white)
-                    .padding(10)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(Circle())
-            }
-            .disabled(motionManager.isStartingSession || motionManager.isFinalizingSession)
-            .opacity(motionManager.isRunning || motionManager.isStartingSession ? 0 : 1)
-            .accessibilityLabel("Close")
-        }
-    }
-
-    @ViewBuilder
-    private var recordingHUD: some View {
-        if motionManager.isRunning {
-            VStack(alignment: .leading, spacing: 10) {
-
-                // MARK: Expandable sensor panel
-                if showSensorPanel {
-                    HStack(alignment: .top, spacing: 10) {
-                        MotionWaveformView(samples: motionManager.recentSamples)
-                            .frame(maxWidth: .infinity, minHeight: 110, maxHeight: 130)
-
-                        HeadOrientationView(attitude: motionManager.latestAttitude)
-                            .frame(width: 110, height: 110)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                // MARK: Chewing label + panel toggle + raw/smooth numbers
-                HStack {
-                    Label(
-                        motionManager.isChewing ? "Chewing" : "Not Chewing",
-                        systemImage: motionManager.isChewing ? "circle.fill" : "circle"
-                    )
-                    .font(.callout.weight(.semibold))
-                    .foregroundColor(motionManager.isChewing ? .orange : .blue)
-
-                    Spacer()
-
-                    Text(String(format: "raw %.2f  smooth %.2f",
-                                motionManager.latestProb,
-                                motionManager.latestSmoothed))
-                        .font(.caption.monospacedDigit())
-                        .foregroundColor(.white.opacity(0.85))
-
-                    // Toggle sensor panel
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            showSensorPanel.toggle()
-                        }
-                    } label: {
-                        Image(systemName: showSensorPanel ? "waveform.path.ecg" : "waveform")
-                            .font(.callout)
-                            .foregroundColor(showSensorPanel ? .orange : .white.opacity(0.75))
-                            .padding(6)
-                            .background(Color.white.opacity(0.12))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel(showSensorPanel ? "Hide sensor panel" : "Show sensor panel")
-                }
-
-                ProbabilityBar(
-                    value: motionManager.latestSmoothed,
-                    high: RuntimeConfig.highThreshold,
-                    low: RuntimeConfig.lowThreshold
-                )
-                .frame(height: 14)
-
-                if motionManager.mealMetrics.latestCue == .slowDown {
-                    Label("Try a slightly slower, steadier pace", systemImage: "tortoise")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.orange)
-                        .transition(.opacity)
-                }
-            }
-            .padding(12)
-            .background(Color.black.opacity(0.55))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.bottom, 12)
-        }
-    }
-
-    private var controlBar: some View {
-        VStack(spacing: 12) {
-            if !motionManager.isRunning && !motionManager.isStartingSession && !motionManager.isFinalizingSession {
-                LiveGuidanceView(stage: .record)
-                    .padding(.horizontal, 8)
-                presetCompactPicker
-            }
-            HStack {
-                Spacer()
-                recordButton
-                Spacer()
-            }
-        }
-    }
-
-    /// Inline preset picker shown above the record button so the user
-    /// always picks an activity tag *before* recording. Detection params
-    /// are owned by the deployed model and are not editable here.
-    private var presetCompactPicker: some View {
-        VStack(spacing: 8) {
-            Menu {
-                ForEach(ActivityPreset.allCases) { preset in
-                    Button {
-                        config.activityPreset = preset
-                    } label: {
-                        Label(preset.displayName, systemImage: preset.systemImage)
-                    }
-                }
-            } label: {
-                HStack {
-                    Image(systemName: config.activityPreset.systemImage)
-                    Text(config.activityPreset.displayName)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.55))
-                .foregroundColor(.white)
-                .clipShape(Capsule())
-            }
-
-            if config.activityPreset == .custom {
-                TextField("Describe the activity", text: $config.customActivity)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal, 24)
-            }
-
-            Picker("Texture", selection: $config.mealTexture) {
-                ForEach(MealTexture.allCases) { texture in
-                    Text(texture.title).tag(texture)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 24)
-
-            Toggle(isOn: $config.goldLockCandidate) {
-                Text("Mark as benchmark candidate")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.white)
-            }
-            .toggleStyle(.switch)
-            .padding(.horizontal, 24)
-
-            if !config.isPresetReadyToRecord {
-                Text("Add a description to enable recording.")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
-        }
-    }
-
-    private var recordButton: some View {
+    private var recordingControl: some View {
         Button(action: toggleRecording) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white, lineWidth: 4)
-                    .frame(width: 78, height: 78)
-
-                if motionManager.isStartingSession || motionManager.isFinalizingSession {
-                    ProgressView()
-                        .tint(.white)
-                } else if motionManager.isRunning {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.red)
-                        .frame(width: 30, height: 30)
-                } else {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 64, height: 64)
-                }
+            HStack {
+                if motionManager.isStartingSession || motionManager.isFinalizingSession { ProgressView() }
+                Label(controlTitle, systemImage: motionManager.isRunning ? "stop.fill" : "record.circle")
             }
+            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 10)
         }
-        .buttonStyle(.plain)
-        .disabled(
-            motionManager.isStartingSession
-                || motionManager.isFinalizingSession
-                || (!motionManager.isRunning && !config.isPresetReadyToRecord)
-        )
-        .accessibilityLabel(motionManager.isRunning ? "Stop Recording" : "Start Recording")
+        .buttonStyle(.borderedProminent)
+        .tint(motionManager.isRunning ? .red : .blue)
+        .disabled(motionManager.isStartingSession || motionManager.isFinalizingSession
+                  || (!motionManager.isRunning && !motionManager.hasFreshMotion))
+        .accessibilityIdentifier("liveCheckStartStop")
+        .padding().background(.bar)
     }
 
-    // MARK: - Helpers
+    private var controlTitle: String {
+        if motionManager.isFinalizingSession { return "Saving check…" }
+        if motionManager.isStartingSession { return "Starting…" }
+        return motionManager.isRunning ? "Stop and save" : "Start model check"
+    }
 
     private func toggleRecording() {
-        if motionManager.isRunning {
-            motionManager.stop()
-        } else {
-            // Detection params come from the bundled model; the only thing
-            // the UI provides is the dataset metadata for this session.
-            guard config.isPresetReadyToRecord else { return }
-            var metadata = MotionManager.SessionMetadataInput()
-            metadata.testScenario = config.testScenario
-            metadata.sessionNotes = sessionNotes
-            metadata.configJSON = config.toSessionConfigJSON()
-            metadata.activitySlug = config.activitySlug
-            metadata.activityLabel = config.activityLabel
-            metadata.expectedLabelClass = config.activityPreset.expectedLabelClass.rawValue
-            metadata.goldLockCandidate = config.goldLockCandidate
-            metadata.mealTexture = config.mealTexture
-            motionManager.start(metadata: metadata)
-        }
+        if motionManager.isRunning { motionManager.stop(); return }
+        var metadata = MotionManager.SessionMetadataInput()
+        metadata.testScenario = config.testScenario
+        metadata.sessionNotes = sessionNotes
+        metadata.configJSON = config.toSessionConfigJSON()
+        metadata.activitySlug = config.activitySlug
+        metadata.activityLabel = config.activityLabel
+        metadata.expectedLabelClass = config.effectiveExpectedLabelClass
+        metadata.goldLockCandidate = config.recordReferenceVideo && config.goldLockCandidate
+        metadata.mealTexture = config.mealTexture
+        metadata.recordReferenceVideo = config.recordReferenceVideo
+        motionManager.start(metadata: metadata)
     }
 
-    private var elapsedString: String {
-        guard let started = motionManager.recordingStartedAt else { return "00:00" }
-        // Reference nowTick so the timer publisher actually drives recomputation.
-        let elapsed = max(0, nowTick.timeIntervalSince(started))
-        let total = Int(elapsed)
-        return String(format: "%02d:%02d", total / 60, total % 60)
+    private var elapsed: String {
+        let seconds = max(0, Int(nowTick.timeIntervalSince(motionManager.recordingStartedAt ?? nowTick)))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }

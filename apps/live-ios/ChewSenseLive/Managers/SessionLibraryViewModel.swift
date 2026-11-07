@@ -29,6 +29,17 @@ struct ReviewSessionSummary: Identifiable, Hashable {
     let activitySlug: String?
     let activityLabel: String?
     let goldLockCandidate: Bool
+    let motionSampleCount: Int
+    let exportedPredictionCount: Int
+    let modelMode: String?
+
+    var captureStatus: String {
+        if motionSampleCount == 0 { return "No motion captured" }
+        if predictionCount == 0 && exportedPredictionCount == 0 { return "No model output" }
+        return "Unreviewed check"
+    }
+
+    var displayTitle: String { activityLabel ?? activitySlug ?? "Model check" }
 
     var subtitle: String {
         if let startedAt {
@@ -116,6 +127,12 @@ final class SessionLibraryViewModel: ObservableObject {
         sessions.first { $0.sessionURL == url }
     }
 
+    /// Display-only telemetry. Never materialized as reviewed labels.
+    func predictionSpans(for url: URL) -> [PredictionSpan] {
+        readPredictionWindows(url.appendingPathComponent("predictions.csv"))
+            ?? readPredictionSpansFromMotion(url.appendingPathComponent("motion.csv"))
+    }
+
     /// Permanently deletes a session bundle from disk and refreshes the list.
     @discardableResult
     func delete(_ summary: ReviewSessionSummary) -> Bool {
@@ -142,11 +159,20 @@ final class SessionLibraryViewModel: ObservableObject {
         let sessionID = metadata["session_id"] as? String
         let startedAt = parseDate(metadata["started_at"] as? String) ?? fileDate(url)
         let title = sessionID?.isEmpty == false ? sessionID! : url.lastPathComponent
-        let predictionSpans = readPredictionSpans(url.appendingPathComponent("predictions.csv"))
+        let predictionWindows = readPredictionWindows(url.appendingPathComponent("predictions.csv"))
+        let motionFacts = readMotionFacts(url.appendingPathComponent("motion.csv"))
+        let shadowText = (try? String(contentsOf: url.appendingPathComponent("eating_detector.csv"), encoding: .utf8)) ?? ""
+        let shadow = SessionCSV.parse(shadowText)
+        let probabilityIndex = shadow.header.firstIndex(of: "probability")
+        let shadowCount = shadow.rows.filter { row in
+            guard let index = probabilityIndex, index < row.count,
+                  let value = Double(row[index]), value.isFinite else { return false }
+            return true
+        }.count
         let reviewSegments = readReviewSegments(url.appendingPathComponent("review_segments.json"))
         let duration = max(
-            readMotionDuration(url.appendingPathComponent("motion.csv")),
-            predictionSpans.map(\.endTime).max() ?? 0,
+            motionFacts.duration,
+            predictionWindows?.map(\.endTime).max() ?? 0,
             reviewSegments.map(\.endTime).max() ?? 0
         )
         let files = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
@@ -165,7 +191,7 @@ final class SessionLibraryViewModel: ObservableObject {
             startedAt: startedAt,
             duration: duration,
             reviewStatus: reviewStatus,
-            predictionCount: predictionSpans.count,
+            predictionCount: predictionWindows?.count ?? 0,
             correctionCount: reviewSegments.count,
             hasVideo: hasVideo,
             hasCorrections: !reviewSegments.isEmpty,
@@ -174,7 +200,10 @@ final class SessionLibraryViewModel: ObservableObject {
             exportedAt: exportedAt,
             activitySlug: (metadata["activity"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             activityLabel: (metadata["activity_label"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            goldLockCandidate: (metadata["gold_lock_candidate"] as? Bool) ?? false
+            goldLockCandidate: (metadata["gold_lock_candidate"] as? Bool) ?? false,
+            motionSampleCount: motionFacts.samples,
+            exportedPredictionCount: shadowCount,
+            modelMode: (metadata["eating_detector"] as? [String: Any])?["mode"] as? String
         )
     }
 
@@ -186,22 +215,18 @@ final class SessionLibraryViewModel: ObservableObject {
         return object
     }
 
-    private func readPredictionSpans(_ url: URL) -> [PredictionSpan] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return readPredictionSpansFromMotion(url.deletingLastPathComponent().appendingPathComponent("motion.csv"))
-        }
+    private func readPredictionWindows(_ url: URL) -> [PredictionSpan]? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let table = SessionCSV.parse(text)
         guard let startIndex = table.header.firstIndex(of: "window_start"),
               let endIndex = table.header.firstIndex(of: "window_end"),
-              let stateIndex = table.header.firstIndex(of: "state") else {
-            return readPredictionSpansFromMotion(url.deletingLastPathComponent().appendingPathComponent("motion.csv"))
-        }
+              let stateIndex = table.header.firstIndex(of: "state") else { return nil }
         let base = table.rows.compactMap { row -> Double? in
             guard startIndex < row.count else { return nil }
             return Double(row[startIndex])
         }.first ?? 0
 
-        let spans = table.rows.compactMap { row -> PredictionSpan? in
+        return table.rows.compactMap { row -> PredictionSpan? in
             guard max(startIndex, endIndex, stateIndex) < row.count,
                   let start = Double(row[startIndex]),
                   let end = Double(row[endIndex]) else {
@@ -217,11 +242,6 @@ final class SessionLibraryViewModel: ObservableObject {
                 )
             )
         }
-
-        if spans.isEmpty {
-            return readPredictionSpansFromMotion(url.deletingLastPathComponent().appendingPathComponent("motion.csv"))
-        }
-        return spans
     }
 
     /// Fallback path: synthesize display-only spans from the derived
@@ -290,16 +310,17 @@ final class SessionLibraryViewModel: ObservableObject {
         }
     }
 
-    private func readMotionDuration(_ url: URL) -> Double {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
+    private func readMotionFacts(_ url: URL) -> (duration: Double, samples: Int) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return (0, 0) }
         let table = SessionCSV.parse(text)
-        guard let timestampIndex = table.header.firstIndex(of: "timestamp") else { return 0 }
+        guard let timestampIndex = table.header.firstIndex(of: "timestamp") else { return (0, 0) }
         let timestamps = table.rows.compactMap { row -> Double? in
             guard timestampIndex < row.count else { return nil }
-            return Double(row[timestampIndex].trimmingCharacters(in: .whitespacesAndNewlines))
+            guard let time = Double(row[timestampIndex].trimmingCharacters(in: .whitespacesAndNewlines)), time.isFinite else { return nil }
+            return time
         }
-        guard let first = timestamps.first, let last = timestamps.last else { return 0 }
-        return max(0, last - first)
+        guard let first = timestamps.first, let last = timestamps.last else { return (0, 0) }
+        return (max(0, last - first), timestamps.count)
     }
 
     private func parseDate(_ value: String?) -> Date? {

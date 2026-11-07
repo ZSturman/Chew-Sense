@@ -8,6 +8,8 @@ import XCTest
 
 @MainActor
 final class CollectionRecommendationTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suite: String!
     func testGuidanceKeepsGroundTruthOutOfLiveCapture() {
         XCTAssertEqual(LiveGuidanceStage.prepare.title, "Prepare a field test")
         XCTAssertTrue(LiveGuidanceStage.record.nextStep.contains("does not create ground truth"))
@@ -16,11 +18,13 @@ final class CollectionRecommendationTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        clearConfigurationDefaults()
+        suite = "LiveConfigurationTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suite)
     }
 
     override func tearDown() {
-        clearConfigurationDefaults()
+        defaults.removePersistentDomain(forName: suite)
+        defaults = nil
         super.tearDown()
     }
 
@@ -47,7 +51,7 @@ final class CollectionRecommendationTests: XCTestCase {
             targetMinutes: 6.0
         )
 
-        let config = DetectionConfiguration()
+        let config = DetectionConfiguration(defaults: defaults)
         config.applyRecommendation(recommendation)
 
         XCTAssertEqual(config.activityPreset, .headShake)
@@ -56,15 +60,16 @@ final class CollectionRecommendationTests: XCTestCase {
         XCTAssertEqual(config.testScenario, recommendation.scenarioText)
     }
 
-    private func clearConfigurationDefaults() {
-        let defaults = UserDefaults.standard
-        for key in [
-            "config.testScenario",
-            "config.activityPreset",
-            "config.customActivity",
-            "config.goldLockCandidate",
-        ] {
-            defaults.removeObject(forKey: key)
-        }
+    func testMotionOnlyContextCannotBecomeGroundTruthOrBenchmarkData() throws {
+        let config = DetectionConfiguration(defaults: defaults)
+        XCTAssertFalse(config.recordReferenceVideo)
+        XCTAssertTrue(config.isPresetReadyToRecord)
+        XCTAssertEqual(config.effectiveExpectedLabelClass, "unknown")
+        config.activityPreset = .baseline
+        config.goldLockCandidate = true
+        let data = try XCTUnwrap(config.toSessionConfigJSON().data(using: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(payload["expected_label_class"] as? String, "unknown")
+        XCTAssertEqual(payload["gold_lock_candidate"] as? Bool, false)
     }
 }

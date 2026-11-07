@@ -18,6 +18,8 @@ struct MainContentView: View {
     @State private var selectedSessionURL: URL?
     @State private var isComposingNew = false
     @State private var showConfigurationInspector = false
+    @State private var showAirPods = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var sessionPendingDeletion: ReviewSessionSummary?
 
     #if os(iOS)
@@ -30,15 +32,17 @@ struct MainContentView: View {
     // MARK: - Body
 
     var body: some View {
-        #if os(iOS)
-        if horizontalSizeClass == .compact {
-            phoneBody
-        } else {
+        Group {
+            #if os(iOS)
+            if horizontalSizeClass == .compact { phoneBody } else { splitBody }
+            #else
             splitBody
+            #endif
         }
-        #else
-        splitBody
-        #endif
+        .sheet(isPresented: $showAirPods) { LiveAirPodsConnectionSheet(motionManager: motionManager) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { motionManager.endAirPodsConnectionCheck() }
+        }
     }
 
     // MARK: - iPhone (NavigationStack) layout
@@ -48,20 +52,21 @@ struct MainContentView: View {
     private var phoneBody: some View {
         NavigationStack {
             phoneSidebar
-                .navigationTitle("Sessions")
+                .navigationTitle("ChewSense Live")
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            sessionLibrary.refresh()
+                            showConfigurationInspector = true
                         } label: {
-                            Image(systemName: "arrow.clockwise")
+                            Image(systemName: "gearshape")
                         }
+                        .accessibilityLabel("Advanced test settings")
                     }
                     ToolbarItem(placement: .secondaryAction) {
                         NavigationLink {
                             MetricsView(metrics: motionManager.mealMetrics)
                         } label: {
-                            Label("Live Metrics", systemImage: "chart.bar.xaxis")
+                            Label("Research metrics", systemImage: "chart.bar.xaxis")
                         }
                     }
                 }
@@ -84,6 +89,7 @@ struct MainContentView: View {
                     LiveSessionDetailView(
                         sessionURL: url,
                         summary: sessionLibrary.summary(for: url),
+                        predictions: sessionLibrary.predictionSpans(for: url),
                         motionManager: motionManager
                     )
                 }
@@ -93,7 +99,8 @@ struct MainContentView: View {
                 config: config,
                 isEditable: !motionManager.isRunning
                     && !motionManager.isStartingSession
-                    && !motionManager.isFinalizingSession
+                    && !motionManager.isFinalizingSession,
+                onClose: { showConfigurationInspector = false }
             )
         }
         .onAppear {
@@ -131,43 +138,20 @@ struct MainContentView: View {
     /// (instead of `List(selection:)`) so tapping a session updates
     /// `selectedSessionURL` and triggers the `navigationDestination(item:)` push.
     private var phoneSidebar: some View {
-        VStack(spacing: 0) {
-            capturePanel
-                .padding()
-
-            Divider()
-
-            List {
+        List {
+            Section { capturePanel.padding(.vertical, 8) }
+            Section("Recent checks") {
                 if sessionLibrary.sessions.isEmpty {
-                    ContentUnavailableView(
-                        "No Sessions",
-                        systemImage: "film.stack",
-                        description: Text("Tap New to record your first session.")
-                    )
-                    .listRowSeparator(.hidden)
-                } else {
-                    Section("Recorded Sessions") {
-                        ForEach(sessionLibrary.sessions) { session in
-                            Button {
-                                selectedSessionURL = session.sessionURL
-                            } label: {
-                                SessionSidebarRow(session: session)
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    sessionPendingDeletion = session
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    sessionPendingDeletion = session
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                    Text("Your saved tests will appear here.").foregroundStyle(.secondary)
+                }
+                ForEach(sessionLibrary.sessions) { session in
+                    Button { selectedSessionURL = session.sessionURL } label: {
+                        SessionSidebarRow(session: session)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { sessionPendingDeletion = session } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
@@ -181,21 +165,22 @@ struct MainContentView: View {
     private var splitBody: some View {
         NavigationSplitView {
             sidebar
-                .navigationTitle("Sessions")
+                .navigationTitle("ChewSense Live")
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            sessionLibrary.refresh()
+                            showConfigurationInspector = true
                         } label: {
-                            Image(systemName: "arrow.clockwise")
+                            Image(systemName: "gearshape")
                         }
-                        .help("Refresh Sessions")
+                        .accessibilityLabel("Advanced test settings")
+                        .help("Advanced test settings")
                     }
                     ToolbarItem(placement: .secondaryAction) {
                         NavigationLink {
                             MetricsView(metrics: motionManager.mealMetrics)
                         } label: {
-                            Label("Live Metrics", systemImage: "chart.bar.xaxis")
+                            Label("Research metrics", systemImage: "chart.bar.xaxis")
                         }
                     }
                 }
@@ -207,7 +192,8 @@ struct MainContentView: View {
                 config: config,
                 isEditable: !motionManager.isRunning
                     && !motionManager.isStartingSession
-                    && !motionManager.isFinalizingSession
+                    && !motionManager.isFinalizingSession,
+                onClose: { showConfigurationInspector = false }
             )
         }
         .onAppear {
@@ -247,89 +233,55 @@ struct MainContentView: View {
     // MARK: - Shared sub-views (iPad / Mac split layout)
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            capturePanel
-                .padding()
-
-            Divider()
-
-            List(selection: $selectedSessionURL) {
+        List(selection: $selectedSessionURL) {
+            Section { capturePanel.padding(.vertical, 8) }
+            Section("Recent checks") {
                 if sessionLibrary.sessions.isEmpty {
-                    ContentUnavailableView(
-                        "No Sessions",
-                        systemImage: "film.stack",
-                        description: Text("Tap New to record your first session.")
-                    )
-                    .listRowSeparator(.hidden)
-                } else {
-                    Section("Recorded Sessions") {
-                        ForEach(sessionLibrary.sessions) { session in
-                            SessionSidebarRow(session: session)
-                                .tag(session.sessionURL)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        sessionPendingDeletion = session
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        sessionPendingDeletion = session
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
+                    Text("Your saved tests will appear here.").foregroundStyle(.secondary)
+                }
+                ForEach(sessionLibrary.sessions) { session in
+                    SessionSidebarRow(session: session).tag(session.sessionURL)
+                        .contextMenu {
+                            Button(role: .destructive) { sessionPendingDeletion = session } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
-                    }
                 }
             }
         }
     }
 
     private var capturePanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Capture")
-                        .font(.headline)
-                    Text(motionManager.statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Test chewing detection", systemImage: "airpodspro")
+                .font(.title3.bold())
+            Text("See what the current model detects from AirPods motion. Use Collect for guided training recordings.")
+                .foregroundStyle(.secondary)
+            Button {
+                showAirPods = true
+            } label: {
+                HStack {
+                    Label(motionManager.hasFreshMotion ? "AirPods motion ready" : "Connect AirPods",
+                          systemImage: motionManager.hasFreshMotion ? "checkmark.circle.fill" : "airpodspro")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption)
                 }
-                Spacer()
-                #if os(iOS)
-                RoutePickerView()
-                    .frame(width: 34, height: 34)
-                    .accessibilityLabel("Select AirPods")
-                #endif
-                Button {
-                    showConfigurationInspector.toggle()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                }
-                .buttonStyle(.bordered)
-                .help("Recording Configuration")
             }
-
+            .accessibilityIdentifier("connectAirPodsButton")
+            Text(config.eatingDetectorMode.title)
+                .font(.caption).foregroundStyle(.secondary)
             Button(action: startNewComposition) {
-                Label("New", systemImage: "plus.circle.fill")
-                    .frame(maxWidth: .infinity)
+                Label("New model check", systemImage: "plus.circle.fill")
+                    .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.green)
-            .disabled(
-                motionManager.isRunning
-                    || motionManager.isStartingSession
-                    || motionManager.isFinalizingSession
-            )
+            .disabled(motionManager.isRunning || motionManager.isStartingSession || motionManager.isFinalizingSession)
             .accessibilityIdentifier("newFieldTestButton")
-
-            LiveGuidanceView(stage: .prepare)
-
+            Text("Connect → record a short check → inspect the saved predictions.")
+                .font(.caption).foregroundStyle(.secondary)
             if CollectionRecommendations.current.hasRecommendations {
-                Divider()
-                nextToRecordPanel
+                DisclosureGroup("Suggested checks") { nextToRecordPanel.padding(.top, 8) }
+                    .font(.subheadline)
             }
         }
     }
@@ -379,6 +331,7 @@ struct MainContentView: View {
             LiveSessionDetailView(
                 sessionURL: selectedSessionURL,
                 summary: sessionLibrary.summary(for: selectedSessionURL),
+                predictions: sessionLibrary.predictionSpans(for: selectedSessionURL),
                 motionManager: motionManager
             )
             .id(selectedSessionURL)
@@ -386,7 +339,7 @@ struct MainContentView: View {
             ContentUnavailableView(
                 "Select a Session",
                 systemImage: "waveform.path.ecg.rectangle",
-                description: Text("Choose a recorded field-test bundle from the sidebar, or tap New to record.")
+                description: Text("Choose a saved check, or start a new model check.")
             )
         }
     }
@@ -467,87 +420,6 @@ private struct NextRecommendationRow: View {
     }
 }
 
-private struct LiveRecordingDetailView: View {
-    @ObservedObject var motionManager: MotionManager
-    @ObservedObject var config: DetectionConfiguration
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Live Recording")
-                            .font(.title2.weight(.semibold))
-                        Text(motionManager.statusText)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Label(motionManager.isChewing ? "Chewing" : "Not Chewing", systemImage: motionManager.isChewing ? "circle.fill" : "circle")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(motionManager.isChewing ? .orange : .blue)
-                }
-
-                LiveGuidanceView(stage: .record)
-
-                #if os(iOS)
-                if let captureSession = motionManager.captureSession {
-                    CameraPreviewView(session: captureSession)
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 560)
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                #endif
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Prediction Timeline")
-                        .font(.headline)
-                    LivePredictionTimelineView(
-                        spans: motionManager.livePredictionSpans,
-                        duration: motionManager.liveTimelineDuration
-                    )
-                    .frame(height: 86)
-                    .background(Color.gray.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                ProbabilityView(
-                    latestProb: motionManager.latestProb,
-                    smoothedProb: motionManager.latestSmoothed,
-                    isChewing: motionManager.isChewing,
-                    highThreshold: RuntimeConfig.highThreshold,
-                    lowThreshold: RuntimeConfig.lowThreshold
-                )
-
-                if !motionManager.logPreview.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Recent Output")
-                            .font(.headline)
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 3) {
-                                ForEach(motionManager.logPreview.suffix(18), id: \.self) { line in
-                                    Text(line)
-                                        .font(.system(.caption2, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 180)
-                    }
-                }
-            }
-            .padding(20)
-        }
-        .navigationTitle("Recording")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 private struct LivePredictionTimelineView: View {
     let spans: [PredictionSpan]
     let duration: Double
@@ -623,47 +495,26 @@ private struct LivePredictionTimelineView: View {
 
 private struct SessionSidebarRow: View {
     let session: ReviewSessionSummary
-
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "waveform.path.ecg.rectangle")
-                .foregroundStyle(.blue)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(session.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-
-                Text(session.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                HStack(spacing: 6) {
-                    SessionBadge(text: session.formattedDuration, systemImage: "clock")
-                    SessionBadge(text: "captured", systemImage: "tray.full")
-                    if let label = session.activityLabel ?? session.activitySlug {
-                        SessionBadge(text: label, systemImage: "figure.walk")
-                    }
-                    if session.goldLockCandidate {
-                        SessionBadge(text: "benchmark", systemImage: "lock.fill")
-                    }
-                    if session.hasCorrections {
-                        SessionBadge(text: "\(session.correctionCount)", systemImage: "pencil")
-                    }
-                    if session.predictionCount > 0 {
-                        SessionBadge(text: "pred", systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(session.displayTitle).font(.headline).lineLimit(1)
+                Spacer()
+                Text(session.formattedDuration).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-        }
+            Text(session.subtitle).font(.caption).foregroundStyle(.secondary)
+            Label(session.captureStatus,
+                  systemImage: session.motionSampleCount == 0 ? "exclamationmark.triangle" : "waveform")
+                .font(.caption)
+                .foregroundStyle(session.motionSampleCount == 0 ? .orange : .secondary)
+        }.padding(.vertical, 4)
     }
 }
 
 private struct LiveSessionDetailView: View {
     let sessionURL: URL
     let summary: ReviewSessionSummary?
+    let predictions: [PredictionSpan]
     @ObservedObject var motionManager: MotionManager
 
     @State private var mealSummary: StoredMealSummary?
@@ -675,48 +526,63 @@ private struct LiveSessionDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(summary?.title ?? sessionURL.lastPathComponent)
-                    .font(.title2.weight(.semibold))
-                Text("This app captures synchronized video, AirPods motion, and model telemetry. It does not create or edit ground truth.")
-                    .foregroundStyle(.secondary)
-
-                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                    GridRow {
-                        Text("Duration").foregroundStyle(.secondary)
-                        Text(summary?.formattedDuration ?? "--:--")
-                    }
-                    GridRow {
-                        Text("Predictions").foregroundStyle(.secondary)
-                        Text("\(summary?.predictionCount ?? 0)")
-                    }
-                    if let activity = summary?.activityLabel ?? summary?.activitySlug {
-                        GridRow {
-                            Text("Activity").foregroundStyle(.secondary)
-                            Text(activity)
-                        }
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(summary?.displayTitle ?? "Model check").font(.title2.bold())
+                    Text(summary?.subtitle ?? "").foregroundStyle(.secondary)
+                    Label(summary?.captureStatus ?? "Not assessed",
+                          systemImage: (summary?.motionSampleCount ?? 0) == 0 ? "exclamationmark.triangle" : "waveform")
+                        .font(.headline)
+                        .foregroundStyle((summary?.motionSampleCount ?? 0) == 0 ? .orange : .primary)
+                    if (summary?.motionSampleCount ?? 0) == 0 {
+                        Text("No AirPods samples were captured. Connect your AirPods and repeat the check; this result cannot measure model accuracy.")
+                            .foregroundStyle(.secondary)
+                    } else if summary?.captureStatus == "No model output" {
+                        Text("Motion was saved. Keep the next check running until a model prediction appears.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("These are model predictions. Accuracy requires a comparison with independently reviewed labels.")
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                if let mealSummary {
-                    postMealSummary(mealSummary)
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
+                    GridRow { Text("Duration").foregroundStyle(.secondary); Text(summary?.formattedDuration ?? "—") }
+                    GridRow { Text("Motion samples").foregroundStyle(.secondary); Text((summary?.motionSampleCount ?? 0).formatted()) }
+                    GridRow { Text("ChewNet windows").foregroundStyle(.secondary); Text("\(summary?.predictionCount ?? 0)") }
+                    GridRow { Text("Experimental windows").foregroundStyle(.secondary); Text("\(summary?.exportedPredictionCount ?? 0)") }
+                    GridRow { Text("Reference video").foregroundStyle(.secondary); Text(summary?.hasVideo == true ? "Saved" : "Off") }
                 }
-
-                Text("Export this bundle to the computer pipeline. Legacy annotations are preserved only for migration; new chew-cycle and food-entry labels belong to CycleReviewer.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                LiveGuidanceView(stage: .export)
-
+                if !predictions.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Saved prediction timeline").font(.headline)
+                        LivePredictionTimelineView(spans: predictions, duration: summary?.duration ?? 0).frame(height: 86)
+                        Text("Orange: chewing · blue: no chewing. This is not ground truth.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 ShareLink(item: sessionURL) {
-                    Label("Export Session Bundle", systemImage: "square.and.arrow.up")
+                    Label("Export check", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("exportLiveSessionButton")
+                DisclosureGroup("Test details") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(summary?.title ?? sessionURL.lastPathComponent).font(.caption.monospaced())
+                        if let mode = summary?.modelMode, let detector = EatingDetectorMode(rawValue: mode) {
+                            Text(detector.title)
+                        }
+                        Text("Use ChewSense Review on the Mac for independent labels and model evaluation. Original motion and prediction files are included in the export.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(.top, 8)
+                }
+                if let mealSummary, mealSummary.chewEventModelPromoted {
+                    DisclosureGroup("Research: chewing cadence") { postMealSummary(mealSummary) }
+                }
             }
             .padding(24)
         }
-        .navigationTitle("Field Test")
+        .navigationTitle("Saved check")
         .task(id: sessionURL) { loadMealSummary() }
         .confirmationDialog(
             "Use this as a calibration meal?",

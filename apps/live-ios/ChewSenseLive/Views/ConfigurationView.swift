@@ -18,16 +18,17 @@ import Combine
 /// parameters are sourced from the auto-generated `RuntimeConfig` (see
 /// `Generated/NormalizationConstants.swift`) and are exposed read-only.
 final class DetectionConfiguration: ObservableObject {
+    private let defaults: UserDefaults
 
     // MARK: - User-supplied session metadata (persisted between runs)
 
     @Published var testScenario: String {
-        didSet { UserDefaults.standard.set(testScenario, forKey: "config.testScenario") }
+        didSet { defaults.set(testScenario, forKey: "config.testScenario") }
     }
 
     @Published var activityPreset: ActivityPreset {
         didSet {
-            UserDefaults.standard.set(activityPreset.rawValue, forKey: "config.activityPreset")
+            defaults.set(activityPreset.rawValue, forKey: "config.activityPreset")
             // Initialize the gold-lock toggle to the preset's default when it
             // changes, but only on transitions — never blindly overwrite a
             // toggle the user just touched (didSet on goldLockCandidate
@@ -40,25 +41,33 @@ final class DetectionConfiguration: ObservableObject {
     }
 
     @Published var customActivity: String {
-        didSet { UserDefaults.standard.set(customActivity, forKey: "config.customActivity") }
+        didSet { defaults.set(customActivity, forKey: "config.customActivity") }
     }
 
     @Published var goldLockCandidate: Bool {
-        didSet { UserDefaults.standard.set(goldLockCandidate, forKey: "config.goldLockCandidate") }
+        didSet { defaults.set(goldLockCandidate, forKey: "config.goldLockCandidate") }
     }
 
     @Published var mealTexture: MealTexture {
-        didSet { UserDefaults.standard.set(mealTexture.rawValue, forKey: "config.mealTexture") }
+        didSet { defaults.set(mealTexture.rawValue, forKey: "config.mealTexture") }
     }
 
     @Published var eatingDetectorMode: EatingDetectorMode {
-        didSet { UserDefaults.standard.set(eatingDetectorMode.rawValue, forKey: EatingDetectorMode.defaultsKey) }
+        didSet { defaults.set(eatingDetectorMode.rawValue, forKey: EatingDetectorMode.defaultsKey) }
+    }
+
+    @Published var recordReferenceVideo: Bool {
+        didSet { defaults.set(recordReferenceVideo, forKey: "config.recordReferenceVideo") }
+    }
+
+    var effectiveExpectedLabelClass: String {
+        recordReferenceVideo ? activityPreset.expectedLabelClass.rawValue : "unknown"
     }
 
     // MARK: - Init
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         self.testScenario = defaults.string(forKey: "config.testScenario") ?? ""
         let storedPreset = defaults.string(forKey: "config.activityPreset")
             .flatMap(ActivityPreset.init(rawValue:))
@@ -67,20 +76,16 @@ final class DetectionConfiguration: ObservableObject {
         self.goldLockCandidate = defaults.bool(forKey: "config.goldLockCandidate")
         self.mealTexture = defaults.string(forKey: "config.mealTexture")
             .flatMap(MealTexture.init(rawValue:)) ?? .unknown
-        self.eatingDetectorMode = EatingDetectorMode.stored
+        self.eatingDetectorMode = defaults.string(forKey: EatingDetectorMode.defaultsKey)
+            .flatMap(EatingDetectorMode.init(rawValue:)) ?? .bundledChewNetWithShadow
+        self.recordReferenceVideo = defaults.object(forKey: "config.recordReferenceVideo") as? Bool ?? false
     }
 
     // MARK: - Derived values
 
-    /// True when the current preset selection is enough to start a session.
-    /// Custom requires a non-empty custom string; everything else is fine.
+    /// Activity is optional context; the live motion connection gates Start.
     var isPresetReadyToRecord: Bool {
-        switch activityPreset {
-        case .custom:
-            return !customActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        default:
-            return true
-        }
+        true // Activity is optional context; missing context never becomes a label.
     }
 
     /// Display label written into session metadata. For custom presets,
@@ -89,7 +94,8 @@ final class DetectionConfiguration: ObservableObject {
     var activityLabel: String {
         switch activityPreset {
         case .custom:
-            return customActivity.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = customActivity.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? "Unspecified activity" : value
         default:
             return activityPreset.displayName
         }
@@ -135,8 +141,9 @@ final class DetectionConfiguration: ObservableObject {
             "test_scenario": testScenario,
             "activity": activitySlug,
             "activity_label": activityLabel,
-            "expected_label_class": activityPreset.expectedLabelClass.rawValue,
-            "gold_lock_candidate": goldLockCandidate,
+            "expected_label_class": effectiveExpectedLabelClass,
+            "gold_lock_candidate": recordReferenceVideo && goldLockCandidate,
+            "record_reference_video": recordReferenceVideo,
             "meal_texture": mealTexture.rawValue,
             "params_source": "bundled_model"
         ]
@@ -198,37 +205,35 @@ struct DetectionConfigurationInspector: View {
     /// been removed for detection params; only metadata fields below are
     /// affected, and they remain editable until recording starts.
     let isEditable: Bool
+    let onClose: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Field-Test Session")
-                    .font(.headline)
-
-                ActivityPresetSection(config: config, isEditable: isEditable)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(ConfigurationDescriptions.scenario.title)
-                        .font(.caption.weight(.semibold))
-                    TextField("apple chew, walking idle, talking", text: $config.testScenario)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(!isEditable)
-                    Text(ConfigurationDescriptions.scenario.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack {
+                    Text("Advanced settings").font(.headline)
+                    Spacer()
+                    Button("Done", action: onClose)
                 }
 
-                Divider()
+                Toggle("Record reference video", isOn: $config.recordReferenceVideo)
+                    .disabled(!isEditable)
+                Text("Detection uses only AirPods motion. Turn video off for an unlabelled shadow run without camera access.")
+                    .font(.caption).foregroundStyle(.secondary)
 
-                ActiveModelSection()
+                DisclosureGroup("Session metadata") {
+                    ActivityPresetSection(config: config, isEditable: isEditable)
+                    TextField("Optional scenario", text: $config.testScenario)
+                        .textFieldStyle(.roundedBorder).disabled(!isEditable)
+                }
+                DisclosureGroup("Model details and parameters") {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ActiveModelSection()
+                        BundledModelSection()
+                        ExportedEatingDetectorSection(config: config, isEditable: isEditable)
+                    }.padding(.top, 10)
+                }
 
-                Divider()
-
-                BundledModelSection()
-
-                Divider()
-
-                ExportedEatingDetectorSection(config: config, isEditable: isEditable)
             }
             .padding()
         }

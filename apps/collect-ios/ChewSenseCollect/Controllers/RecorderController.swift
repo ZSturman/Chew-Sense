@@ -104,7 +104,7 @@ final class RecorderController: NSObject, ObservableObject {
         guard !CollectionTestMode.isEnabled else { return }
         activateAudioSession()
         do {
-            let player = try AVAudioPlayer(data: Self.connectionTestTone())
+            let player = try AVAudioPlayer(data: AirPodsConnectionTone.data())
             player.volume = 0.35
             connectionTestPlayer = player
             player.prepareToPlay()
@@ -112,23 +112,6 @@ final class RecorderController: NSObject, ObservableObject {
             airPodsMessage = "Test sound plays through \(audioRouteName). Choose your AirPods if you hear it from the device."
             recorder?.reconnectMotion()
         } catch { airPodsMessage = error.localizedDescription }
-    }
-
-    private static func connectionTestTone() -> Data {
-        let rate = 22_050, count = rate * 3 / 10
-        var data = Data()
-        func word<T: FixedWidthInteger>(_ value: T) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-        }
-        data.append(Data("RIFF".utf8)); word(UInt32(36 + count * 2)); data.append(Data("WAVEfmt ".utf8))
-        word(UInt32(16)); word(UInt16(1)); word(UInt16(1)); word(UInt32(rate)); word(UInt32(rate * 2))
-        word(UInt16(2)); word(UInt16(16)); data.append(Data("data".utf8)); word(UInt32(count * 2))
-        for index in 0..<count {
-            let fade = min(1, min(Double(index), Double(count - index - 1)) / 220)
-            word(Int16(sin(2 * .pi * 660 * Double(index) / Double(rate)) * fade * 6_000))
-        }
-        return data
     }
 
     private func makeTimestampString() -> String {

@@ -13,7 +13,7 @@ struct LiveCaptureSnapshot {
     let sessionID: String
     let createdAt: String
     let activity: String
-    let videoFileName: String
+    let videoFileName: String?
     let motionFileName: String
     let videoClockOriginHostTime: Double
     let usedConfirmedVideoOrigin: Bool
@@ -37,7 +37,8 @@ enum LiveCanonicalSessionWriter {
         sessionURL: URL,
         sourceAppVersion: String
     ) throws {
-        let videoURL = sessionURL.appendingPathComponent(snapshot.videoFileName)
+        let videoURL = snapshot.videoFileName.map { sessionURL.appendingPathComponent($0) }
+        let videoConfirmed = videoURL != nil && snapshot.usedConfirmedVideoOrigin
         let motionURL = sessionURL.appendingPathComponent(snapshot.motionFileName)
         let firstMotion = snapshot.firstMotionHostTime
         let lastMotion = snapshot.lastMotionHostTime
@@ -52,14 +53,14 @@ enum LiveCanonicalSessionWriter {
             guard let motionDuration, motionDuration > 0 else { return nil }
             return Double(max(0, snapshot.motionSampleCount - 1)) / motionDuration
         }()
-        let videoPresent = FileManager.default.fileExists(atPath: videoURL.path)
+        let videoPresent = videoURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
         let motionPresent = FileManager.default.fileExists(atPath: motionURL.path)
 
-        let video = try CanonicalCaptureContract.mediaReference(
-            url: videoURL,
+        let video = try videoURL.map { try CanonicalCaptureContract.mediaReference(
+            url: $0,
             mediaType: "video",
             includeHash: snapshot.finalized
-        )
+        ) }
         let motion = try CanonicalCaptureContract.mediaReference(
             url: motionURL,
             mediaType: "motion_csv",
@@ -67,14 +68,14 @@ enum LiveCanonicalSessionWriter {
         )
         let clockSync = CanonicalCaptureContract.clockSync(
             videoOriginHostTime: snapshot.videoClockOriginHostTime,
-            videoStartHostTime: snapshot.usedConfirmedVideoOrigin
+            videoStartHostTime: videoConfirmed
                 ? snapshot.videoClockOriginHostTime : nil,
             firstMotionHostTime: firstMotion,
-            method: snapshot.usedConfirmedVideoOrigin
+            method: videoConfirmed
                 ? "shared_host_clock" : "capture_clock_fallback",
-            confidence: snapshot.usedConfirmedVideoOrigin ? "high" : "low"
+            confidence: videoConfirmed ? "high" : "low"
         )
-        let capture = CanonicalCaptureContract.capture(
+        var capture = CanonicalCaptureContract.capture(
             fps: 30.0,
             sensorRateHz: sensorRate,
             durationSeconds: sessionDuration,
@@ -83,22 +84,28 @@ enum LiveCanonicalSessionWriter {
             motionSampleGapCount: snapshot.motionSampleGapCount,
             largestMotionSampleGapSeconds: snapshot.largestMotionSampleGapSec
         )
+        if videoURL == nil { capture["fps"] = NSNull() }
         var notes: [String] = []
-        if !snapshot.usedConfirmedVideoOrigin {
+        if snapshot.motionSampleCount == 0 {
+            notes.append("Invalid capture: no measured AirPods motion samples.")
+        }
+        if videoURL == nil {
+            notes.append("Motion-only shadow capture; no reference video or verified ground truth.")
+        } else if !videoConfirmed {
             notes.append("Video start callback was unavailable; audit the fallback clock origin before review.")
         }
         if snapshot.interrupted {
             notes.append("One or more headphone-motion interruptions occurred during capture.")
         }
 
-        let payload = CanonicalCaptureContract.manifest(
+        var payload = CanonicalCaptureContract.manifest(
             sessionID: snapshot.sessionID,
             sourceApp: "live",
             sourceAppVersion: sourceAppVersion,
             activity: snapshot.activity,
             status: "collected",
             createdAt: snapshot.createdAt,
-            video: video,
+            video: video ?? [:],
             motion: motion,
             audio: [
                 "enabled": false,
@@ -108,7 +115,7 @@ enum LiveCanonicalSessionWriter {
             capture: capture,
             quality: [
                 "video_present": videoPresent,
-                "motion_present": motionPresent,
+                "motion_present": motionPresent && snapshot.motionSampleCount > 0,
                 "motion_samples": snapshot.motionSampleCount,
                 "notes": notes
             ],
@@ -117,6 +124,7 @@ enum LiveCanonicalSessionWriter {
                 "motion_mode": snapshot.modelMode
             ]
         )
+        if video == nil { payload["video"] = NSNull() }
         try CanonicalCaptureContract.writeJSON(
             payload,
             to: sessionURL.appendingPathComponent("session.json")
