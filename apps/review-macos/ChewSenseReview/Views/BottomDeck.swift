@@ -644,11 +644,17 @@ struct TransportBar: View {
             }
             .buttonStyle(.plain).help("−1 s (J)")
 
+            Button { playback.stepFrames(by: -1) } label: { Image(systemName: "backward.frame") }
+                .buttonStyle(.plain).accessibilityLabel("Previous video frame").help("Previous frame (←)")
+
             Button { playOrPauseFromSelectedCycleStart() } label: {
                 Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 26, height: 26)
             }
             .buttonStyle(.plain).help("Play / pause (Space)")
+
+            Button { playback.stepFrames(by: 1) } label: { Image(systemName: "forward.frame") }
+                .buttonStyle(.plain).accessibilityLabel("Next video frame").help("Next frame (→)")
 
             Button { playback.skip(by: 1) } label: {
                 Image(systemName: "goforward.1")

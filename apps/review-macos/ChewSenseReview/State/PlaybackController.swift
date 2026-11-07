@@ -28,6 +28,8 @@ final class PlaybackController: ObservableObject {
     private var durationTask: Task<Void, Never>?
     private var rangeStart: Double?
     private var rangeEnd: Double?
+    private var pendingSeek: UUID?
+    private var queuedFrameSteps = 0
 
     deinit {
         durationTask?.cancel()
@@ -44,6 +46,8 @@ final class PlaybackController: ObservableObject {
         displayQuarterTurns = UserDefaults.standard.integer(forKey: "ReviewDisplayRotation:\(url.path)")
         currentTime = 0
         duration = 0
+        pendingSeek = nil
+        queuedFrameSteps = 0
         durationTask?.cancel()
         rangeStart = nil
         rangeEnd = nil
@@ -68,12 +72,35 @@ final class PlaybackController: ObservableObject {
 
     func seek(to seconds: Double) {
         let target = clampedTime(seconds)
+        let request = UUID()
+        pendingSeek = request
+        queuedFrameSteps = 0
         currentTime = target
         player.seek(
-            to: CMTime(seconds: target, preferredTimescale: 600),
+            to: CMTime(seconds: target, preferredTimescale: 60_000),
             toleranceBefore: .zero,
             toleranceAfter: .zero
-        )
+        ) { [weak self] finished in
+            Task { @MainActor in
+                guard let self, self.pendingSeek == request else { return }
+                self.pendingSeek = nil
+                let steps = self.queuedFrameSteps
+                self.queuedFrameSteps = 0
+                self.tick()
+                if finished, steps != 0 { self.stepFrames(by: steps) }
+            }
+        }
+    }
+
+    func stepFrames(by count: Int) {
+        guard let item = player.currentItem, count != 0 else { return }
+        pause()
+        if pendingSeek != nil {
+            queuedFrameSteps += count
+            return
+        }
+        guard count > 0 ? item.canStepForward : item.canStepBackward else { return }
+        item.step(byCount: count)
     }
 
     func skip(by delta: Double) { seek(to: currentTime + delta) }
@@ -123,9 +150,9 @@ final class PlaybackController: ObservableObject {
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600),
             queue: .main
-        ) { [weak self] time in
+        ) { [weak self] _ in
             Task { @MainActor in
-                self?.tick(time)
+                self?.tick()
             }
         }
     }
@@ -137,12 +164,13 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    private func tick(_ time: CMTime) {
-        let seconds = CMTimeGetSeconds(time)
+    private func tick() {
+        guard pendingSeek == nil else { return }
+        let seconds = player.currentTime().seconds
         guard seconds.isFinite else { return }
         currentTime = seconds
 
-        guard !suppressLoop, let rangeEnd, seconds >= rangeEnd else { return }
+        guard isPlaying, !suppressLoop, let rangeEnd, seconds >= rangeEnd else { return }
         if isLooping, let rangeStart {
             seek(to: rangeStart)
             if isPlaying { play() }

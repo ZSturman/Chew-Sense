@@ -1,4 +1,4 @@
-# Autonomous checkpoint — November 6, 2026
+# Autonomous checkpoint — November 7, 2026
 
 Details and reproduction: [device/pipeline report](DEVICE_PIPELINE_2026-11-06.md).
 Continues `claude/phase2-2026-11`; Claude's `3e8fb8c` checkpoint was already
@@ -7,9 +7,9 @@ ignored `workspace/checkpoints/resume-20261106/`.
 
 **Completed:**
 - Built, installed in place and launched Collect 1.2 (7) and Live on the physical
-  iPhone 16 Pro Max (iOS 27.2). Live: 11 focused device tests passed, including
-  exact synthetic-stream parity; Debug CPU median 13.9 ms/p95 14.2 ms per valid
-  window (500 ms stride). This is fixture execution, not a real AirPods trial.
+  iPhone 16 Pro Max (iOS 27.2). Live: 22 focused device tests passed, including
+  exact synthetic-stream parity; Debug CPU median 17.7 ms/p95 19.8 ms per valid
+  window (500 ms stride). A separate real capture is recorded below.
 - Collect: 18 guided device tests passed; copied the actual device-generated
   fixture sidecar back to the Mac and passed the Python contract check. Fixed
   Mac-only resource paths in both app test suites and isolated catalog test
@@ -46,31 +46,52 @@ ignored `workspace/checkpoints/resume-20261106/`.
 - Collect now reports Bonjour policy denial with Open Settings/Retry discovery
   instead of searching forever. Actual device confirmed **Local Network is off**.
 
-**Physical collection now active:** the wearer enabled Local Network. Codex
-completed Bonjour discovery, authenticated/pinned pairing and catalog sync;
-iPhone shows the expected certificate and a connected Mac. Natural Meal is
-recording as `Guided-natural-meal-20261106-174058-8029B059` (started 17:40:58).
-iPhone Mirroring is closed: Apple explicitly reports the camera unavailable
-from the Mac while mirrored. The wearer handles only AirPods/phone placement,
-Start and the meal/nod actions. Recording completion and quality are not yet
-validated. A read-only device-file watcher is waiting for the final guided
-sidecar before retrieval. No app build/command is required from the wearer.
+**New meal processed:** the wearer enabled Local Network; authenticated pairing
+and catalog sync succeeded. The real meal take
+`Guided-natural-meal-20261106-174058-8029B059` saved 210.59 s / 10,518 motion
+samples / 99.869% sensor coverage / one 240 ms gap; device face visibility was
+99%. The wearer confirmed intentional End Early. It lacks the final nod and
+remaining periods, is explicitly incomplete, and stays excluded from training/
+evaluation. Originals are preserved. Actual service processing finished:
+521.2 s Vision, 159 automatic cycles and 15 food-entry proposals; coarse proposals
+created. Synchronization is inconclusive. These are automatic, unverified outputs.
+Six review tasks remain. Natural Meal v1 also defines only two marker windows,
+while the automatic synchronization pass needs three; do not lower that gate.
 
-**Independent labeling:** baseline draft still has 0 added events/0 seconds,
-full-pass/verified/sync false. Human independence is still available; Codex read
-Phase 2 aggregate results and must not fabricate human gold. Review remains on
-`workspace/loop/blind`; reuse wearer sections 24.1–44.2 s and 61.5–75.3 s, then
-check the rest. Freeze it before baseline assisted review. Keep incomplete Quiet
-Sitting diagnostic; its review cannot make it eligible. Measured review-time
-savings and verified chew-event quality are still pending.
+**Live simplified and tested with AirPods:** use **Connect AirPods → New model
+check → Start model check → Stop and save**. Collect and Live share the same
+audio route picker, test sound and fresh-motion/retry panel. A check can start
+once fresh samples arrive. Reference video defaults off. Camera-free checks
+record no video/audio, stay unlabelled and cannot be benchmark candidates.
+Saved checks distinguish no motion, motion without predictions and unreviewed
+predictions. Prior empty captures remain intact.
 
-**Next Codex work:** retrieve the saved meal without changing the phone original;
-process through the existing service, audit synchronization/sample gaps and
-proposals; finish independent then
-assisted review with the wearer. Prepare a real Live shadow trial and compare
-logs to independent truth. No full new wearer collection→verified labels→training→
-live-accuracy cycle, battery result, model promotion or merge/push is claimed.
-Do not lower the 20 positive/20 hard-negative/6 evaluation/300 gold-event gates.
+The wearer reported **Motion is ready** after selecting the AirPods, playing
+the tone and retrying. The device diagnostics confirmed authorized fresh motion.
+`FieldTest-20261107-023850-E7978B9B` saved 32.13 s, 1,590 real samples across six
+axes, two gaps (largest 290 ms), 313 ChewNet windows and 59 valid experimental
+shadow windows. AirDrop and USB copies match; the motion SHA matches. Mac replay
+matched all 59 experimental decisions (maximum probability difference 4.97e-9).
+ChewNet reported 19 chewing windows and the shadow model none; the check was
+unlabelled. No recognition accuracy or battery measurements follow from it.
+
+**Independent labeling:** the wearer reported unreliable frame stepping. Review
+now uses the video's actual frames, keeps keyboard focus available to controls,
+and applies the selection loop only during playback. Rebuilt and reopened the
+blind baseline with predictions hidden. Verified Right and Previous frame on
+the actual baseline and a 25 fps regression fixture. At restart the saved draft
+had 0 events, 0 timer seconds and no full pass, verification or sync confirmation.
+Use phone-labelled sections 24.1–44.2 s and 61.5–75.3 s, then check the rest.
+Freeze it before inspecting baseline assisted proposals. Quiet Sitting stays
+diagnostic. Measured review time and verified event quality remain pending.
+
+**Next Codex work:** freeze a completed human blind draft, then run the assisted
+workflow and record review time. Prepare a three-marker Natural Meal revision
+and completed Quiet Sitting, talking, drinking, head movement, gum and mixed
+speech/eating takes. Prioritize synchronized positive and hard-negative examples
+for development before another training run. Compare a labelled on-device check
+to independent truth and measure sustained runtime. Keep the locked test split
+and the 20 positive/20 hard-negative/6 evaluation/300 gold-event gates intact.
 
 Native evidence: `build/Device-Live.xcresult`, `build/Device-Collect.xcresult`,
 `build/DerivedData-mac/Logs/Test/Test-ChewSenseReview-2026.11.06_17-13-01--0800.xcresult`.

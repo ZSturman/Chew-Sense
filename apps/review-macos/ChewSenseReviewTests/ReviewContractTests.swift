@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 @testable import ChewSenseReview
@@ -17,6 +18,59 @@ final class ReviewContractTests: XCTestCase {
             UserDefaults.standard.removeObject(forKey: "ChewSenseReview.workspaceRoot")
         }
         super.tearDown()
+    }
+
+    @MainActor
+    func testFrameStepsFollowSourceFramesAcrossPausedSelectionBoundary() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "25-fps.mov")
+        let writer = try AVAssetWriter(url: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32,
+        ])
+        let pixels = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 32, kCVPixelBufferHeightKey as String: 32,
+        ])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        let pool = try XCTUnwrap(pixels.pixelBufferPool)
+        for frame in 0..<30 {
+            try await waitForPlayback { input.isReadyForMoreMediaData }
+            var buffer: CVPixelBuffer?
+            XCTAssertEqual(CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer), kCVReturnSuccess)
+            XCTAssertTrue(pixels.append(try XCTUnwrap(buffer), withPresentationTime: CMTime(value: Int64(frame), timescale: 25)))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
+
+        let playback = PlaybackController()
+        playback.load(url: url)
+        let layer = AVPlayerLayer(player: playback.player)
+        defer { layer.player = nil }
+        try await waitForPlayback("media item ready") { playback.player.currentItem?.canStepForward == true }
+        playback.setLoop(start: 0.1, end: 0.42, enabled: true)
+        playback.seek(to: 0.4)
+        playback.stepFrames(by: 1)
+        try await waitForPlayback("queued next frame, \(playback.currentTime)") { abs(playback.currentTime - 0.44) < 0.001 }
+        playback.stepFrames(by: 1)
+        try await waitForPlayback("next frame, \(playback.currentTime)") { abs(playback.currentTime - 0.48) < 0.001 }
+        playback.stepFrames(by: -1)
+        try await waitForPlayback("previous frame, \(playback.currentTime)") { abs(playback.currentTime - 0.44) < 0.001 }
+        XCTAssertFalse(playback.isPlaying)
+    }
+
+    @MainActor
+    private func waitForPlayback(_ description: @autoclosure () -> String = "encoder ready", _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        _ = try XCTUnwrap(condition() ? true : nil, "Timed out waiting for \(description())")
     }
 
     func testSectionNavigationKeepsPhoneTruthSeparateFromActualInstructionTimes() throws {

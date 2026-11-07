@@ -3,7 +3,7 @@ import AppKit
 import AVKit
 
 /// Dedicated video area, toolbar, section navigator and optional evidence panels.
-/// All keyboard input flows through the focusable root.
+/// Playback shortcuts are scoped to the review window.
 struct RootView: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
@@ -220,7 +220,9 @@ struct RootView: View {
         guard state.selectedSession != nil else { return event }
         let chars = event.charactersIgnoringModifiers ?? ""
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let plain = mods.subtracting(.numericPad).isEmpty
+            .subtracting([.numericPad, .function, .capsLock])
+        guard mods.intersection([.command, .control]).isEmpty else { return event }
+        let plain = mods.isEmpty
         let shift = mods == .shift
         let option = mods == .option
 
@@ -338,12 +340,14 @@ struct RootView: View {
         case 123: // left
             if option { state.nudgeLastTouchedMarker(by: -1.0/30.0); seekToLastMarker() }
             else if shift { playback.skip(by: -0.25) }
-            else { playback.skip(by: -1.0/30.0) }
+            else if plain { playback.stepFrames(by: -1) }
+            else { return event }
             return nil
         case 124: // right
             if option { state.nudgeLastTouchedMarker(by: 1.0/30.0); seekToLastMarker() }
             else if shift { playback.skip(by: 0.25) }
-            else { playback.skip(by: 1.0/30.0) }
+            else if plain { playback.stepFrames(by: 1) }
+            else { return event }
             return nil
         case 51, 117: // delete, fwd-delete
             state.deleteSelectedOrAt(videoTime: playback.currentTime); return nil
@@ -519,7 +523,7 @@ private struct VideoSurface: NSViewRepresentable {
     }
 }
 
-// MARK: - Key capture (focusable transparent NSView for first-responder)
+// MARK: - Key capture scoped to the review window
 
 private struct KeyCaptureView: NSViewRepresentable {
     let handler: (NSEvent, Set<String>) -> NSEvent?
@@ -527,15 +531,15 @@ private struct KeyCaptureView: NSViewRepresentable {
     func makeNSView(context: Context) -> KeyCaptureNSView {
         let v = KeyCaptureNSView()
         v.handler = handler
-        DispatchQueue.main.async { v.window?.makeFirstResponder(v) }
         return v
     }
 
     func updateNSView(_ nsView: KeyCaptureNSView, context: Context) {
         nsView.handler = handler
-        if nsView.window?.firstResponder !== nsView {
-            DispatchQueue.main.async { nsView.window?.makeFirstResponder(nsView) }
-        }
+    }
+
+    static func dismantleNSView(_ nsView: KeyCaptureNSView, coordinator: ()) {
+        nsView.removeMonitors()
     }
 }
 
@@ -545,53 +549,58 @@ final class KeyCaptureNSView: NSView {
     /// decide whether to treat ←/→ as a marker nudge.
     private(set) var heldChordKeys: Set<String> = []
     private var resignObserver: NSObjectProtocol?
-
-    override var acceptsFirstResponder: Bool { true }
-    override func becomeFirstResponder() -> Bool { true }
+    private var keyMonitor: Any?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let obs = resignObserver {
-            NotificationCenter.default.removeObserver(obs)
-            resignObserver = nil
+        removeMonitors()
+        guard let window else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self, let owningWindow = self.window,
+                  event.window === owningWindow, owningWindow.attachedSheet == nil else { return event }
+            return self.handle(event, in: owningWindow)
         }
-        if let win = window {
-            // Clear stuck chord keys when the app loses key window focus.
-            resignObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didResignKeyNotification, object: win, queue: .main
-            ) { [weak self] _ in
-                self?.heldChordKeys.removeAll()
-            }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            self?.heldChordKeys.removeAll()
         }
     }
 
-    override func keyDown(with event: NSEvent) {
-        // Skip if a text field is the first responder.
-        if let resp = window?.firstResponder, resp is NSText {
-            super.keyDown(with: event); return
-        }
+    private func handle(_ event: NSEvent, in window: NSWindow) -> NSEvent? {
         let chars = (event.charactersIgnoringModifiers ?? "").lowercased()
+        if event.type == .keyUp {
+            heldChordKeys.remove(chars)
+            return event
+        }
+        if window.firstResponder is NSText || (window.firstResponder as? NSTextField)?.isEditable == true {
+            heldChordKeys.removeAll()
+            return event
+        }
         let modsClean = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.shift, .numericPad])
+            .subtracting([.shift, .numericPad, .function, .capsLock])
         if !event.isARepeat, modsClean.isEmpty, ["s", "p", "e"].contains(chars) {
             heldChordKeys.insert(chars)
         }
-        if handler?(event, heldChordKeys) == nil { return }
-        super.keyDown(with: event)
+        guard let handler else { return event }
+        return handler(event, heldChordKeys)
     }
 
-    override func keyUp(with event: NSEvent) {
-        let chars = (event.charactersIgnoringModifiers ?? "").lowercased()
-        if ["s", "p", "e"].contains(chars) {
-            heldChordKeys.remove(chars)
+    func removeMonitors() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
         }
-        super.keyUp(with: event)
+        if let resignObserver {
+            NotificationCenter.default.removeObserver(resignObserver)
+            self.resignObserver = nil
+        }
+        heldChordKeys.removeAll()
     }
 
     deinit {
-        if let obs = resignObserver {
-            NotificationCenter.default.removeObserver(obs)
-        }
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
     }
 }

@@ -16,6 +16,12 @@ Choose **Edit chews** to select, adjust or draw events. **Add chew** is explicit
 and **Delete selected** / **Undo** are always visible. Accidental manual additions
 can be removed without changing other annotations.
 
+Use **← / →** or the frame buttons next to Play to pause and step through
+individual video frames. **Shift + ← / →** skips a quarter second. The selected
+chew's loop affects playback only. For a new cycle, pause at the widest opening
+and press **A** or **Add chew**, then adjust its start and end markers. Use the
+rate menu for slower playback.
+
 In assisted review, **Accept proposals I reviewed here** accepts only pending
 proposals in the selected section; other events remain pending and the whole
 group can be undone. Phone labels need not be recreated. Fine anchors are for
