@@ -93,3 +93,22 @@ calibration, so that choice is left to you.
 the change. Its next Vision step will be the first in-service sandboxed run.
 That step's `vision.log` should show the `INTERNAL: ResponseInfo` failures
 above, never "Not valid for uploading until".
+
+
+## In-service confirmation — November 6
+
+The existing loop service processed the real prior iPhone recording
+`Not-eating-20261026-174428-C27C9380` through its normal queued import and
+Vision runner. The worker (PID 7611, parent service 42269) logged two failed
+Clearcut attempts; same-PID system logs at 17:19:12 show DNS service denial,
+`EPERM`, and both URLSession requests failing with -1003. Evidence is retained
+locally in `workspace/experiments/device-20261106/network-denials.log` and the
+recording's `workspace/loop/reports/sessions/.../vision.log`. This closes the
+specific outstanding first-upload/in-service validation above. No sandbox or
+telemetry exemption was introduced.
+
+The socket guard was also hardened: unexpected socket-creation failures such
+as `EMFILE` no longer imply isolation. At least one explicit `EPERM` is required;
+unsupported address families alone are inconclusive. Fourteen offline tests
+pass, including real sandboxed children. See the
+[continuation report](DEVICE_PIPELINE_2026-11-06.md) for scope and limitations.

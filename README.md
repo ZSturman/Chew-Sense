@@ -59,12 +59,24 @@ dashboard:
 .venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
 ```
 
-Data-integrity update (November 6): training rejects incomplete guided takes,
-checks declared motion hashes, and reports corrupt recordings individually.
-The Phase 2 reference accidentally included 46 development windows from the
-shortened Quiet Sitting diagnostic; its historical scores and bundled detector
-are retained, pending a corrected development-only comparison. Assisted review
-cannot make that incomplete take eligible. The locked test is unchanged.
+November 6 [physical-device and pipeline validation](docs/DEVICE_PIPELINE_2026-11-06.md):
+Collect and Live were built/installed/launched on iPhone; 18 guided Collect and
+11 Live fixture tests passed on the physical device. The exported detector's
+Debug CPU median was 13.9 ms/window. An existing real iPhone recording completed
+the running Mac loop, with MediaPipe telemetry attempts confirmed blocked by
+its DNS/network sandbox. A real wearer shadow trial and battery measurement
+remain outstanding.
+
+Training now rejects incomplete guided takes and declared motion-hash mismatches.
+The Phase 2 experiment accidentally included 46 windows from incomplete Quiet
+Sitting; historical artifacts remain intact. Corrected development-only training
+selected gradient boosting again (F1 .8683, precision .8664, recall .8703).
+No new locked-test evaluation or deployment was performed. The dashboard shows
+this development run separately from Live's installed experimental detector.
+
+Collect's Mac connection reports denied Local Network permission and offers
+**Open Settings**, rather than silently searching forever. Independent baseline
+review and real wearer data remain required; see [current next steps](docs/NEXT_STEPS.md).
 
 Start with [START_HERE.md](START_HERE.md) for the broader repository.
 

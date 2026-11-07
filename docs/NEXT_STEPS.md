@@ -1,64 +1,78 @@
-# Autonomous continuation — November 6, 2026
+# Autonomous checkpoint — November 6, 2026
 
-Resumed at clean commit `3e8fb8c` on `claude/phase2-2026-11`; all requested
-Claude Phase 2/privacy/catalog changes are already present. No merge needed.
-Loop service PID 42269 is running, idle, with three completed uploads and
-three outstanding review tasks. The physical iPhone 16 Pro Max is connected;
-Collect is installed at 1.1 (6), Live at 1.0 (1). Device execution is pending.
+Details and reproduction: [device/pipeline report](DEVICE_PIPELINE_2026-11-06.md).
+Continues `claude/phase2-2026-11`; Claude's `3e8fb8c` checkpoint was already
+present. Source/blind/non-media state was checkpointed before edits under
+ignored `workspace/checkpoints/resume-20261106/`.
 
-Before changes, recorded source/blind/split SHA-256 hashes and copied non-media
-state to ignored `workspace/checkpoints/resume-20261106/`. Original recordings,
-verified revisions and locked splits must remain intact. Test consultations: 2.
+**Completed:**
+- Built, installed in place and launched Collect 1.2 (7) and Live on the physical
+  iPhone 16 Pro Max (iOS 27.2). Live: 11 focused device tests passed, including
+  exact synthetic-stream parity; Debug CPU median 13.9 ms/p95 14.2 ms per valid
+  window (500 ms stride). This is fixture execution, not a real AirPods trial.
+- Collect: 18 guided device tests passed; copied the actual device-generated
+  fixture sidecar back to the Mac and passed the Python contract check. Fixed
+  Mac-only resource paths in both app test suites and isolated catalog test
+  preferences so fixture syncing cannot reset wearer progress.
+- Rebuilt Review: 25 passed, 1 optional render skipped; actual blind UI still
+  has zero proposals and disables assisted review.
+- Copied prior real iPhone take `Not-eating-20261026-174428-C27C9380` over USB,
+  verified hashes/channels/timing and processed it through the running loop.
+  25.255 s, 1,249 samples, 50 Hz, 98.828% coverage, no internal gaps; actual
+  sync unverified. Existing wearer coarse negatives retained. It is fixed
+  evaluation with an untouched blind copy; no new human truth was created.
+- First real in-service sandbox run verified: two Clearcut attempts failed;
+  same worker PID's system logs show DNS service denial/EPERM/URL error -1003.
+  Evidence: `workspace/experiments/device-20261106/network-denials.log`.
+  Hardened the privacy probe's resource-exhaustion fail-open case; sandbox and
+  no-override policy unchanged. 14 privacy tests passed.
+- Fixed data integrity: reject hash mismatches, escaped motion paths, malformed
+  numeric CSVs and incomplete guided takes even after review. The Phase 2 run
+  had accidentally included **46 negative development windows** from incomplete
+  Quiet Sitting. Its historical results and original data are retained.
+- Trained all five candidates development-only in `eating-20261107-011934`
+  (November 6 local): 22 dev/10 locked-evaluation recordings. HGB remains best:
+  precision .8664, recall .8703, F1 .8683, AUC-PR .9444, FPR .0284; 17/17 bouts,
+  7 false bouts (9.1/negative hour), median onset lag 4.08 s. Pilot/legacy labels,
+  not real-world or individual-chew validation. No new locked-test predictions;
+  test consultations remain 2. Prior 32 split records unchanged, one new
+  evaluation assignment appended; 24 protected files and 4 received files retain
+  their checkpoint hashes.
+- Dashboard now shows the newest completed development check and its own scores
+  rather than stale evaluated scores; installed/export models remain unchanged.
+  It also displays the scoped physical fixture/CPU evidence for the matching ID.
+- Collect now reports Bonjour policy denial with Open Settings/Retry discovery
+  instead of searching forever. Actual device confirmed **Local Network is off**.
 
-Blind-review integrity: saved draft has zero added events, zero review seconds,
-full-pass/verified/sync false, and empty blind proposals. Independence is still
-available to a human reviewer. This continuation has read Phase 2 aggregate
-results but has not inspected assisted event/proposal artifacts. Automated
-event suggestions must not be inserted into this blind workspace or called
-human truth. Finish/freeze independent review before assisted review.
+**Physical collection now active:** the wearer enabled Local Network. Codex
+completed Bonjour discovery, authenticated/pinned pairing and catalog sync;
+iPhone shows the expected certificate and a connected Mac. Natural Meal is
+recording as `Guided-natural-meal-20261106-174058-8029B059` (started 17:40:58).
+iPhone Mirroring is closed: Apple explicitly reports the camera unavailable
+from the Mac while mirrored. The wearer handles only AirPods/phone placement,
+Start and the meal/nod actions. Recording completion and quality are not yet
+validated. A read-only device-file watcher is waiting for the final guided
+sidecar before retrieval. No app build/command is required from the wearer.
 
-Integrity fix checkpoint: the canonical eating-data loader now checks declared
-motion hashes, confines media references to their session, isolates non-numeric
-CSV failures, and rejects explicitly incomplete/unverified guided completion
-even if human labels exist. Missing historical hashes remain eligible but are
-reported as unverified integrity. Diagnostic motion replay/proposal generation
-remains possible. Split reuse no longer rewrites the locked file's timestamp.
+**Independent labeling:** baseline draft still has 0 added events/0 seconds,
+full-pass/verified/sync false. Human independence is still available; Codex read
+Phase 2 aggregate results and must not fabricate human gold. Review remains on
+`workspace/loop/blind`; reuse wearer sections 24.1–44.2 s and 61.5–75.3 s, then
+check the rest. Freeze it before baseline assisted review. Keep incomplete Quiet
+Sitting diagnostic; its review cannot make it eligible. Measured review-time
+savings and verified chew-event quality are still pending.
 
-Actual consequence: the Phase 2 reference run included 46 negative development
-windows from the incomplete Quiet Sitting take. Corrected discovery yields
-31 eligible recordings (previously 32). Historical results and bundled models
-are retained as historical, not revalidated. A new development-only run is
-needed; no new test consultation is justified.
+**Next Codex work:** retrieve the saved meal without changing the phone original;
+process through the existing service, audit synchronization/sample gaps and
+proposals; finish independent then
+assisted review with the wearer. Prepare a real Live shadow trial and compare
+logs to independent truth. No full new wearer collection→verified labels→training→
+live-accuracy cycle, battery result, model promotion or merge/push is claimed.
+Do not lower the 20 positive/20 hard-negative/6 evaluation/300 gold-event gates.
 
-Physical checks: Collect 1.2 (7) built/installed/launched in place on the iPhone
-16 Pro Max (iOS 27.2); Live also built and installed in place. Review rebuilt:
-25 passed, 1 optional render skipped; actual UI confirms blind predictions stay
-hidden and Chewing spans is disabled. Initial focused Python group: 83 passed;
-affected integrity/runtime/assistance/status/end-to-end group: 36 passed before
-the additional split no-rewrite regression. Local Network permission is waiting
-on the wearer before pairing. No wearer activity was simulated.
-
-An existing phone recording, `Not-eating-20261026-174428-C27C9380`, was copied
-over USB to ignored `workspace/experiments/device-20261106/received/`. This is
-25.255 s of actual prior capture with 1,249 motion samples and existing wearer
-coarse not-chewing labels, not a new human activity or newly verified labels.
-Its structural/media-hash audit passes and it is not already in the dataset.
-Next: process this new-to-Mac recording through the real sandboxed loop and
-inspect privacy and completeness evidence; retain the phone original.
-
-Privacy guard hardening: reproduced a fail-open check under `EMFILE` (socket
-resource exhaustion was misread as network isolation). The guard now requires
-explicit `EPERM` from at least one family, skips only unsupported families,
-and rejects inconclusive resource/permission errors. The permanent network/DNS
-sandbox profile and no-override policy are unchanged. New targeted coverage
-includes exhaustion, both-family unavailability and explicit sandbox denial.
-
-Immediate work: validate service/catalog, protected hashes, sandbox tests and
-focused pipeline tests; rebuild Review with blindness intact; build/install
-Collect and Live in place on the physical iPhone, then inspect actual runtime
-and hardware readiness. Only actual wearer activity and independent judgment
-may unblock new ground truth. No new recordings, reviewed labels, retraining,
-physical inference result or model promotion claimed at this checkpoint.
+Native evidence: `build/Device-Live.xcresult`, `build/Device-Collect.xcresult`,
+`build/DerivedData-mac/Logs/Test/Test-ChewSenseReview-2026.11.06_17-13-01--0800.xcresult`.
+No developer build/command action is needed; Codex already ran these checks.
 
 ---
 
