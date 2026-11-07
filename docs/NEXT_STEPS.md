@@ -1,3 +1,31 @@
+# Autonomous continuation — November 6, 2026
+
+Resumed at clean commit `3e8fb8c` on `claude/phase2-2026-11`; all requested
+Claude Phase 2/privacy/catalog changes are already present. No merge needed.
+Loop service PID 42269 is running, idle, with three completed uploads and
+three outstanding review tasks. The physical iPhone 16 Pro Max is connected;
+Collect is installed at 1.1 (6), Live at 1.0 (1). Device execution is pending.
+
+Before changes, recorded source/blind/split SHA-256 hashes and copied non-media
+state to ignored `workspace/checkpoints/resume-20261106/`. Original recordings,
+verified revisions and locked splits must remain intact. Test consultations: 2.
+
+Blind-review integrity: saved draft has zero added events, zero review seconds,
+full-pass/verified/sync false, and empty blind proposals. Independence is still
+available to a human reviewer. This continuation has read Phase 2 aggregate
+results but has not inspected assisted event/proposal artifacts. Automated
+event suggestions must not be inserted into this blind workspace or called
+human truth. Finish/freeze independent review before assisted review.
+
+Immediate work: validate service/catalog, protected hashes, sandbox tests and
+focused pipeline tests; rebuild Review with blindness intact; build/install
+Collect and Live in place on the physical iPhone, then inspect actual runtime
+and hardware readiness. Only actual wearer activity and independent judgment
+may unblock new ground truth. No new recordings, reviewed labels, retraining,
+physical inference result or model promotion claimed at this checkpoint.
+
+---
+
 # MediaPipe privacy fix — November 4, 2026
 
 Details: [PRIVACY_MEDIAPIPE_2026-11-04.md](PRIVACY_MEDIAPIPE_2026-11-04.md).
