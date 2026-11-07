@@ -34,7 +34,7 @@ from chewsense.loop.pairing import DeviceRegistry, pairing_proof, server_proof
 from chewsense.loop.processing import SESSION_STEPS, Processor, StepInterrupted
 from chewsense.loop.review_tasks import priority_segments
 from chewsense.loop.store import LoopPaths, read_json
-from chewsense.loop.sync_assess import assess_markers
+from chewsense.loop.sync_assess import MIN_MARKERS, assess_markers
 from chewsense.loop.training import readiness
 
 from .loop_fixtures import (
@@ -154,6 +154,24 @@ def test_lower_version_is_rejected(loop):
     registry.add(dict(seed().model_dump(), version=3))
     with pytest.raises(ValueError, match="greater"):
         registry.add(dict(seed().model_dump(), version=2, title="Older"))
+
+
+def test_natural_meal_update_meets_marker_gate_without_rewriting_v1(loop):
+    registry = registry_for(loop)
+    original = registry.load("natural-meal", 1)
+    v1_digest = ex.definition_sha256(original)
+    path = REPO / "pipelines/vision/configs/experiment-updates/natural-meal-v2.json"
+    revised = registry.add(json.loads(path.read_text()))
+    assert revised.completion.required_sync_markers == MIN_MARKERS
+    assert [a.id for a in revised.activities if a.sync_marker] == ["nod-start", "nod-midpoint", "nod-end"]
+    assert 300 < revised.total_seconds < original.total_seconds
+    assert all(a.intended_label == "unknown" for a in revised.activities if not a.sync_marker)
+    assert registry.state("natural-meal")["published_version"] == 1
+    registry.publish("natural-meal", revised.version, by="test")
+    catalog = LoopController(loop, loop_config()).publish_catalog({}, {})
+    entry = next(e for e in catalog["experiments"] if e["definition"]["experiment_id"] == "natural-meal")
+    assert entry["definition"]["version"] == 2
+    assert ex.definition_sha256(registry.load("natural-meal", 1)) == v1_digest
 
 
 def test_bundled_ios_catalog_matches_seed_definitions():
