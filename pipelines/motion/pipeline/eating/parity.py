@@ -19,6 +19,7 @@ own precision.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import struct
 import subprocess
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import pandas as pd
 
 from .dataset import EatingSession
 from .runtime import TreeEnsemble, decoder_config, run_stream, stream_end_times
@@ -35,6 +37,71 @@ from .evaluate import decode_bouts
 
 INPUT_MAGIC = b"CSEP0001"
 OUTPUT_MAGIC = b"CSEO0001"
+
+
+def check_live_bundle(spec: Mapping[str, Any], folder: Path) -> dict[str, Any]:
+    """Replay one saved Live export without reading labels, splits or other recordings."""
+    manifest = json.loads((folder / "session.json").read_text())
+    metadata = json.loads((folder / "session_metadata.json").read_text())
+    session_id = manifest["session_id"]
+    detector = metadata["eating_detector"]
+    if manifest.get("source_app") != "live" or metadata.get("session_id") != session_id:
+        raise ValueError("manifest and metadata must identify the same Live check")
+    if detector.get("model_id") != spec["model_id"]:
+        raise ValueError("the check used a different model; pass its specification with --spec")
+
+    motion_info = manifest["motion"]
+    motion_path = folder / "motion.csv"
+    if motion_info["path"] != motion_path.name:
+        raise ValueError("Live motion path must be motion.csv")
+    digest = hashlib.sha256()
+    with motion_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != motion_info["sha256"]:
+        raise ValueError("motion.csv SHA-256 disagrees with the manifest")
+    motion = pd.read_csv(motion_path)
+    time = motion["timestamp"].to_numpy(dtype=np.float64)
+    imu = motion[["ax", "ay", "az", "gx", "gy", "gz"]].to_numpy(dtype=np.float32)
+    gaps = np.diff(time)
+    if len(time) < 2 or len(time) != manifest["quality"]["motion_samples"]:
+        raise ValueError("missing motion or sample count disagrees with the manifest")
+    if not (np.isfinite(time).all() and np.isfinite(imu).all() and (gaps > 0).all()):
+        raise ValueError("motion requires six finite channels and strictly advancing timestamps")
+
+    log = pd.read_csv(folder / "eating_detector.csv")
+    ends = stream_end_times(time, spec["decision"]["stride_s"], window_s=spec["input"]["window_s"])
+    if not len(ends) or len(log) != len(ends) or not np.allclose(log["window_end"], ends, rtol=0, atol=1e-6):
+        raise ValueError("saved detector windows do not match the motion timestamps")
+    drives_live = detector["drives_live"]
+    if not isinstance(drives_live, bool) or set(log["drives_live"]) != {int(drives_live)} or not set(log["state"]) <= {"idle", "chewing"}:
+        raise ValueError("detector log has invalid states or a mismatched Live mode")
+
+    replay = run_stream(spec, time, imu, ends)
+    probability = log["probability"].to_numpy(dtype=np.float64)
+    if not (np.isnan(probability) | ((probability >= 0) & (probability <= 1))).all():
+        raise ValueError("saved probabilities must be empty or between zero and one")
+    expected = replay["probability"].to_numpy()
+    scored = np.isfinite(probability) & np.isfinite(expected)
+    max_error = float(np.max(np.abs(probability[scored] - expected[scored]))) if scored.any() else None
+    states = log["state"].eq("chewing")
+    state_errors = int((states != replay["chewing"]).sum())
+    threshold = spec["decision"]["threshold"]
+    threshold_errors = int(((probability[scored] >= threshold) != (expected[scored] >= threshold)).sum())
+    validity_matches = bool(np.array_equal(np.isnan(probability), np.isnan(expected)) and
+                            np.allclose(log["valid_fraction"], replay["valid_fraction"], rtol=0, atol=1e-6))
+    passed = (validity_matches and max_error is not None and max_error <= 1e-6
+              and not state_errors and not threshold_errors)
+    return {
+        "status": "pass" if passed else "fail", "session_id": session_id, "model_id": spec["model_id"],
+        "scope": "runtime parity only; no ground truth or accuracy measurement",
+        "motion_samples": len(time), "sensor_median_hz": float(1 / np.median(gaps)),
+        "largest_motion_gap_s": float(gaps.max()), "has_reference_video": manifest.get("video") is not None,
+        "drives_live": drives_live, "windows": len(log), "scored_windows": int(scored.sum()),
+        "chewing_windows": int(states.sum()), "validity_matches": validity_matches,
+        "max_probability_abs_diff": max_error, "state_disagreements": state_errors,
+        "threshold_disagreements": threshold_errors,
+    }
 
 
 def write_input(path: Path, timestamps: np.ndarray, imu: np.ndarray, first_end: float) -> None:

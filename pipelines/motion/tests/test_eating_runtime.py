@@ -8,6 +8,7 @@ the Python reference.  They say nothing about detection accuracy.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -23,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pipeline.eating.dataset import build_windows, discover_sessions  # noqa: E402
 from pipeline.eating.features import compute_features  # noqa: E402
 from pipeline.eating.models import SklearnModel  # noqa: E402
-from pipeline.eating.parity import live_fixture, run_parity  # noqa: E402
+from pipeline.eating.parity import check_live_bundle, live_fixture, run_parity  # noqa: E402
 from pipeline.eating.runtime import (  # noqa: E402
     TreeEnsemble,
     export_spec,
@@ -109,6 +111,43 @@ def test_stream_end_times_have_no_drift():
     assert ends[0] == t[0] + 3.0
     assert np.allclose(np.diff(ends), 0.5, atol=1e-9)
     assert ends[-1] <= t[-1]
+
+
+def test_saved_live_check_replays_absolute_clock_and_rejects_damaged_motion(tmp_path):
+    spec = load_spec(REPO / "apps/live-ios/ChewSenseLive/EatingDetector/eating-detector.json")
+    time = 575_076.0 + np.arange(400) * 0.02
+    imu = np.zeros((len(time), 6), dtype=np.float32)
+    motion = pd.DataFrame(imu, columns=["ax", "ay", "az", "gx", "gy", "gz"])
+    motion.insert(0, "timestamp", time)
+    motion_path = tmp_path / "motion.csv"
+    motion.to_csv(motion_path, index=False)
+    (tmp_path / "session.json").write_text(json.dumps({
+        "session_id": "fixture", "source_app": "live", "video": None,
+        "quality": {"motion_samples": len(time)},
+        "motion": {"path": "motion.csv", "sha256": hashlib.sha256(motion_path.read_bytes()).hexdigest()},
+    }))
+    (tmp_path / "session_metadata.json").write_text(json.dumps({
+        "session_id": "fixture", "eating_detector": {"model_id": spec["model_id"], "drives_live": False},
+    }))
+    ends = stream_end_times(time, spec["decision"]["stride_s"], window_s=spec["input"]["window_s"])
+    log = run_stream(spec, time, imu, ends).rename(columns={"t_end": "window_end"})
+    log["state"] = np.where(log["chewing"], "chewing", "idle")
+    log["drives_live"] = 0
+    log_path = tmp_path / "eating_detector.csv"
+    log.to_csv(log_path, index=False, float_format="%.8f")
+
+    result = check_live_bundle(spec, tmp_path)
+    assert result["status"] == "pass"
+    assert result["windows"] == len(ends) and result["scored_windows"] > 0
+    assert not result["has_reference_video"] and not result["drives_live"]
+
+    log.loc[0, "state"] = "idle" if log.loc[0, "state"] == "chewing" else "chewing"
+    log.to_csv(log_path, index=False)
+    assert check_live_bundle(spec, tmp_path)["status"] == "fail"
+    with motion_path.open("a") as handle:
+        handle.write("\n")
+    with pytest.raises(ValueError, match="SHA-256"):
+        check_live_bundle(spec, tmp_path)
 
 
 def test_live_fixture_is_current():

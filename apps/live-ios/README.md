@@ -17,6 +17,10 @@ AirPods must already be paired with the iPhone to appear in the in-app picker.
 See the [device validation](../../docs/DEVICE_PIPELINE_2026-11-06.md) for the
 physical export and replay results.
 
+From the repository root, `.venv/bin/chewsense-motion eating-parity --live-check
+/path/to/FieldTest-folder` checks a saved export against the Mac reference and
+returns a nonzero exit status if it finds discrepancies.
+
 <!-- WORKSPACE-VERIFICATION:START -->
 ## Historical startup audit
 

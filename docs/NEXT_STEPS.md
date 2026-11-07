@@ -37,9 +37,10 @@ ignored `workspace/checkpoints/resume-20261106/`.
   precision .8664, recall .8703, F1 .8683, AUC-PR .9444, FPR .0284; 17/17 bouts,
   7 false bouts (9.1/negative hour), median onset lag 4.08 s. Pilot/legacy labels,
   not real-world or individual-chew validation. No new locked-test predictions;
-  test consultations remain 2. Prior 32 split records unchanged, one new
-  evaluation assignment appended; 24 protected files and 4 received files retain
-  their checkpoint hashes.
+  test consultations remain 2. The prior 32 split records are unchanged and one
+  evaluation assignment was appended. Protected recordings, verified labels and
+  received files match their checkpoint hashes. Saving the blind draft before
+  reopening Review changed only its timestamp.
 - Dashboard now shows the newest completed development check and its own scores
   rather than stale evaluated scores; installed/export models remain unchanged.
   It also displays the scoped physical fixture/CPU evidence for the matching ID.
@@ -56,7 +57,10 @@ evaluation. Originals are preserved. Actual service processing finished:
 521.2 s Vision, 159 automatic cycles and 15 food-entry proposals; coarse proposals
 created. Synchronization is inconclusive. These are automatic, unverified outputs.
 Six review tasks remain. Natural Meal v1 also defines only two marker windows,
-while the automatic synchronization pass needs three; do not lower that gate.
+while the automatic synchronization pass needs three. The running service now
+serves catalog v10, with a new 6:15 Natural Meal v2 and three nod prompts. The
+v1 digest and all other catalog entries match the pre-publish checkpoint.
+On the iPhone, **Mac connection → Sync now** will fetch v2 for the next take.
 
 **Live simplified and tested with AirPods:** use **Connect AirPods → New model
 check → Start model check → Stop and save**. Collect and Live share the same
@@ -70,10 +74,12 @@ The wearer reported **Motion is ready** after selecting the AirPods, playing
 the tone and retrying. The device diagnostics confirmed authorized fresh motion.
 `FieldTest-20261107-023850-E7978B9B` saved 32.13 s, 1,590 real samples across six
 axes, two gaps (largest 290 ms), 313 ChewNet windows and 59 valid experimental
-shadow windows. AirDrop and USB copies match; the motion SHA matches. Mac replay
+shadow windows. AirDrop and USB copies match and the motion SHA matches. Mac replay
 matched all 59 experimental decisions (maximum probability difference 4.97e-9).
 ChewNet reported 19 chewing windows and the shadow model none; the check was
 unlabelled. No recognition accuracy or battery measurements follow from it.
+Reproduce with `.venv/bin/chewsense-motion eating-parity --live-check` and the
+saved folder (exact path in the report). This reads no dataset or split.
 
 **Independent labeling:** the wearer reported unreliable frame stepping. Review
 now uses the video's actual frames, keeps keyboard focus available to controls,
@@ -84,10 +90,15 @@ had 0 events, 0 timer seconds and no full pass, verification or sync confirmatio
 Use phone-labelled sections 24.1–44.2 s and 61.5–75.3 s, then check the rest.
 Freeze it before inspecting baseline assisted proposals. Quiet Sitting stays
 diagnostic. Measured review time and verified event quality remain pending.
+Once the wearer finishes the full pass, verifies and saves, use the
+[Phase 0 finalize command](PHASE0.md#synchronization-confirmation-and-safe-label-transfer) with
+`workspace/loop/blind` and the baseline session ID. Confirm clocks only from
+evidence. If they are uncertain, freeze the visual labels with motion targets
+masked.
 
 **Next Codex work:** freeze a completed human blind draft, then run the assisted
-workflow and record review time. Prepare a three-marker Natural Meal revision
-and completed Quiet Sitting, talking, drinking, head movement, gum and mixed
+workflow and record review time. Collect a complete three-marker Natural Meal
+v2 and completed Quiet Sitting, talking, drinking, head movement, gum and mixed
 speech/eating takes. Prioritize synchronized positive and hard-negative examples
 for development before another training run. Compare a labelled on-device check
 to independent truth and measure sustained runtime. Keep the locked test split

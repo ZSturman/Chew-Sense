@@ -1477,10 +1477,9 @@ def cmd_eating_parity(args: argparse.Namespace) -> int:
     import pandas as pd
 
     from pipeline.eating.dataset import discover_sessions
-    from pipeline.eating.parity import run_parity
+    from pipeline.eating.parity import check_live_bundle, run_parity
     from pipeline.eating.runtime import load_spec
 
-    workspace = get_workspace_root()
     repo = get_repo_root()
     spec_path = Path(args.spec) if args.spec else repo / LIVE_EATING_SPEC
     try:
@@ -1488,6 +1487,15 @@ def cmd_eating_parity(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         print(f"Cannot read specification {spec_path}: {exc}")
         return 1
+    if args.live_check:
+        try:
+            result = check_live_bundle(spec, Path(args.live_check))
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            print(f"Live check audit failed: {exc}")
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0 if result["status"] == "pass" else 1
+    workspace = get_workspace_root()
     if args.write_live_fixture:
         from pipeline.eating.parity import live_fixture
 
@@ -2134,8 +2142,10 @@ Examples:
     p_eating_parity.add_argument("--spec", help="Specification (default: the one bundled in Live)")
     p_eating_parity.add_argument("--swift-tool", help="Prebuilt parity tool (default: build from Live sources)")
     p_eating_parity.add_argument("--work-dir", help="Scratch folder for binary inputs/outputs (default: /tmp)")
-    p_eating_parity.add_argument("--write-live-fixture", action="store_true",
-                                 help="Also regenerate Live's synthetic XCTest parity fixture for this specification")
+    parity_input = p_eating_parity.add_mutually_exclusive_group()
+    parity_input.add_argument("--live-check", help="Audit one saved Live export without reading the dataset or labels")
+    parity_input.add_argument("--write-live-fixture", action="store_true",
+                              help="Also regenerate Live's synthetic XCTest parity fixture for this specification")
     p_eating_parity.set_defaults(func=cmd_eating_parity)
 
     p_assist = subparsers.add_parser(

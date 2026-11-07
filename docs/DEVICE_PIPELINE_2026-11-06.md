@@ -56,7 +56,10 @@ face visibility. The running service took 521.2 s for Vision and produced 159
 automatic chew cycles, 15 food-entry proposals and coarse chewing proposals.
 The final nod and remaining periods are missing. The take stays diagnostic,
 with inconclusive synchronization and zero new human-verified labels. Natural
-Meal v1 supplies only two marker windows; the automatic clock check needs three.
+Meal v1 supplied two marker windows. Catalog v10 now serves v2, which takes
+6:15 and requires start, midpoint and final nods. The v1 digest and all other
+catalog entries were checked after publication. The phone still needs to sync
+the new catalog and complete a v2 take.
 
 ### Privacy verified in the running service
 
@@ -204,10 +207,11 @@ Review's training status displays that scoped physical evidence.
 3. **Review and measurement:** retain incomplete Quiet Sitting diagnostically;
    after independent review, use assisted proposals with the existing active-time
    counters. No measured review-time saving or new human-verified labels exists.
-4. **Next collection:** revise the Natural Meal marker schedule in a new version.
-   Collect completed hard negatives for talking, drinking, gum and head movement,
-   followed by talking while eating. Compare a labelled Live shadow check to
-   independent ground truth and measure sustained runtime separately.
+4. **Next collection:** sync catalog v10 on the iPhone and complete Natural Meal
+   v2 through its final nod. Collect completed hard negatives for talking,
+   drinking, gum and head movement, followed by talking while eating. Compare a
+   labelled Live shadow check to independent ground truth and measure sustained
+   runtime separately.
 
 Native and real-source processing are complete to the gates above. A full new
 wearer collection → verified labeling → training → live shadow accuracy cycle
@@ -220,12 +224,19 @@ is **not yet demonstrated**. Do not lower the 20 positive/20 hard-negative,
 # Safe read/refresh; no locked-test evaluation.
 tools/loop-service status
 .venv/bin/chewsense-motion pipeline-status
+# Replay one Live export. Expected: pass, 59/59 valid windows, no state differences.
+.venv/bin/chewsense-motion eating-parity --live-check \
+  workspace/experiments/device-20261106/received/FieldTest-20261107-023850-E7978B9B
 # Already executed; repeat only after a meaningful data/code change.
 .venv/bin/chewsense-motion eating-experiment --dev-only
 # Focused integrity, isolation and dashboard regression checks.
 .venv/bin/python -m pytest pipelines/motion/tests/test_eating_detection.py \
   pipelines/motion/tests/test_eating_status.py pipelines/vision/tests/test_offline.py -q
 ```
+
+The export audit verifies the model ID, the manifest's motion hash, six sensor
+channels, window validity and recorded decisions. It takes only the exported
+folder and the bundled model spec (use `--spec` for a different model ID).
 
 For native reruns use the existing stable `build/DerivedData-ios` and
 `build/DerivedData-mac`, replacing the previous result bundle for the topic.
