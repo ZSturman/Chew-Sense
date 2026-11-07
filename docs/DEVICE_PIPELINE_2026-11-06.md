@@ -73,6 +73,11 @@ only a standalone reproduction. Filtered local evidence is retained in
 with the recording's report. No sandbox rule, telemetry override or dependency
 version was relaxed.
 
+The newly recorded Natural Meal also ran through the sandboxed Vision worker.
+Its `vision.log` has 16 failed Clearcut requests. macOS logs for its worker,
+PID 12906, show 16 mDNS denials and 16 zero-byte HTTP failures. Evidence is in
+`workspace/experiments/device-20261106/meal-network-denials.log`.
+
 A separate guard defect was reproduced: socket resource exhaustion (`EMFILE`)
 previously counted as network isolation. It now fails closed unless at least
 one address family reports explicit `EPERM`; only unsupported families are

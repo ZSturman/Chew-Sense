@@ -56,6 +56,8 @@ remaining periods, is explicitly incomplete, and stays excluded from training/
 evaluation. Originals are preserved. Actual service processing finished:
 521.2 s Vision, 159 automatic cycles and 15 food-entry proposals; coarse proposals
 created. Synchronization is inconclusive. These are automatic, unverified outputs.
+The meal's Vision worker logged 16 failed Clearcut attempts. System logs for
+that worker show 16 mDNS denials and 16 zero-byte HTTP failures.
 Six review tasks remain. Natural Meal v1 also defines only two marker windows,
 while the automatic synchronization pass needs three. The running service now
 serves catalog v10, with a new 6:15 Natural Meal v2 and three nod prompts. The

@@ -107,6 +107,12 @@ recording's `workspace/loop/reports/sessions/.../vision.log`. This closes the
 specific outstanding first-upload/in-service validation above. No sandbox or
 telemetry exemption was introduced.
 
+The next capture, a newly recorded Natural Meal, independently confirmed the
+same behavior. Vision logged 16 failed Clearcut attempts. For that worker
+(PID 12906), macOS logged 16 mDNS access denials and 16 HTTP failures with zero
+bytes transferred. The filtered evidence is in
+`workspace/experiments/device-20261106/meal-network-denials.log`.
+
 The socket guard was also hardened: unexpected socket-creation failures such
 as `EMFILE` no longer imply isolation. At least one explicit `EPERM` is required;
 unsupported address families alone are inconclusive. Fourteen offline tests
