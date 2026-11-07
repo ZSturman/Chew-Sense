@@ -37,20 +37,27 @@ class MediaPipeNetworkError(RuntimeError):
 
 def network_blocked() -> bool:
     """True only if the sandbox refuses outbound sockets in this process."""
+    denied = False
     for family, address in _PROBES:
         try:
             probe = socket.socket(family, socket.SOCK_DGRAM)
-        except OSError:
-            continue  # family unavailable: nothing can leave through it
+        except OSError as error:
+            if error.errno == errno.EPERM:
+                denied = True
+                continue
+            if error.errno in {errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT}:
+                continue  # unsupported address family, not evidence of isolation
+            return False  # resource exhaustion or other failures prove nothing
         with probe:
             try:
                 probe.connect(address)
             except OSError as error:
                 if error.errno != errno.EPERM:
                     return False
+                denied = True
             else:
                 return False
-    return True
+    return denied
 
 
 def require_offline(task: str) -> None:

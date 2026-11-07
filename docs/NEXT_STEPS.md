@@ -46,6 +46,13 @@ Its structural/media-hash audit passes and it is not already in the dataset.
 Next: process this new-to-Mac recording through the real sandboxed loop and
 inspect privacy and completeness evidence; retain the phone original.
 
+Privacy guard hardening: reproduced a fail-open check under `EMFILE` (socket
+resource exhaustion was misread as network isolation). The guard now requires
+explicit `EPERM` from at least one family, skips only unsupported families,
+and rejects inconclusive resource/permission errors. The permanent network/DNS
+sandbox profile and no-override policy are unchanged. New targeted coverage
+includes exhaustion, both-family unavailability and explicit sandbox denial.
+
 Immediate work: validate service/catalog, protected hashes, sandbox tests and
 focused pipeline tests; rebuild Review with blindness intact; build/install
 Collect and Live in place on the physical iPhone, then inspect actual runtime

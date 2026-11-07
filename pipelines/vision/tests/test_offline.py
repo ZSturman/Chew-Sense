@@ -5,6 +5,7 @@ model is loaded here, and the socket probe sends no packets.
 """
 from __future__ import annotations
 
+import errno
 import subprocess
 import sys
 from pathlib import Path
@@ -45,6 +46,26 @@ def test_no_environment_override_bypasses_the_check(monkeypatch):
     monkeypatch.setenv("CHEWSENSE_ALLOW_MEDIAPIPE_NETWORK", "1")
     with pytest.raises(offline.MediaPipeNetworkError):
         offline.require_offline("FaceLandmarker")
+
+
+@pytest.mark.parametrize("error_number", [errno.EMFILE, errno.ENFILE, errno.ENOMEM, errno.EACCES,
+                                         errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT])
+def test_socket_creation_failure_is_not_evidence_of_network_isolation(monkeypatch, error_number):
+    def fail(*args):
+        raise OSError(error_number, "socket unavailable")
+
+    monkeypatch.setattr(offline.socket, "socket", fail)
+    assert not offline.network_blocked()
+    with pytest.raises(offline.MediaPipeNetworkError):
+        offline.require_offline("FaceLandmarker")
+
+
+def test_explicit_sandbox_denial_at_socket_creation_is_recognized(monkeypatch):
+    def denied(*args):
+        raise OSError(errno.EPERM, "sandbox denied socket")
+
+    monkeypatch.setattr(offline.socket, "socket", denied)
+    assert offline.network_blocked()
 
 
 @macos
