@@ -5,6 +5,31 @@ Continues `claude/phase2-2026-11`; Claude's `3e8fb8c` checkpoint was already
 present. Source/blind/non-media state was checkpointed before edits under
 ignored `workspace/checkpoints/resume-20261106/`.
 
+**Blind baseline completed on November 7.** The wearer confirmed a full review
+of the 94.477 s clip, with 45 hand-marked chew cycles and zero visible proposals.
+Saved and froze verified `annotations/review-v0001.json` in the blind workspace.
+The post-freeze audit passed. Only one timing marker was usable, so all 4,699
+motion rows remain masked for supervision. The blind timer was not used.
+
+**Offline Vision comparison.** At ±250 ms, the stored Vision candidate revision
+matched 28 of 45 closure anchors (4 extra, 17 missed, precision .875, recall .622,
+F1 .727). F1 at ±100/50 ms was .364/.104. All 45 human cycles retain the Add chew
+default ±210 ms around the marked opening. On the marked opening timestamps,
+Vision matched 30 at ±100 ms (2 extra, 15 missed, F1 .779, mean matched error 45 ms).
+The first chewing section accounted for 12 of the 17 closure misses. These are
+one recording's offline video-annotation results. Neither the AirPods model nor
+the locked motion test was rerun. Evidence is in
+`workspace/experiments/independent-baseline-20261107/`.
+
+**Assisted baseline staged.** The 45 frozen labels are separate from the assisted
+copy. Review shows six disagreement spans (10.5 s) and seven agreement spans
+(89% of the clip). The updated timer starts only on demand and pauses on save,
+panel close or app switch. Twenty-five focused native tests passed. No assisted
+human decisions or time saving are claimed until the wearer saves a revision.
+Quiet Sitting has zero Vision chew proposals and 71.1% motion coverage with one
+11.5 s gap. Its two no-motion review spans (17.25 s) stay diagnostic, and a full
+new take is higher value than labelling the failed one.
+
 **Completed:**
 - Built, installed in place and launched Collect 1.2 (7) and Live on the physical
   iPhone 16 Pro Max (iOS 27.2). Live: 22 focused device tests passed, including
@@ -83,7 +108,7 @@ unlabelled. No recognition accuracy or battery measurements follow from it.
 Reproduce with `.venv/bin/chewsense-motion eating-parity --live-check` and the
 saved folder (exact path in the report). This reads no dataset or split.
 
-**Independent labeling:** the wearer reported unreliable frame stepping. Review
+**Playback changes used for the blind baseline:** the wearer reported unreliable frame stepping. Review
 now uses the video's actual frames, keeps keyboard focus available to controls,
 and applies the selection loop only during playback. Rebuilt and reopened the
 blind baseline with predictions hidden. Verified Right and Previous frame on
@@ -94,17 +119,11 @@ video layer. The 25 focused macOS tests passed, including checks that stepping
 retains the video layer and its bounds. On the actual blind recording, two Right
 presses and two Left presses moved by one frame each and returned to 25.973 s.
 The draft hash was unchanged and Review was left paused there.
-Use phone-labelled sections 24.1–44.2 s and 61.5–75.3 s, then check the rest.
-Freeze it before inspecting baseline assisted proposals. Quiet Sitting stays
-diagnostic. Measured review time and verified event quality remain pending.
-Once the wearer finishes the full pass, verifies and saves, use the
-[Phase 0 finalize command](PHASE0.md#synchronization-confirmation-and-safe-label-transfer) with
-`workspace/loop/blind` and the baseline session ID. Confirm clocks only from
-evidence. If they are uncertain, freeze the visual labels with motion targets
-masked.
+The wearer used the phone-labelled sections and confirmed the full-video pass.
 
-**Next Codex work:** freeze a completed human blind draft, then run the assisted
-workflow and record review time. Collect a complete three-marker Natural Meal
+**Next Codex work:** audit the saved assisted revision for proposal hash, decisions
+and elapsed time. Record time for the assisted pass alone because the blind pass
+was untimed. Collect a complete three-marker Natural Meal
 v2 and completed Quiet Sitting, talking, drinking, head movement, gum and mixed
 speech/eating takes. Prioritize synchronized positive and hard-negative examples
 for development before another training run. Compare a labelled on-device check

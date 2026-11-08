@@ -89,12 +89,25 @@ final class CoarseAssistTests: XCTestCase {
         let session = Session(id: "S1", rawDir: raw, derivedDir: derived, videoURL: nil, annotatedVideoURL: nil,
                               framePredictionsCSV: nil, motionCSV: nil, alignedCSV: nil, candidatesJSON: nil,
                               overridesURL: raw.appending(path: "annotations/review-draft.json"), status: .candidates)
-        let store = CoarseAssistStore()
+        var now = 10.0
+        let store = CoarseAssistStore(now: { now })
         store.load(session: session, workspaceRoot: root)
         XCTAssertNotNil(store.proposals)
+        now = 20
         store.batchAccept()
+        XCTAssertEqual(store.activeSeconds, 0)
+        store.startTimer()
+        now = 24
         store.setLabel("cp_0002", "chewing")
+        store.pauseTimer()
+        now = 60
+        XCTAssertEqual(store.activeSeconds, 4)
+        store.startTimer()
+        now = 62.5
         store.save()
+        now = 100
+        XCTAssertFalse(store.isTiming)
+        XCTAssertEqual(store.activeSeconds, 6.5)
         let saved = raw.appending(path: "annotations/coarse-review-v0001.json")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: saved)) as? [String: Any])
         XCTAssertEqual((json["proposals"] as? [String: Any])?["content_sha256"] as? String, "abc")
@@ -102,12 +115,13 @@ final class CoarseAssistTests: XCTestCase {
         let context = try XCTUnwrap(json["review_context"] as? [String: Any])
         XCTAssertEqual(context["spans_decided"] as? Int, 2)
         XCTAssertEqual(context["complete"] as? Bool, false)
-        XCTAssertNotNil(context["active_seconds"] as? Double)
+        XCTAssertEqual(context["active_seconds"] as? Double, 6.5)
         XCTAssertFalse(FileManager.default.isWritableFile(atPath: saved.path))
 
         let reopened = CoarseAssistStore()
         reopened.load(session: session, workspaceRoot: root)
         XCTAssertEqual(reopened.document.decidedCount, 2)
+        XCTAssertEqual(reopened.activeSeconds, 6.5)
         reopened.setLabel("cp_0003", "not_chewing")
         reopened.save()
         XCTAssertTrue(FileManager.default.fileExists(atPath: raw.appending(path: "annotations/coarse-review-v0002.json").path))

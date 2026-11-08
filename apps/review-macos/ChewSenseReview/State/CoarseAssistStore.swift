@@ -205,14 +205,20 @@ final class CoarseAssistStore: ObservableObject {
     @Published private(set) var message = ""
     @Published private(set) var savedRevision: Int?
     @Published private(set) var isDirty = false
+    @Published private(set) var isTiming = false
 
     private var annotationsDirectory: URL?
     private var sessionID: String?
-    private var activeSince: Date?
+    private let now: () -> TimeInterval
+    private var activeSince: TimeInterval?
     private var accumulatedSeconds: TimeInterval = 0
 
+    init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.now = now
+    }
+
     var activeSeconds: TimeInterval {
-        accumulatedSeconds + (activeSince.map { Date().timeIntervalSince($0) } ?? 0)
+        accumulatedSeconds + (activeSince.map { now() - $0 } ?? 0)
     }
 
     var selectedItem: CoarseAssistDocument.Item? {
@@ -292,14 +298,17 @@ final class CoarseAssistStore: ObservableObject {
 
     // MARK: Timer (measures real review time)
 
-    func resumeTimer() {
-        if activeSince == nil, proposals != nil { activeSince = Date() }
+    func startTimer() {
+        guard activeSince == nil, proposals != nil else { return }
+        activeSince = now()
+        isTiming = true
     }
 
     func pauseTimer() {
         if let since = activeSince {
-            accumulatedSeconds += Date().timeIntervalSince(since)
+            accumulatedSeconds += now() - since
             activeSince = nil
+            isTiming = false
         }
     }
 
@@ -319,7 +328,6 @@ final class CoarseAssistStore: ObservableObject {
     func moveEnd(of id: String, to time: Double) { mutate { $0.moveBoundary(of: id, end: time) } }
 
     private func mutate(_ change: (inout CoarseAssistDocument) -> Void) {
-        resumeTimer()
         change(&document)
         isDirty = true
     }
@@ -339,7 +347,6 @@ final class CoarseAssistStore: ObservableObject {
             return
         }
         pauseTimer()
-        defer { resumeTimer() }
         let next = (Self.latestRevision(in: annotationsDirectory, prefix: "coarse-review-v")?.0 ?? 0) + 1
         let payload: [String: Any] = [
             "artifact_type": "coarse_label_review",

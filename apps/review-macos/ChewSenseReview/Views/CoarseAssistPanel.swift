@@ -8,6 +8,7 @@ struct CoarseAssistPanel: View {
     @EnvironmentObject var playback: PlaybackController
     @EnvironmentObject var viewport: TimelineViewport
     @EnvironmentObject var assist: CoarseAssistStore
+    @Environment(\.scenePhase) private var scenePhase
     let onClose: () -> Void
 
     var body: some View {
@@ -36,8 +37,10 @@ struct CoarseAssistPanel: View {
         .padding(14)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor))
-        .onAppear { assist.resumeTimer() }
         .onDisappear { assist.pauseTimer() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { assist.pauseTimer() }
+        }
         .onChange(of: assist.selectedSpanID) { _, _ in cueSelected() }
     }
 
@@ -51,9 +54,26 @@ struct CoarseAssistPanel: View {
                       systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.red)
             }
-            Text("\(assist.document.decidedCount)/\(assist.document.items.count) decided · \(Int(assist.activeSeconds)) s active")
-                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            HStack {
+                Text("\(assist.document.decidedCount)/\(assist.document.items.count) decided")
+                if assist.isTiming {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in reviewTime }
+                } else {
+                    reviewTime
+                }
+                Spacer()
+                Button(assist.isTiming ? "Pause timing" : "Start timing") {
+                    if assist.isTiming { assist.pauseTimer() }
+                    else { assist.startTimer() }
+                }
+                .controlSize(.small)
+            }
+            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
+    }
+
+    private var reviewTime: some View {
+        Text("\(Int(assist.activeSeconds)) s timed")
     }
 
     @ViewBuilder
