@@ -61,3 +61,26 @@ def test_rhythm_neighbors_and_calibration_table():
     result = evaluate(rows)
     assert result["fixed_constants"]["auc_roc"] == 0.5
     assert result["meaning"].startswith("P(proposed cycle lies inside")
+
+
+def test_chew_count_against_verified_chews_reports_cadence_and_span_padding():
+    from types import SimpleNamespace
+
+    from pipeline.behavior.validate import chew_count_against_verified
+
+    rate = 50.0
+    t = np.arange(0, 40, 1 / rate)
+    imu = np.zeros((len(t), 6), dtype=np.float32)
+    chewing = (t >= 10) & (t < 30)
+    imu[chewing, 3] = 0.3 * np.sin(2 * np.pi * 1.5 * t[chewing])
+    session = SimpleNamespace(session_id="S", clock="shared_host_clock", motion_t=t, imu=imu, duration_s=40.0)
+    truth = np.arange(10.0, 30.0, 1 / 1.5)  # 30 chews at 1.5 Hz
+    # Adjacent human spans are merged; the second span pads 2 s past the last chew.
+    result = chew_count_against_verified(session, [(10.0, 20.0), (20.0, 30.0)], truth)
+    span = result["spans"][0]
+    assert len(result["spans"]) == 1 and span["verified_chews"] == 30
+    assert abs(span["motion_cadence_hz"] - 1.5) < 0.1 and abs(span["cadence_relative_error"]) < 0.07
+    assert abs(span["count_error"]) <= 2
+    padded = chew_count_against_verified(session, [(10.0, 32.0)], truth)
+    assert padded["spans"][0]["count_error"] > span["count_error"]  # padding inflates the count
+    assert padded["outside_spans"] == 0 and not padded["caveats"] == []

@@ -56,8 +56,9 @@ REGISTRY: tuple[MeasurementDefinition, ...] = (
         "chewing_cadence", "Hz", "inferred",
         f"dominant gyro frequency ({CADENCE_BAND_HZ[0]}-{CADENCE_BAND_HZ[1]} Hz) in "
         f"{CADENCE_WINDOW_S:g} s windows inside bouts; peak share as quality",
-        "video jaw-opening frequency (independent sensor)",
-        "agrees with video at one self-selected pace; tracking of pace changes untested",
+        "video jaw-opening frequency; hand-marked chews (frozen blind review)",
+        "agrees with video and with 45 hand-marked chews (within 2.5% in 2 bouts, one recording, "
+        "one self-selected pace); tracking of pace changes untested",
         "the chewing-pace guided experiment (slow/normal/fast)",
     ),
     MeasurementDefinition(
@@ -67,8 +68,9 @@ REGISTRY: tuple[MeasurementDefinition, ...] = (
     ),
     MeasurementDefinition(
         "chew_count_estimate", "chews", "inferred",
-        "cadence x bout duration", "video chew-cycle proposals (not human-verified)",
-        "exploratory; no individually verified chews exist (0 of 300 needed)",
+        "cadence x bout duration", "hand-marked chews from frozen blind reviews (chew-count-eval)",
+        "pilot: 50 estimated vs 45 hand-marked chews (+11%) inside human spans on one recording; "
+        "span padding past the last chew inflates counts; 45 of 300 verified chews needed",
         "independent annotation of individual chews",
     ),
     MeasurementDefinition(

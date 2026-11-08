@@ -29,7 +29,7 @@ import pandas as pd
 from ..eating.dataset import CHEWING, EatingSession, _label_runs, build_windows
 from ..eating.evaluate import DecoderConfig, decode_bouts
 from . import cycle_context
-from .measures import CADENCE_WINDOW_S, bouts_from_states, dominant_frequency, motion_cadence
+from .measures import CADENCE_WINDOW_S, bouts_from_states, cadence_track, dominant_frequency, motion_cadence, summarize_bouts
 
 
 def _median_abs(values: Sequence[float]) -> float | None:
@@ -209,3 +209,61 @@ def alignment_check(sessions: Sequence[EatingSession], vision_dirs: Mapping[str,
         if spans:
             results.append({"session_id": session.session_id, "clock": session.clock, "spans": spans})
     return results
+
+
+def chew_count_against_verified(
+    session: EatingSession, chewing_spans: Sequence[tuple[float, float]], verified_chew_times: Sequence[float],
+) -> dict[str, Any]:
+    """AirPods-only cadence and chew count inside human chewing spans versus
+    independently hand-marked chews (frozen blind review).
+
+    The method is the fixed one used everywhere else (6 s windows, dominant gyro
+    frequency, count = median cadence x span duration); nothing is fitted here.
+    Span boundaries are human (oracle), so this isolates counting from bout
+    detection. Human cadence per span is (n - 1) / (last - first chew).
+    """
+
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(chewing_spans):
+        if merged and start - merged[-1][1] <= 1e-6:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((float(start), float(end)))
+    chews = np.sort(np.asarray(verified_chew_times, dtype=float))
+    track = cadence_track(session.motion_t, session.imu, merged)
+    per_span = []
+    for bout in summarize_bouts(merged, track, session.duration_s)["bouts"]:
+        inside = chews[(chews >= bout["start_s"]) & (chews <= bout["end_s"])]
+        human_hz = (len(inside) - 1) / (inside[-1] - inside[0]) if len(inside) >= 2 else None
+        estimate = bout["chew_count_estimate"]
+        per_span.append({
+            "start_s": bout["start_s"], "end_s": bout["end_s"],
+            "verified_chews": int(len(inside)),
+            "verified_first_last_s": [round(float(inside[0]), 3), round(float(inside[-1]), 3)] if len(inside) else None,
+            "human_cadence_hz": None if human_hz is None else round(float(human_hz), 3),
+            "motion_cadence_hz": bout["cadence_hz"],
+            "cadence_relative_error": None if human_hz is None or bout["cadence_hz"] is None
+            else round(float(bout["cadence_hz"] / human_hz - 1), 4),
+            "motion_peak_share": bout["cadence_peak_share"],
+            "motion_windows": bout["cadence_windows"],
+            "motion_chew_count": estimate,
+            "count_error": None if estimate is None else int(estimate - len(inside)),
+        })
+    counted = [row for row in per_span if row["motion_chew_count"] is not None]
+    total_true = sum(row["verified_chews"] for row in counted)
+    total_est = sum(row["motion_chew_count"] for row in counted)
+    return {
+        "session_id": session.session_id,
+        "clock": session.clock,
+        "spans": per_span,
+        "verified_chews_total": int(sum(row["verified_chews"] for row in per_span)),
+        "outside_spans": int(len(chews) - sum(row["verified_chews"] for row in per_span)),
+        "motion_chew_count_total": int(total_est),
+        "count_relative_error": None if not total_true else round(total_est / total_true - 1, 4),
+        "method": "fixed: 6 s windows, dominant gyro frequency 0.5-3 Hz, count = median cadence x span duration",
+        "caveats": [
+            "one wearer, one recording, one self-selected pace",
+            "human span boundaries (oracle); with detected bouts, onset/offset errors add to the count error",
+            "spans that extend past the first/last chew inflate the count (cadence x full span duration)",
+        ],
+    }

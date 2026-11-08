@@ -1755,6 +1755,65 @@ def cmd_behavior_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chew_count_eval(args: argparse.Namespace) -> int:
+    """AirPods-only cadence and chew count versus frozen, independently hand-marked chews."""
+
+    from pipeline.behavior.validate import chew_count_against_verified
+    from pipeline.eating.dataset import CHEWING, discover_sessions
+
+    workspace = get_workspace_root()
+    loop = workspace / "loop"
+    sessions, _ = discover_sessions(canonical_roots=[loop / "assisted" / "sessions" / "raw"],
+                                    field_test_roots=[], loop_root=loop)
+    splits = (json.loads((workspace / "experiments/eating/splits.json").read_text()).get("assignments") or {}
+              if (workspace / "experiments/eating/splits.json").exists() else {})
+    results = []
+    for session in sessions:
+        frozen = sorted((loop / "blind/sessions/raw" / session.session_id / "annotations").glob("review-v[0-9]*.json"))
+        if not frozen:
+            continue  # only frozen blind reviews are independent truth
+        chews = [c["open_peak_ts"] for c in json.loads(frozen[-1].read_text()).get("added_chews") or []]
+        reviews = sorted((loop / "assisted/sessions/raw" / session.session_id / "annotations").glob("coarse-review-v*.json"))
+        if reviews:
+            spans = [(i["start_ts"], i["end_ts"]) for i in json.loads(reviews[-1].read_text())["intervals"]
+                     if i.get("label") == "chewing"]
+            span_source = reviews[-1].name
+        else:
+            spans = [(i.start, i.end) for i in session.intervals if i.label == CHEWING]
+            span_source = "session coarse labels"
+        if not chews or not spans:
+            continue
+        row = chew_count_against_verified(session, spans, chews)
+        row.update(blind_review=frozen[-1].name, span_source=span_source,
+                   split=(splits.get(session.session_id) or {}).get("split"))
+        results.append(row)
+    if not results:
+        print("No recording has both a frozen blind review with chews and human chewing spans.")
+        return 1
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    payload = {
+        "evaluation_id": f"chew-count-{stamp}",
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "reference": "frozen independent blind reviews (open-peak time of each hand-marked chew)",
+        "reads_model_output": False,
+        "note": "Fixed method, nothing fitted. Locked-test recordings are scored for this behaviour measure only; "
+                "no eating-detector prediction is read and nothing is tuned on them.",
+        "recordings": results,
+    }
+    out = workspace / "experiments" / "behavior"
+    out.mkdir(parents=True, exist_ok=True)
+    for name in (f"chew-count-{stamp}.json", "chew-count-latest.json"):
+        (out / name).write_text(json.dumps(payload, indent=2, default=float) + "\n")
+    for row in results:
+        print(f"{row['session_id']} ({row['split']}): {row['motion_chew_count_total']} estimated vs "
+              f"{row['verified_chews_total']} verified chews ({row['count_relative_error']:+.1%})")
+        for span in row["spans"]:
+            print(f"  {span['start_s']}-{span['end_s']} s: cadence {span['motion_cadence_hz']} vs {span['human_cadence_hz']} Hz, "
+                  f"count {span['motion_chew_count']} vs {span['verified_chews']}")
+    print(f"Wrote {out / f'chew-count-{stamp}.json'}")
+    return 0
+
+
 def cmd_video_teacher(args: argparse.Namespace) -> int:
     """Measure how well ungated Vision output recovers human coarse chewing spans."""
 
@@ -2180,6 +2239,12 @@ Examples:
     )
     p_behavior.add_argument("--run", help="Eating run for out-of-fold predictions (default: latest)")
     p_behavior.set_defaults(func=cmd_behavior_eval)
+
+    p_chew_count = subparsers.add_parser(
+        "chew-count-eval",
+        help="AirPods-only cadence and chew count versus frozen hand-marked chews (no model output read)",
+    )
+    p_chew_count.set_defaults(func=cmd_chew_count_eval)
 
     p_video_teacher = subparsers.add_parser(
         "video-teacher-eval",
