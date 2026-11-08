@@ -30,9 +30,12 @@ independent benchmark calibration and corrections, not manually entering every
 routine recording's chews from scratch. Final verification still requires the
 existing checks. Signal charts are available under **More**.
 
-In **Chewing spans**, use **Start timing** when you begin comparing clips and
-**Pause timing** if you take a break. The timer pauses when you leave the panel,
-switch apps, or save. Saved revisions include the elapsed time and decision counts.
+In **Chewing spans**, use **Play clip** and choose **Chewing**, **No chewing**,
+or **Can't tell**. Each choice advances to the next flagged clip. Then check
+the suggestions together or one at a time and choose **Save labels**.
+**All clips and evidence** lets you revisit clips and adjust boundaries.
+Timing starts when you play a clip and pauses on save, panel close, or app
+switch. Use **Pause timing** for breaks.
 
 **More → Rotate video right/left** fixes the display of older sideways clips.
 It does not edit source video, annotations or clock mapping. Current Collect

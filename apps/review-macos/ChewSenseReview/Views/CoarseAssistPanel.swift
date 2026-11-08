@@ -1,205 +1,216 @@
 import SwiftUI
 
-/// Assisted chewing-span review: video and AirPods motion each judge the
-/// recording; agreement spans can be accepted together, everything else gets
-/// one decision. Proposals stay proposals until saved here.
+/// Guide the reviewer through flagged clips, then suggest the agreement batch.
 struct CoarseAssistPanel: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
-    @EnvironmentObject var viewport: TimelineViewport
     @EnvironmentObject var assist: CoarseAssistStore
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showSaveResult = false
     let onClose: () -> Void
+    let onPlayClip: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Chewing spans").font(.headline)
+                Text("Chewing spans").font(.title2.bold())
                 Spacer()
-                Button { onClose() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                Button("Close chewing spans", systemImage: "xmark", action: onClose)
+                    .labelStyle(.iconOnly).buttonStyle(.plain)
             }
             if state.isBlindReview {
                 Text("Proposals stay hidden during an independent benchmark.")
-                    .font(.caption).foregroundStyle(.secondary)
             } else if let proposals = assist.proposals {
-                summary(proposals)
-                AssistTimeline(proposals: proposals)
-                    .frame(height: 92)
-                selectedControls
-                spanList
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let item = assist.selectedItem {
+                            clipCard(item)
+                        } else if !assist.document.batchCandidates.isEmpty {
+                            agreementCard
+                        } else if assist.document.isComplete {
+                            Text(assist.isDirty ? "Review complete. Save your labels below." : "All clips reviewed.")
+                                .font(.headline)
+                        }
+                        DisclosureGroup("All clips and evidence") { details(proposals) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 footer
             } else {
                 Text(assist.message.isEmpty ? "Choose a recording." : assist.message)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor))
-        .onDisappear { assist.pauseTimer() }
+        .onDisappear {
+            assist.pauseTimer()
+            playback.pause()
+            playback.clearLoop()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { assist.pauseTimer() }
         }
-        .onChange(of: assist.selectedSpanID) { _, _ in cueSelected() }
+        .onChange(of: assist.selectedSpanID, initial: true) { _, _ in cueSelected() }
+        .onChange(of: assist.isDirty) { _, dirty in
+            if dirty { showSaveResult = false }
+        }
     }
 
-    private func summary(_ proposals: CoarseProposals) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Video and AirPods motion agree on \(Int((proposals.summary.coverage * 100).rounded()))% of this recording. "
-                 + "Decide the \(proposals.summary.reviewItems) other spans; accept agreements together.")
-                .font(.caption).fixedSize(horizontal: false, vertical: true)
-            if proposals.summary.labelConflicts > 0 {
-                Label("\(proposals.summary.labelConflicts) spans where both sources disagree with your phone label",
-                      systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.red)
+    private func clipCard(_ item: CoarseAssistDocument.Item) -> some View {
+        let flagged = assist.document.reviewClips.contains { $0.id == item.id }
+        let clips = flagged ? assist.document.reviewClips : assist.document.agreementClips
+        let index = clips.firstIndex { $0.id == item.id } ?? 0
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(flagged ? "1. Check flagged clips" : "2. Check suggested labels")
+                .font(.headline)
+            Text("Clip \(index + 1) of \(clips.count) · \(timeRange(item))")
+                .font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+
+            Button(playback.isPlaying ? "Pause clip" : "Play clip",
+                   systemImage: playback.isPlaying ? "pause.fill" : "play.fill", action: onPlayClip)
+                .buttonStyle(.borderedProminent)
+            Slider(value: Binding(
+                get: { min(max(playback.currentTime, item.start), item.end) },
+                set: { playback.seek(to: $0) }
+            ), in: item.start...item.end)
+            .accessibilityLabel("Clip position")
+
+            Text("Was there chewing in this clip?").font(.headline)
+            HStack(spacing: 6) {
+                decisionButton("Chewing", label: "chewing", for: item)
+                decisionButton("No chewing", label: "not_chewing", for: item)
+                decisionButton("Can't tell", label: "unknown", for: item)
+            }
+            if item.label != nil {
+                Text("Current choice: \(title(item.label ?? ""))").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
-                Text("\(assist.document.decidedCount)/\(assist.document.items.count) decided")
-                if assist.isTiming {
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in reviewTime }
-                } else {
-                    reviewTime
+                if index > 0 {
+                    Button("Previous clip") { assist.selectedSpanID = clips[index - 1].id }
                 }
-                Spacer()
-                Button(assist.isTiming ? "Pause timing" : "Start timing") {
-                    if assist.isTiming { assist.pauseTimer() }
-                    else { assist.startTimer() }
+                if !flagged {
+                    Button("Back to suggestions") { assist.selectedSpanID = nil }
+                }
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func decisionButton(_ title: String, label: String, for item: CoarseAssistDocument.Item) -> some View {
+        Button(title) {
+            assist.setLabel(item.id, label)
+        }
+        .buttonStyle(.bordered)
+        .tint(item.label == label ? .accentColor : nil)
+    }
+
+    private var agreementCard: some View {
+        let pending = assist.document.batchCandidates
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("2. Check suggested labels").font(.headline)
+            Text("Video and AirPods motion agree on these \(pending.count) remaining clips.")
+                .foregroundStyle(.secondary)
+            Text("\(pending.filter { $0.span.proposal == "chewing" }.count) chewing · \(pending.filter { $0.span.proposal == "not_chewing" }.count) no chewing")
+                .font(.subheadline.monospacedDigit())
+            Button("Use \(pending.count) suggested labels") { assist.batchAccept() }
+                .buttonStyle(.borderedProminent)
+            Button("Review one at a time") { assist.selectedSpanID = pending.first?.id }
+        }
+    }
+
+    private func details(_ proposals: CoarseProposals) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AssistTimeline(proposals: proposals).frame(height: 92)
+            if let item = assist.selectedItem {
+                Text(item.span.reason).font(.caption).foregroundStyle(.secondary)
+                let evidence = item.span.evidence
+                Text("Video: \(evidence.videoChewingWindows) chewing windows · Motion: \(evidence.motionChewingWindows) chewing windows")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let label = item.span.existingLabel {
+                    Text("Phone label: \(title(label))").font(.caption)
+                }
+                HStack {
+                    Button("Start at playhead") { assist.moveStart(of: item.id, to: playback.currentTime) }
+                    Button("End at playhead") { assist.moveEnd(of: item.id, to: playback.currentTime) }
+                    if item.isDecided { Button("Clear choice") { assist.clear(item.id) } }
                 }
                 .controlSize(.small)
             }
-            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            ForEach(assist.document.reviewClips + assist.document.agreementClips) { item in
+                Button {
+                    assist.selectedSpanID = item.id
+                } label: {
+                    Label("\(timeRange(item)) · \(title(item.label ?? item.span.proposal ?? "needs review"))",
+                          systemImage: item.isDecided ? "checkmark.circle.fill" : "circle")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            HStack {
+                Text("\(assist.document.decidedCount) of \(assist.document.items.count) labelled")
+                Spacer()
+                if assist.isTiming {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in reviewTime }
+                    Button("Pause timing") { assist.pauseTimer() }.controlSize(.small)
+                } else {
+                    reviewTime
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            if assist.document.isComplete {
+                saveButton("Save labels").buttonStyle(.borderedProminent)
+            } else {
+                saveButton("Save progress").buttonStyle(.bordered)
+            }
+            if showSaveResult {
+                Text(assist.message).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
     private var reviewTime: some View {
-        Text("\(Int(assist.activeSeconds)) s timed")
+        Text(!assist.isTiming && assist.activeSeconds == 0 ? "Timer starts with Play" : "\(Int(assist.activeSeconds)) s timed")
+            .monospacedDigit()
     }
 
-    @ViewBuilder
-    private var selectedControls: some View {
-        if let item = assist.selectedItem {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(String(format: "%.1f–%.1f s", item.start, item.end)).font(.callout.monospacedDigit().weight(.semibold))
-                Text(evidenceText(item.span)).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    if let proposal = item.span.proposal {
-                        Button("Accept \(title(proposal))") { assist.accept(item.id) }
-                    }
-                    Button("Chewing") { assist.setLabel(item.id, "chewing") }
-                    Button("Not chewing") { assist.setLabel(item.id, "not_chewing") }
-                    Button("Can't tell") { assist.setLabel(item.id, "unknown") }
-                }
-                HStack(spacing: 6) {
-                    Button("Start at playhead") { assist.moveStart(of: item.id, to: playback.currentTime) }
-                    Button("End at playhead") { assist.moveEnd(of: item.id, to: playback.currentTime) }
-                    if item.isDecided { Button("Undo decision") { assist.clear(item.id) } }
-                }
-                .controlSize(.small)
-            }
-            .padding(10)
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    private func saveButton(_ title: String) -> some View {
+        Button(title) {
+            playback.pause()
+            assist.save()
+            showSaveResult = true
         }
-    }
-
-    private var spanList: some View {
-        let needsYou = assist.document.items.filter { !$0.span.isAgreement || $0.span.conflictWithExistingLabel }
-        let agreements = assist.document.items.filter { $0.span.isAgreement && !$0.span.conflictWithExistingLabel }
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6) {
-                Text("Needs you (\(needsYou.filter { !$0.isDecided }.count) left)").font(.caption.weight(.semibold))
-                ForEach(needsYou.sorted(by: Self.conflictsFirst)) { row($0) }
-                HStack {
-                    Text("Agreement (\(agreements.count))").font(.caption.weight(.semibold))
-                    Spacer()
-                    Button("Accept \(assist.document.batchCandidates.count) together") { assist.batchAccept() }
-                        .disabled(assist.document.batchCandidates.isEmpty)
-                        .controlSize(.small)
-                }
-                .padding(.top, 6)
-                ForEach(agreements) { row($0) }
-            }
-        }
-    }
-
-    /// Spans contradicting a phone label first, then in time order.
-    private static func conflictsFirst(_ a: CoarseAssistDocument.Item, _ b: CoarseAssistDocument.Item) -> Bool {
-        let rankA = a.span.conflictWithExistingLabel ? 0 : 1
-        let rankB = b.span.conflictWithExistingLabel ? 0 : 1
-        return rankA != rankB ? rankA < rankB : a.start < b.start
-    }
-
-    private func row(_ item: CoarseAssistDocument.Item) -> some View {
-        Button { assist.selectedSpanID = item.id } label: {
-            HStack(spacing: 8) {
-                Image(systemName: item.isDecided ? "checkmark.circle.fill" : item.span.conflictWithExistingLabel ? "exclamationmark.triangle.fill" : "circle")
-                    .foregroundStyle(item.isDecided ? .green : item.span.conflictWithExistingLabel ? .red : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "%.1f–%.1f s · %@", item.start, item.end,
-                                item.label.map(title) ?? (item.span.proposal.map { "proposed \(title($0))" } ?? "no proposal")))
-                        .font(.caption.monospacedDigit())
-                    Text(item.span.reason).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
-            }
-            .padding(6)
-            .background(color(for: item).opacity(assist.selectedSpanID == item.id ? 0.3 : 0.1),
-                        in: RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Button("Save labels") { assist.save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(assist.document.decidedCount == 0 || !assist.isDirty)
-                if let revision = assist.savedRevision {
-                    Text("Saved v\(String(format: "%04d", revision))").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Text(assist.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Saving writes a new immutable coarse-review revision. Phone labels and proposals are never changed. "
-                 + "Batch-accepted spans train the model but are never used to score it.")
-                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
+        .disabled(assist.document.decidedCount == 0 || !assist.isDirty)
     }
 
     private func cueSelected() {
-        guard let item = assist.selectedItem else { return }
         playback.pause()
-        playback.setLoop(start: item.start, end: item.end, enabled: true)
+        guard let item = assist.selectedItem else {
+            playback.clearLoop()
+            return
+        }
+        playback.setLoop(start: item.start, end: item.end, enabled: false)
         playback.seek(to: item.start)
-        viewport.center = (item.start + item.end) / 2
-        viewport.zoom = max(1, playback.duration / max(1, item.end - item.start + 2))
     }
 
-    private func evidenceText(_ span: CoarseProposals.Span) -> String {
-        let e = span.evidence
-        let video = e.videoUnavailableWindows == span.windows
-            ? "face not visible"
-            : "video chewing in \(e.videoChewingWindows)/\(span.windows - e.videoUnavailableWindows) windows"
-        let motion = e.motionMeanProbability.map { String(format: "motion %.0f%% (chewing in %d/%d windows)", $0 * 100, e.motionChewingWindows, span.windows) } ?? "no motion"
-        let existing = span.existingLabel.map { " · phone label: \(title($0))" } ?? ""
-        return "\(span.reason). \(video); \(motion)\(existing)"
+    private func timeRange(_ item: CoarseAssistDocument.Item) -> String {
+        String(format: "%.1f–%.1f s", item.start, item.end)
     }
 
     private func title(_ label: String) -> String {
         switch label {
         case "chewing": return "chewing"
-        case "not_chewing": return "not chewing"
+        case "not_chewing": return "no chewing"
         case "unknown": return "can't tell"
         case "mixed": return "mixed"
         default: return label
         }
-    }
-
-    private func color(for item: CoarseAssistDocument.Item) -> Color {
-        if item.span.conflictWithExistingLabel { return .red }
-        if !item.span.isAgreement { return .orange }
-        return item.span.proposal == "chewing" ? .green : .gray
     }
 }
 

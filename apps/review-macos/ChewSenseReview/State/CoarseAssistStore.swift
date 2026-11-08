@@ -91,9 +91,18 @@ struct CoarseAssistDocument: Equatable {
     var decidedCount: Int { items.filter(\.isDecided).count }
     var isComplete: Bool { items.allSatisfy(\.isDecided) }
 
+    var reviewClips: [Item] {
+        let conflicts = items.filter { $0.span.conflictWithExistingLabel }
+        return conflicts + items.filter { !$0.span.isAgreement && !$0.span.conflictWithExistingLabel }
+    }
+
+    var agreementClips: [Item] {
+        items.filter { $0.span.isAgreement && !$0.span.conflictWithExistingLabel }
+    }
+
     /// Agreement spans not yet decided that do not contradict an existing label.
     var batchCandidates: [Item] {
-        items.filter { $0.span.isAgreement && !$0.isDecided && !$0.span.conflictWithExistingLabel }
+        agreementClips.filter { !$0.isDecided }
     }
 
     private mutating func count(_ action: String, _ n: Int = 1) { actions[action, default: 0] += n }
@@ -269,7 +278,7 @@ final class CoarseAssistStore: ObservableObject {
             proposalURL = url
             document = CoarseAssistDocument(spans: loaded.spans)
             restoreLatestReview(matching: loaded.contentSha256)
-            selectedSpanID = document.items.first { !$0.isDecided && !$0.span.isAgreement }?.id ?? document.items.first?.id
+            selectedSpanID = document.reviewClips.first { !$0.isDecided }?.id
         } catch {
             message = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"
         }
@@ -333,9 +342,9 @@ final class CoarseAssistStore: ObservableObject {
     }
 
     private func advance(from id: String) {
-        guard let index = document.items.firstIndex(where: { $0.id == id }) else { return }
-        let rest = document.items[(index + 1)...] + document.items[..<index]
-        selectedSpanID = rest.first { !$0.isDecided && !$0.span.isAgreement }?.id ?? selectedSpanID
+        let reviewClips = document.reviewClips
+        let clips = reviewClips.contains(where: { $0.id == id }) ? reviewClips : document.agreementClips
+        selectedSpanID = clips.first { !$0.isDecided }?.id
     }
 
     // MARK: Save

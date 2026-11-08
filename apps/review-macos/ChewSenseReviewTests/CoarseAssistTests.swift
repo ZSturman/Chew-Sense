@@ -93,12 +93,14 @@ final class CoarseAssistTests: XCTestCase {
         let store = CoarseAssistStore(now: { now })
         store.load(session: session, workspaceRoot: root)
         XCTAssertNotNil(store.proposals)
+        XCTAssertEqual(store.selectedSpanID, "cp_0002") // phone conflict is checked first
         now = 20
         store.batchAccept()
         XCTAssertEqual(store.activeSeconds, 0)
         store.startTimer()
         now = 24
         store.setLabel("cp_0002", "chewing")
+        XCTAssertEqual(store.selectedSpanID, "cp_0003")
         store.pauseTimer()
         now = 60
         XCTAssertEqual(store.activeSeconds, 4)
@@ -122,7 +124,9 @@ final class CoarseAssistTests: XCTestCase {
         reopened.load(session: session, workspaceRoot: root)
         XCTAssertEqual(reopened.document.decidedCount, 2)
         XCTAssertEqual(reopened.activeSeconds, 6.5)
+        XCTAssertEqual(reopened.selectedSpanID, "cp_0003")
         reopened.setLabel("cp_0003", "not_chewing")
+        XCTAssertNil(reopened.selectedSpanID)
         reopened.save()
         XCTAssertTrue(FileManager.default.fileExists(atPath: raw.appending(path: "annotations/coarse-review-v0002.json").path))
     }

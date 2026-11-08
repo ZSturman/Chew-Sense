@@ -37,13 +37,12 @@ final class ReviewSnapshotTests: XCTestCase {
         let session = try XCTUnwrap(sessions.first { $0.id.hasPrefix("Guided-baseline") })
         let state = ReviewerState()
         let playback = PlaybackController()
-        let viewport = TimelineViewport()
         let assist = CoarseAssistStore()
         assist.load(session: session, workspaceRoot: assistedRoot)
         XCTAssertNotNil(assist.proposals)
-        try render(CoarseAssistPanel(onClose: {})
+        try render(CoarseAssistPanel(onClose: {}, onPlayClip: {})
                     .environmentObject(state).environmentObject(playback)
-                    .environmentObject(viewport).environmentObject(assist),
+                    .environmentObject(assist),
                    size: CGSize(width: 380, height: 860), to: output.appending(path: "review-chewing-spans.png"))
 
         let training = TrainingStatusStore()

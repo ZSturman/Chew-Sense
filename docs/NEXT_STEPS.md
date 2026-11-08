@@ -22,10 +22,13 @@ the locked motion test was rerun. Evidence is in
 `workspace/experiments/independent-baseline-20261107/`.
 
 **Assisted baseline staged.** The 45 frozen labels are separate from the assisted
-copy. Review shows six disagreement spans (10.5 s) and seven agreement spans
-(89% of the clip). The updated timer starts only on demand and pauses on save,
-panel close or app switch. Twenty-five focused native tests passed. No assisted
-human decisions or time saving are claimed until the wearer saves a revision.
+copy. The wearer found the original panel confusing. Its first attempt showed
+25 s timed and zero decisions. The new flow shows one of six flagged clips
+at a time (10.5 s total), then offers the seven suggested labels together or
+one at a time. **Play clip** starts timing and plays only that clip. The timer
+pauses on save, panel close or app switch. The old trial time is recorded
+separately. Twenty-five focused native tests passed. No assisted human decisions
+or time saving are claimed until the wearer saves a revision.
 Quiet Sitting has zero Vision chew proposals and 71.1% motion coverage with one
 11.5 s gap. Its two no-motion review spans (17.25 s) stay diagnostic, and a full
 new take is higher value than labelling the failed one.

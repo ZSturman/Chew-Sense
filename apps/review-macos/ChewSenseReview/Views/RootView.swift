@@ -28,7 +28,8 @@ struct RootView: View {
             mainStage
             if showAssist, state.selectedSession != nil {
                 Divider()
-                CoarseAssistPanel(onClose: { withAnimation { showAssist = false } })
+                CoarseAssistPanel(onClose: { withAnimation { showAssist = false } },
+                                  onPlayClip: playOrPauseFromSelectedCycleStart)
                     .frame(width: 380)
                     .transition(.move(edge: .trailing))
             } else if showReviewQueue {
@@ -126,13 +127,17 @@ struct RootView: View {
 
     private var videoStage: some View {
         VStack(spacing: 8) {
-            HUDTop(toggleSidebar: { showSidebar.toggle() },
-                   toggleHelp: { showHelp.toggle() },
-                   toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false; showAssist = false } },
-                   toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false; showAssist = false } },
-                   toggleAssist: { showAssist.toggle(); if showAssist { showReviewQueue = false; showSections = false } },
-                   toggleSignals: { showSignals.toggle() })
-            Text(state.isBlindReview
+            if !showAssist {
+                HUDTop(toggleSidebar: { showSidebar.toggle() },
+                       toggleHelp: { showHelp.toggle() },
+                       toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false } },
+                       toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false } },
+                       toggleAssist: { showAssist = true; showReviewQueue = false; showSections = false },
+                       toggleSignals: { showSignals.toggle() })
+            }
+            Text(showAssist
+                 ? "Play each clip and label what you see."
+                 : state.isBlindReview
                  ? "Independent benchmark: add actual chews in the phone-labeled sections, then check for misses elsewhere. Routine recordings use automatic proposals."
                  : "Phone intervals are already imported. Jump to a section, check the automatic proposals, and correct mistakes. Instructions are navigation context, not labels.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -143,11 +148,11 @@ struct RootView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .background(Color.black).clipped()
-            if showSignals && !state.isBlindReview {
+            if showSignals && !state.isBlindReview && !showAssist {
                     CycleShapeChart()
                         .frame(height: 110)
             }
-            BottomDeck()
+            if !showAssist { BottomDeck() }
         }
         .padding(10)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -203,6 +208,13 @@ struct RootView: View {
             playback.pause()
             return
         }
+        if showAssist {
+            guard let item = assist.selectedItem else { return }
+            assist.startTimer()
+            playback.setLoop(start: item.start, end: item.end, enabled: false)
+            playback.playWithinCycle(start: item.start, end: item.end)
+            return
+        }
         if let chew = state.selectedChew {
             playback.setLoop(start: chew.startTS, end: chew.endTS, enabled: state.loopSelectedChew)
             playback.playWithinCycle(start: chew.startTS, end: chew.endTS)
@@ -222,6 +234,19 @@ struct RootView: View {
         let plain = mods.isEmpty
         let shift = mods == .shift
         let option = mods == .option
+
+        if showAssist {
+            guard plain else { return event }
+            if chars == " " {
+                playOrPauseFromSelectedCycleStart()
+                return nil
+            }
+            if event.keyCode == 123 || event.keyCode == 124 {
+                playback.stepFrames(by: event.keyCode == 123 ? -1 : 1)
+                return nil
+            }
+            return event
+        }
 
         // S/P/E + ←/→ chord: nudge that marker on the selected chew.
         // Holding s/p/e suppresses their normal key actions while down.
