@@ -50,8 +50,11 @@ final class ReviewContractTests: XCTestCase {
 
         let playback = PlaybackController()
         playback.load(url: url)
-        let layer = AVPlayerLayer(player: playback.player)
-        defer { layer.player = nil }
+        let videoView = ReviewVideoView(player: playback.player)
+        videoView.setFrameSize(NSSize(width: 480, height: 270))
+        videoView.layoutSubtreeIfNeeded()
+        let layer = try XCTUnwrap(videoView.layer?.sublayers?.first as? AVPlayerLayer)
+        XCTAssertEqual(layer.bounds.size, NSSize(width: 480, height: 270))
         try await waitForPlayback("media item ready") { playback.player.currentItem?.canStepForward == true }
         playback.setLoop(start: 0.1, end: 0.42, enabled: true)
         playback.seek(to: 0.4)
@@ -62,6 +65,15 @@ final class ReviewContractTests: XCTestCase {
         playback.stepFrames(by: -1)
         try await waitForPlayback("previous frame, \(playback.currentTime)") { abs(playback.currentTime - 0.44) < 0.001 }
         XCTAssertFalse(playback.isPlaying)
+        XCTAssertTrue(videoView.layer?.sublayers?.first === layer)
+        XCTAssertEqual(layer.bounds.size, NSSize(width: 480, height: 270))
+
+        videoView.configure(player: playback.player, quarterTurns: 1)
+        videoView.layoutSubtreeIfNeeded()
+        XCTAssertTrue(videoView.layer?.sublayers?.first === layer)
+        XCTAssertEqual(videoView.bounds.size, NSSize(width: 480, height: 270))
+        XCTAssertEqual(layer.bounds.size, NSSize(width: 270, height: 480))
+        XCTAssertNil(layer.animation(forKey: "transform"))
     }
 
     @MainActor

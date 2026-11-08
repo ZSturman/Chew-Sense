@@ -18,7 +18,8 @@ can be removed without changing other annotations.
 
 Use **← / →** or the frame buttons next to Play to pause and step through
 individual video frames. **Shift + ← / →** skips a quarter second. The selected
-chew's loop affects playback only. For a new cycle, pause at the widest opening
+chew's loop affects playback only. Frame stepping updates the same video
+surface at its existing size. For a new cycle, pause at the widest opening
 and press **A** or **Add chew**, then adjust its start and end markers. Use the
 rate menu for slower playback.
 

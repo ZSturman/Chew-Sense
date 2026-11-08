@@ -94,7 +94,7 @@ final class PlaybackController: ObservableObject {
 
     func stepFrames(by count: Int) {
         guard let item = player.currentItem, count != 0 else { return }
-        pause()
+        if isPlaying || player.rate != 0 { pause() }
         if pendingSeek != nil {
             queuedFrameSteps += count
             return
@@ -168,7 +168,7 @@ final class PlaybackController: ObservableObject {
         guard pendingSeek == nil else { return }
         let seconds = player.currentTime().seconds
         guard seconds.isFinite else { return }
-        currentTime = seconds
+        if currentTime != seconds { currentTime = seconds }
 
         guard isPlaying, !suppressLoop, let rangeEnd, seconds >= rangeEnd else { return }
         if isLooping, let rangeStart {

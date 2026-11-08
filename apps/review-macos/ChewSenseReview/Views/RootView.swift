@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import AVKit
+import AVFoundation
 
 /// Dedicated video area, toolbar, section navigator and optional evidence panels.
 /// Playback shortcuts are scoped to the review window.
@@ -138,11 +138,8 @@ struct RootView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             GeometryReader { geometry in
-                let sideways = playback.displayQuarterTurns % 2 != 0
-                VideoSurface()
-                    .frame(width: sideways ? geometry.size.height : geometry.size.width,
-                           height: sideways ? geometry.size.width : geometry.size.height)
-                    .rotationEffect(.degrees(Double(playback.displayQuarterTurns) * 90))
+                VideoSurface(player: playback.player, quarterTurns: playback.displayQuarterTurns)
+                    .equatable()
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .background(Color.black).clipped()
@@ -504,22 +501,59 @@ private struct ReviewSectionsPanel: View {
     }
 }
 
-private struct VideoSurface: NSViewRepresentable {
-    @EnvironmentObject var playback: PlaybackController
+private struct VideoSurface: NSViewRepresentable, Equatable {
+    let player: AVPlayer
+    let quarterTurns: Int
 
-    func makeNSView(context: Context) -> AVPlayerView {
-        let v = AVPlayerView()
-        v.controlsStyle = .none
-        v.showsFullScreenToggleButton = false
-        v.player = playback.player
-        v.videoGravity = .resizeAspect
-        return v
+    func makeNSView(context: Context) -> ReviewVideoView {
+        ReviewVideoView(player: player, quarterTurns: quarterTurns)
     }
 
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        if nsView.player !== playback.player {
-            nsView.player = playback.player
+    func updateNSView(_ nsView: ReviewVideoView, context: Context) {
+        nsView.configure(player: player, quarterTurns: quarterTurns)
+    }
+}
+
+/// The custom transport owns playback. Keep the video layer attached and
+/// independent of playhead updates and AppKit's media controls.
+final class ReviewVideoView: NSView {
+    private let videoLayer: AVPlayerLayer
+    private var quarterTurns: Int
+
+    init(player: AVPlayer, quarterTurns: Int = 0) {
+        videoLayer = AVPlayerLayer(player: player)
+        self.quarterTurns = quarterTurns
+        super.init(frame: .zero)
+        let surface = CALayer()
+        surface.backgroundColor = NSColor.black.cgColor
+        surface.masksToBounds = true
+        videoLayer.videoGravity = .resizeAspect
+        surface.addSublayer(videoLayer)
+        layer = surface
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(player:quarterTurns:)") }
+
+    func configure(player: AVPlayer, quarterTurns: Int) {
+        if videoLayer.player !== player { videoLayer.player = player }
+        if self.quarterTurns != quarterTurns {
+            self.quarterTurns = quarterTurns
+            needsLayout = true
         }
+    }
+
+    override func layout() {
+        super.layout()
+        let size = quarterTurns.isMultiple(of: 2)
+            ? bounds.size : CGSize(width: bounds.height, height: bounds.width)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        videoLayer.bounds = CGRect(origin: .zero, size: size)
+        videoLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        videoLayer.setAffineTransform(CGAffineTransform(rotationAngle: -CGFloat(quarterTurns) * .pi / 2))
+        CATransaction.commit()
     }
 }
 

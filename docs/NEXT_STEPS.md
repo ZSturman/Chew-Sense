@@ -89,6 +89,11 @@ and applies the selection loop only during playback. Rebuilt and reopened the
 blind baseline with predictions hidden. Verified Right and Previous frame on
 the actual baseline and a 25 fps regression fixture. At restart the saved draft
 had 0 events, 0 timer seconds and no full pass, verification or sync confirmation.
+After a report of flashing during scrubbing, Review switched to one persistent
+video layer. The 25 focused macOS tests passed, including checks that stepping
+retains the video layer and its bounds. On the actual blind recording, two Right
+presses and two Left presses moved by one frame each and returned to 25.973 s.
+The draft hash was unchanged and Review was left paused there.
 Use phone-labelled sections 24.1–44.2 s and 61.5–75.3 s, then check the rest.
 Freeze it before inspecting baseline assisted proposals. Quiet Sitting stays
 diagnostic. Measured review time and verified event quality remain pending.
