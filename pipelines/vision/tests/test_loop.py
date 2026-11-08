@@ -642,6 +642,9 @@ def test_phone_status_explains_review_and_training_blockers(loop):
     assert project["phase"] == "collect"
     assert summary["next_action"].startswith(project["headline"] + ": " + project["steps"][0]["title"])
     assert summary["next_experiment_id"] == project["steps"][0]["experiment_id"]
+    # Phones get the stored copy: the timestamp is when it last changed, as Review shows.
+    assert service.phone_status()["pipeline"]["project"]["updated_at"] == project["updated_at"]
+    assert json.loads((loop.root / "project_status.json").read_text()) == project
     write_json_atomic(loop.review_tasks, {"tasks": [{"workspace": "/private/path", "kind": "blind_review"}]})
     summary = service.phone_status()["pipeline"]
     assert summary["review_tasks"] == 1

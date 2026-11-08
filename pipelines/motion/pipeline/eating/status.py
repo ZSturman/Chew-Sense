@@ -118,6 +118,12 @@ def _proposal_state(session_id: str, workspace: Path) -> dict[str, Any] | None:
     return None
 
 
+def _never_trainable(row: Mapping[str, Any]) -> bool:
+    """Rejected for a reason a label cannot fix: incomplete guided take or diagnostic role."""
+    reason = str(row.get("reason") or "")
+    return row.get("role") == "diagnostic" or reason.startswith(("guided recording incomplete", "loop diagnostic role"))
+
+
 def _has_video(session: EatingSession) -> bool:
     folder = Path(session.source_path)
     return folder.is_dir() and any(p.suffix.lower() in {".mov", ".mp4"} for p in folder.iterdir())
@@ -284,10 +290,12 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         "chewing_windows": int((windows.label == 1).sum()) if windows is not None else 0,
         "by_split": by_split,
         # Incomplete or diagnostic takes stay reviewable for diagnosis, but
-        # their spans never reach training or evaluation, so they are not queued.
+        # their spans never reach training or evaluation, so they are not
+        # queued. A new upload is "unusable" only until it has labels; it stays.
         "awaiting_assisted_review": sorted(
             row["session_id"] for row in recordings
-            if row["usable"] and row.get("proposals") and not (row.get("labels") or {}).get("latest_assisted_review")
+            if row.get("proposals") and not (row.get("labels") or {}).get("latest_assisted_review")
+            and not _never_trainable(row)
         ),
     }
 

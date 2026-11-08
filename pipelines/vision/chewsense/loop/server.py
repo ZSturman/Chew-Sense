@@ -30,7 +30,7 @@ from .importer import sha256_file
 from .lmstudio import LMStudio
 from .pairing import DeviceRegistry, ServiceIdentity
 from .processing import Processor
-from .project_status import compute_project_status, write_project_status
+from .project_status import compute_project_status, project_status_path, write_project_status
 from .review_tasks import review_state
 from .requirements import build_requirements
 from .store import LoopPaths, read_json
@@ -223,6 +223,9 @@ class LoopService:
         actions = requirements.get("actions", [])
         project = compute_project_status(self.paths, self.config, records=self.controller.records(),
                                          service_status=status)
+        # Send the stored copy so "updated" means "last changed" in every app, as Review shows it.
+        write_project_status(self.paths, project)
+        project = read_json(project_status_path(self.paths), project) or project
         first = next((s for s in project["steps"] if not s.get("optional")), None)
         # Send only wearer-facing status, never local paths, tokens or raw reviews.
         pipeline = {

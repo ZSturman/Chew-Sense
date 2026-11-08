@@ -129,11 +129,11 @@ def test_locked_test_label_change_keeps_development_results_current(tmp_path):
     assert any("development check" in item["title"] for item in changed["next"])
 
 
-def test_unusable_recordings_are_not_queued_for_span_review(tmp_path):
-    workspace = synthetic_workspace(tmp_path / "workspace")
-    for session_id in ("Guided-s0-20261100-100000-AAAA", "Broken-1"):
-        folder = workspace / "loop/assisted/derived/assist" / session_id
-        folder.mkdir(parents=True)
-        (folder / "coarse-proposals-v0001.json").write_text(json.dumps({"summary": {}}))
-    status = build_status(workspace=workspace, repo=tmp_path / "no-repo")
-    assert status["data"]["awaiting_assisted_review"] == ["Guided-s0-20261100-100000-AAAA"]
+def test_only_never_trainable_recordings_skip_span_review():
+    from pipeline.eating.status import _never_trainable
+
+    assert _never_trainable({"reason": "guided recording incomplete or completion unverified; review remains diagnostic"})
+    assert _never_trainable({"reason": "loop diagnostic role (timing check); never training or evaluation data"})
+    assert _never_trainable({"role": "diagnostic"})
+    # A new upload is rejected only until its spans are labelled: it must stay queued.
+    assert not _never_trainable({"reason": "no human coarse labels (coarse review missing)", "role": "training"})
