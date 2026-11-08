@@ -283,9 +283,11 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         "labelled_windows": int((windows.label >= 0).sum()) if windows is not None else 0,
         "chewing_windows": int((windows.label == 1).sum()) if windows is not None else 0,
         "by_split": by_split,
+        # Incomplete or diagnostic takes stay reviewable for diagnosis, but
+        # their spans never reach training or evaluation, so they are not queued.
         "awaiting_assisted_review": sorted(
             row["session_id"] for row in recordings
-            if row.get("proposals") and not (row.get("labels") or {}).get("latest_assisted_review")
+            if row["usable"] and row.get("proposals") and not (row.get("labels") or {}).get("latest_assisted_review")
         ),
     }
 
@@ -295,7 +297,19 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         result = (metrics.get("results") or {}).get(selected) or {}
         config = metrics.get("config") or {}
         current_fingerprint = dataset_fingerprint(sessions, {k: config[k] for k in FINGERPRINT_KEYS if k in config})
-        trained_ids = {row["session_id"] for row in metrics.get("sessions_overview") or []}
+        overview = metrics.get("sessions_overview") or []
+        trained_ids = {row["session_id"] for row in overview}
+        fingerprint_config = {k: config[k] for k in FINGERPRINT_KEYS if k in config}
+        run_prints = {row["session_id"]: row.get("fingerprint") for row in overview}
+        # Development results stay current when only locked-test recordings
+        # changed. Runs before per-recording fingerprints cannot tell.
+        changed_dev: list[str] | None = None
+        if overview and all(run_prints.values()):
+            changed_dev = sorted(
+                s.session_id for s in sessions
+                if (splits.get(s.session_id) or {}).get("split") != "test"
+                and run_prints.get(s.session_id) != dataset_fingerprint([s], fingerprint_config))
+            changed_dev += sorted(r["session_id"] for r in overview if r.get("split") == "dev" and r["session_id"] not in by_id)
 
         def split_scores(name: str) -> dict[str, Any] | None:
             block = result.get(name)
@@ -363,6 +377,9 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
             "dataset_fingerprint": metrics.get("dataset_fingerprint"),
             "current_dataset_fingerprint": current_fingerprint,
             "trained_on_current_data": current_fingerprint == metrics.get("dataset_fingerprint"),
+            "development_changed_recordings": changed_dev,
+            "development_current": (current_fingerprint == metrics.get("dataset_fingerprint")
+                                    if changed_dev is None else not changed_dev),
             "recordings_not_in_run": sorted(set(by_id) - trained_ids),
             "development": split_scores("dev_oof"),
             "test": split_scores("test"),
@@ -431,10 +448,10 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         for run in index.get("runs") or []
     ]
     next_steps = []
-    if model.get("trained") and not model.get("trained_on_current_data"):
+    if model.get("trained") and not model.get("development_current"):
         next_steps.append({
             "title": "Re-run the development check",
-            "reason": f"labels or recordings changed since {model.get('run_id')} "
+            "reason": f"development labels or recordings changed since {model.get('run_id')} "
                       f"({len(model.get('recordings_not_in_run') or [])} recordings not in that run)",
             "command": "chewsense-motion eating-experiment --dev-only",
         })
@@ -501,7 +518,9 @@ def summarize(status: Mapping[str, Any]) -> list[str]:
             f"(95% CI {test.get('f1_ci95')}) · test consulted {model.get('test_consultations')} times"
         )
         lines.append("Trained on current data: " + ("yes" if model.get("trained_on_current_data") else
-                     f"no ({len(model.get('recordings_not_in_run') or [])} recordings not in the run)"))
+                     f"no ({len(model.get('recordings_not_in_run') or [])} recordings not in the run)")
+                     + ("" if model.get("trained_on_current_data") or not model.get("development_current")
+                        else "; only locked-test recordings changed, development results still current"))
     live = (model.get("live") or {}).get("exported_detector") or {}
     if live:
         parity = model.get("parity") or {}

@@ -97,3 +97,43 @@ def test_latest_development_check_is_visible_without_reusing_historical_test_sco
     assert status["model"]["test_consultations"] == 1
     assert not any("development check" in item["title"] for item in status["next"])
     assert (workspace / "experiments/eating/latest.json").read_bytes() == export_pointer
+
+
+def _relabel(workspace: Path, session_id: str) -> None:
+    path = workspace / "sessions/raw" / session_id / "annotations/coarse_labels.json"
+    payload = json.loads(path.read_text())
+    payload["intervals"] = [_span(0, 12, "not_chewing"), _span(12, 25, "chewing"), _span(25, 40, "not_chewing")]
+    path.write_text(json.dumps(payload))
+
+
+def test_locked_test_label_change_keeps_development_results_current(tmp_path):
+    workspace = synthetic_workspace(tmp_path / "workspace")
+    run_experiment(workspace=workspace, config=ExperimentConfig(models=("prior", "logreg"), folds=2,
+                                                                bootstrap_resamples=20, evaluate_test=False))
+    status = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    by_split = {}
+    for row in status["recordings"]:
+        if row["usable"]:
+            by_split.setdefault(row["split"], []).append(row["session_id"])
+    assert status["model"]["development_current"] and status["model"]["development_changed_recordings"] == []
+
+    _relabel(workspace, by_split["test"][0])
+    changed = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    assert changed["model"]["trained_on_current_data"] is False  # the full fingerprint still says so
+    assert changed["model"]["development_current"] is True
+    assert not any("development check" in item["title"] for item in changed["next"])
+
+    _relabel(workspace, by_split["dev"][0])
+    changed = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    assert changed["model"]["development_changed_recordings"] == [by_split["dev"][0]]
+    assert any("development check" in item["title"] for item in changed["next"])
+
+
+def test_unusable_recordings_are_not_queued_for_span_review(tmp_path):
+    workspace = synthetic_workspace(tmp_path / "workspace")
+    for session_id in ("Guided-s0-20261100-100000-AAAA", "Broken-1"):
+        folder = workspace / "loop/assisted/derived/assist" / session_id
+        folder.mkdir(parents=True)
+        (folder / "coarse-proposals-v0001.json").write_text(json.dumps({"summary": {}}))
+    status = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    assert status["data"]["awaiting_assisted_review"] == ["Guided-s0-20261100-100000-AAAA"]

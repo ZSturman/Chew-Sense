@@ -204,10 +204,11 @@ def run_experiment(
     is_test = (frame["split"] == TEST).to_numpy()
     usable_gap = frame["exclusion"].ne("sensor_gap").to_numpy()
 
-    fingerprint = dataset_fingerprint(sessions, {
+    fingerprint_config = {
         k: v for k, v in asdict(config).items()
         if k in {"window_s", "stride_s", "guard_s", "min_valid_fraction", "training_tiers"}
-    })
+    }
+    fingerprint = dataset_fingerprint(sessions, fingerprint_config)
     models = [m for m in config.models if not (m == "tcn" and abs(config.window_s - 3.0) > 1e-9)]
     if len(models) != len(config.models):
         log("  tcn skipped: the deployable TCN contract requires 3-second windows")
@@ -374,8 +375,13 @@ def run_experiment(
     }
     from .recommendations import collection_recommendations
 
+    # Per-recording fingerprints let the dashboard tell a locked-test label
+    # change (development results still current) from a development change.
+    by_session = {s.session_id: s for s in sessions}
     summary["sessions_overview"] = [
-        {"session_id": row["session_id"], "activity": row["activity"], "split": row["split"]}
+        {"session_id": row["session_id"], "activity": row["activity"], "split": row["split"],
+         "fingerprint": dataset_fingerprint([by_session[row["session_id"]]], fingerprint_config)
+         if row["session_id"] in by_session else None}
         for row in session_rows
     ]
     summary["recommendations"] = collection_recommendations(summary)
