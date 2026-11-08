@@ -124,6 +124,49 @@ def _never_trainable(row: Mapping[str, Any]) -> bool:
     return row.get("role") == "diagnostic" or reason.startswith(("guided recording incomplete", "loop diagnostic role"))
 
 
+def _saved_reviews(workspace: Path) -> list[Path]:
+    reviews = []
+    for root in (workspace / "loop" / "assisted" / "sessions" / "raw", workspace / "sessions" / "raw"):
+        for folder in sorted(root.glob("*/annotations")) if root.is_dir() else []:
+            found = sorted(folder.glob("coarse-review-v*.json"))
+            if found:
+                reviews.append(found[-1])
+    return reviews
+
+
+def reviews_exist(workspace: Path) -> bool:
+    return bool(_saved_reviews(workspace))
+
+
+def saved_review_decisions(workspace: Path) -> dict[str, Any]:
+    """How people treated automatic proposals in saved span reviews (latest per recording).
+
+    This is the evidence for whether agreements could need less human time; it
+    never changes a label.
+    """
+
+    totals = {"recordings": 0, "auto_spans": 0, "auto_accepted_unchanged": 0, "auto_overturned": 0,
+              "auto_seconds": 0.0, "review_spans": 0, "review_seconds": 0.0, "active_seconds": 0.0}
+    for path in _saved_reviews(workspace):
+        review = _read(path) or {}
+        totals["recordings"] += 1
+        totals["active_seconds"] += float((review.get("review_context") or {}).get("active_seconds") or 0.0)
+        for item in review.get("intervals") or []:
+            length = float(item.get("end_ts", 0)) - float(item.get("start_ts", 0))
+            if item.get("proposal_state") == "auto" and item.get("proposal"):
+                totals["auto_spans"] += 1
+                totals["auto_seconds"] += length
+                same = item.get("label") == item.get("proposal") and not item.get("boundary_adjusted")
+                totals["auto_accepted_unchanged" if same else "auto_overturned"] += 1
+            else:
+                totals["review_spans"] += 1
+                totals["review_seconds"] += length
+    for key in ("auto_seconds", "review_seconds", "active_seconds"):
+        totals[key] = round(totals[key], 1)
+    totals["note"] = "latest saved review per recording; agreement acceptance is measured, never assumed"
+    return totals
+
+
 def _has_video(session: EatingSession) -> bool:
     folder = Path(session.source_path)
     return folder.is_dir() and any(p.suffix.lower() in {".mov", ".mp4"} for p in folder.iterdir())
@@ -413,6 +456,9 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
         "auto_not_chewing_precision", "chewing_recovered_automatically", "false_positive_windows",
         "false_negative_windows", "review_windows", "video_unavailable_windows", "effort_model",
     )} if assist else None
+
+    if evaluation is not None or reviews_exist(workspace):
+        evaluation = {**(evaluation or {}), "human_decisions": saved_review_decisions(workspace)}
 
     behavior_latest = _read(workspace / "experiments" / "behavior" / "latest.json")
     if behavior_latest:

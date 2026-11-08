@@ -137,3 +137,18 @@ def test_only_never_trainable_recordings_skip_span_review():
     assert _never_trainable({"role": "diagnostic"})
     # A new upload is rejected only until its spans are labelled: it must stay queued.
     assert not _never_trainable({"reason": "no human coarse labels (coarse review missing)", "role": "training"})
+
+
+def test_saved_review_decisions_count_auto_acceptance(tmp_path):
+    from pipeline.eating.status import saved_review_decisions
+
+    folder = tmp_path / "loop/assisted/sessions/raw/S1/annotations"
+    folder.mkdir(parents=True)
+    (folder / "coarse-review-v0001.json").write_text(json.dumps({"review_context": {"active_seconds": 12.5}, "intervals": [
+        {"start_ts": 0, "end_ts": 10, "label": "chewing", "proposal": "chewing", "proposal_state": "auto"},
+        {"start_ts": 10, "end_ts": 12, "label": "chewing", "proposal": "not_chewing", "proposal_state": "auto"},
+        {"start_ts": 12, "end_ts": 15, "label": "not_chewing", "proposal": None, "proposal_state": "review"},
+    ]}))
+    result = saved_review_decisions(tmp_path)
+    assert result["auto_spans"] == 2 and result["auto_accepted_unchanged"] == 1 and result["auto_overturned"] == 1
+    assert result["review_spans"] == 1 and result["auto_seconds"] == 12.0 and result["active_seconds"] == 12.5
