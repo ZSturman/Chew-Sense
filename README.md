@@ -56,6 +56,7 @@ dashboard:
 .venv/bin/chewsense-motion assist-propose --loop   # chewing-span proposals for loop recordings
 .venv/bin/chewsense-motion assist-eval             # proposal accuracy against human labels
 .venv/bin/chewsense-motion behavior-eval           # bout, pause, cadence and alignment checks
+.venv/bin/chewsense-motion chew-count-eval         # AirPods-only cadence/chew count vs frozen hand-marked chews
 .venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
 ```
 

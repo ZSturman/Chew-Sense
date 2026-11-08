@@ -1,3 +1,45 @@
+# Checkpoint — November 8, 2026 (afternoon): physical-device verification, chew-count evidence
+
+**Verified on the physical iPhone 16 Pro Max (iOS 27.2):**
+- Live pairs as its own status-only device (paired 17:55 UTC). The in-app device
+  test `ChewSenseLiveTests/DeviceStatusTests` fetched `/v1/status` over the pinned
+  certificate with Live's real pairing; the headline matched
+  `loop/project_status.json` (`build/Device-Status-Live.xcresult`).
+- Collect, launched normally (not fixture mode), opened Collect Required Data
+  and showed the same card, steps and answers with its own steps marked
+  "This app" (UI test `DeviceStatusUITests`, `build/Device-Status-Collect.xcresult`,
+  screenshot attachment). It navigates and reads only; nothing was recorded.
+- Review (rebuilt, relaunched) shows the same card. All three now report the
+  same "updated" time: the service sends its stored copy instead of stamping
+  every request.
+
+**Fixed:** the span-review queue had dropped label-less new uploads (caught by
+`test_upload_to_retraining_with_assisted_labels`); only incomplete guided takes
+and diagnostic recordings are skipped now.
+
+**New measurement — AirPods-only chew counting against hand-marked chews.**
+`chewsense-motion chew-count-eval` (reads no model output, fits nothing) scores
+the fixed cadence × duration method inside human chewing spans against the 45
+frozen blind chews of the 90-Second Baseline (locked test recording; behaviour
+measure only): cadence 1.465 vs 1.429 Hz (+2.5%) and 1.562 vs 1.550 Hz (+0.8%);
+count 28 vs 27 and 22 vs 18, total 50 vs 45 (+11%). The excess comes from span
+padding after the last chew. One wearer, one recording, one pace, human span
+boundaries: pilot evidence, not validation.
+`workspace/experiments/behavior/chew-count-latest.json`.
+
+**Automation evidence.** `pipeline-status` now records how people treat
+automatic span proposals: 7/7 agreements (84 of 94.5 s) accepted unchanged;
+6 flagged clips (10.5 s) took 31.9 s active. One recording only, so agreements
+still require confirmation.
+
+**Labelling that stays with the wearer (not done by the agent, on purpose):**
+the blind review of Not eating (Oct 26) and the per-chew check of the
+90-Second Baseline are human ground truth and human-assisted measurements.
+An agent-written review would be model output stored as verified truth. The
+blind workspace was audited: 0 candidates, untouched draft (0 s active).
+
+---
+
 # Checkpoint — November 8, 2026: assisted span review saved; one shared status in every app
 
 **Assisted chewing-span review of the 90-Second Baseline (Nov 2) is saved and audited.**
