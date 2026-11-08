@@ -1,3 +1,50 @@
+# Checkpoint — November 8, 2026 (evening): timing, existing data, device suites
+
+**Timing (video ↔ AirPods), 90-Second Baseline.** Not misaligned, but not
+formally confirmable from this take. The end nod is distinct: residual −8 ms.
+The middle nod agrees (+84 ms) but its motion peak is too weak (prominence 1.9 < 4).
+The start window holds about three nods. Matching all peak pairs fits two
+offsets equally well (6 pairs at ≈0 s and 6 at ≈−0.75 s, one nod apart), so the
+"ambiguous" verdict is correct and the 3-marker rule was left unchanged. Chewing
+rhythm cross-correlation gives +0.04 s in bout 1; −0.6 s in bout 2 is one chew
+period of slip. Video and motion share the iPhone host clock, and the Nov 2 Timing
+Check on the same phone and app version was human-confirmed consistent.
+Conclusion: no evidence of a timing error. The fix is in recording: exactly one
+slow nod per prompt. Confirmation stays human (Review, during the per-chew check).
+
+**Existing recordings cannot add labelled data.** Every rejected recording was
+rechecked. Not-eating-20251212-181452 has an empty motion file. The two
+video-2025 recovery files have 28 s / 11 s of motion, no activity labels and
+unverifiable clocks. Eating-fieldtest-20260525 points outside its bundle and is
+locked test anyway. Nothing was relabelled automatically. New development
+chews come from 90-Second Baselines that the loop's fixed hash assigns to
+training: your per-chew check there creates development truth. Evaluation
+baselines get a blind review.
+
+**No retraining this round.** The development data is unchanged since
+`eating-20261108-105237` (dev F1 .8683, AUC-PR .9444, 7 false bouts; locked test
+consultations still 2). Chew-count changes (e.g. trimming span padding, counting
+cycles instead of cadence × duration) need development recordings with
+hand-marked chews; every verified chew so far is in the locked test recording,
+so nothing was tuned on it.
+
+**Physical iPhone 16 Pro Max suites:** Live 42/42 (`build/Device-Live.xcresult`),
+Collect 31/31 (`build/Device-Collect.xcresult`). Fixed: two Collect tests failed
+only on device (`/private/var` vs `/var` path comparison). One returned before
+deleting its temporary folders from Collect's real Documents. Both now always
+clean up; only the two real recordings remain on the device (listed with
+`devicectl`).
+
+**Your tasks, one at a time:**
+1. Mac, Review: switch to the blind workspace (`workspace/loop/blind`). Open
+   Not-eating-20261026, play its 25 s, then press **Full pass**, **Verify**, **Save**.
+2. iPhone, Collect: **Start 90-Second Baseline**. At each nod prompt, make
+   exactly one slow nod down and up, then stay still. Send it to the Mac.
+3. Then follow the shared card. It names whether that take needs a blind
+   review (evaluation) or a per-chew check (training).
+
+---
+
 # Checkpoint — November 8, 2026 (afternoon): physical-device verification, chew-count evidence
 
 **Verified on the physical iPhone 16 Pro Max (iOS 27.2):**
