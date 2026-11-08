@@ -17,7 +17,11 @@ struct CollectRequiredDataView: View {
             Section {
                 if let pipeline = services.connection.pipeline {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(pipeline.nextAction).font(.callout.weight(.semibold))
+                        if let project = services.connection.project {
+                            ProjectStatusCard(status: project, app: "collect", stale: isOffline)
+                        } else {
+                            Text(pipeline.nextAction).font(.callout.weight(.semibold))
+                        }
                         if let id = pipeline.nextExperimentId,
                            let entry = services.catalog.catalog.entries.first(where: { $0.definition.experimentID == id }) {
                             NavigationLink {
@@ -28,52 +32,57 @@ struct CollectRequiredDataView: View {
                             .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("startRecommendedExperiment")
                         }
-                        if let received = pipeline.receivedSessions {
-                            Text("\(received) received · \(pipeline.completeSessions ?? 0) complete · \(pipeline.incompleteSessions ?? 0) incomplete")
+                        DisclosureGroup("Details") {
+                            if let received = pipeline.receivedSessions {
+                                Text("\(received) received · \(pipeline.completeSessions ?? 0) complete · \(pipeline.incompleteSessions ?? 0) incomplete")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text("\(pipeline.availableReviewTasks ?? pipeline.reviewTasks) reviews ready on your Mac · \(pipeline.attentionCount) processing issues")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if case .offline = services.connection.state {
+                                Text("Last received status. Reconnect to update.").font(.caption).foregroundStyle(.orange)
+                            }
+                            Text(pipeline.researchTargetsMet ? "Vision research targets met" : "Vision research targets still need verification")
+                                .font(.caption.weight(.semibold))
+                            Text(pipeline.motionAssessmentPassed == true ? "AirPods model test gates passed" : "AirPods model still needs training and test verification")
+                                .font(.caption.weight(.semibold))
+                            if pipeline.trainingReady {
+                                Text("Data gates passed. Experimental training is eligible; model verification and promotion remain separate.")
+                                    .font(.caption)
+                            }
+                            ForEach(pipeline.goals ?? []) { goal in
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(goal.title)
+                                    Spacer()
+                                    Text("\(goal.current) / \(goal.target)").monospacedDigit().fixedSize()
+                                }
+                                .font(.caption)
+                            }
+                            if services.connection.project == nil {
+                                ForEach(Array((pipeline.actions ?? []).dropFirst().prefix(2))) { action in
+                                    Label(action.title + " · " + (action.destination == "mac" ? "On your Mac" : "In Collect"),
+                                          systemImage: action.destination == "mac" ? "desktopcomputer" : "video")
+                                        .font(.caption)
+                                }
+                            }
+                            DisclosureGroup("Pipeline progress") {
+                                ForEach(pipeline.stages ?? []) { stage in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Label(stage.title, systemImage: stage.state == "complete" ? "checkmark.circle.fill" : stage.state == "running" ? "gearshape.2" : "circle.dashed")
+                                        Text(stage.detail).foregroundStyle(.secondary)
+                                    }
+                                    .font(.caption).padding(.vertical, 3)
+                                }
+                            }
+                            DisclosureGroup("Why training is waiting") {
+                                ForEach(pipeline.blockers, id: \.self) { blocker in
+                                    Label(blocker, systemImage: "circle.dashed").font(.caption)
+                                }
+                            }
+                            Text("A completed recording is not a verified label. Review and clock confirmation happen on the Mac.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("\(pipeline.availableReviewTasks ?? pipeline.reviewTasks) reviews ready on your Mac · \(pipeline.attentionCount) processing issues")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if case .offline = services.connection.state {
-                            Text("Last received status. Reconnect to update.").font(.caption).foregroundStyle(.orange)
-                        }
-                        Text(pipeline.researchTargetsMet ? "Vision research targets met" : "Vision research targets still need verification")
-                            .font(.caption.weight(.semibold))
-                        Text(pipeline.motionAssessmentPassed == true ? "AirPods model test gates passed" : "AirPods model still needs training and test verification")
-                            .font(.caption.weight(.semibold))
-                        if pipeline.trainingReady {
-                            Text("Data gates passed. Experimental training is eligible; model verification and promotion remain separate.")
-                                .font(.caption)
-                        }
-                        ForEach(pipeline.goals ?? []) { goal in
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(goal.title)
-                                Spacer()
-                                Text("\(goal.current) / \(goal.target)").monospacedDigit().fixedSize()
-                            }
-                            .font(.caption)
-                        }
-                        ForEach(Array((pipeline.actions ?? []).dropFirst().prefix(2))) { action in
-                            Label(action.title + " · " + (action.destination == "mac" ? "On your Mac" : "In Collect"),
-                                  systemImage: action.destination == "mac" ? "desktopcomputer" : "video")
-                                .font(.caption)
-                        }
-                        DisclosureGroup("Pipeline progress") {
-                            ForEach(pipeline.stages ?? []) { stage in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label(stage.title, systemImage: stage.state == "complete" ? "checkmark.circle.fill" : stage.state == "running" ? "gearshape.2" : "circle.dashed")
-                                    Text(stage.detail).foregroundStyle(.secondary)
-                                }
-                                .font(.caption).padding(.vertical, 3)
-                            }
-                        }
-                        DisclosureGroup("Why training is waiting") {
-                            ForEach(pipeline.blockers, id: \.self) { blocker in
-                                Label(blocker, systemImage: "circle.dashed").font(.caption)
-                            }
-                        }
-                        Text("A completed recording is not a verified label. Review and clock confirmation happen on the Mac.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
                     }
                     .accessibilityIdentifier("pipelineNextSteps")
                 } else {
@@ -103,6 +112,11 @@ struct CollectRequiredDataView: View {
         .navigationTitle("Collect Required Data")
         .refreshable { await services.synchronize() }
         .task { await services.synchronize() }
+    }
+
+    private var isOffline: Bool {
+        if case .offline = services.connection.state { return true }
+        return false
     }
 
     private var catalogFooter: String {

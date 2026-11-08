@@ -24,6 +24,8 @@ struct SessionSidebar: View {
                     .padding(.horizontal, 10)
             }
 
+            ProjectStatusLine().padding(.horizontal, 10)
+
             List(state.sessions, selection: bindingForSelection()) { session in
                 HStack(spacing: 6) {
                     Circle().fill(statusColor(session.status)).frame(width: 8, height: 8)

@@ -637,11 +637,16 @@ def test_phone_status_explains_review_and_training_blockers(loop):
     assert not summary["training_ready"]
     assert not summary["research_targets_met"]
     assert any("need 20" in reason for reason in summary["blockers"])
-    assert "experiment" in summary["next_action"]
+    # The legacy one-line message is the shared project status's first step.
+    project = summary["project"]
+    assert project["phase"] == "collect"
+    assert summary["next_action"].startswith(project["headline"] + ": " + project["steps"][0]["title"])
+    assert summary["next_experiment_id"] == project["steps"][0]["experiment_id"]
     write_json_atomic(loop.review_tasks, {"tasks": [{"workspace": "/private/path", "kind": "blind_review"}]})
     summary = service.phone_status()["pipeline"]
     assert summary["review_tasks"] == 1
     assert "Review" in summary["next_action"]
+    assert summary["project"]["phase"] == "label"
     assert "/private/path" not in json.dumps(summary)
     write_json_atomic(loop.status, {"attention": [{"error": "failure"}]})
     assert "errors" in service.phone_status()["pipeline"]["next_action"]

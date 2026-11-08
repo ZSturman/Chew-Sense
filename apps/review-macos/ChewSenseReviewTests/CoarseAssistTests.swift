@@ -152,3 +152,25 @@ final class TrainingStatusDecodingTests: XCTestCase {
         XCTAssertEqual(timeline.humanIntervals[0][2].string.map { ["chewing", "not_chewing"].contains($0) }, true)
     }
 }
+
+/// Review reads the same shared message Collect and Live receive.
+@MainActor
+final class ProjectStatusDecodingTests: XCTestCase {
+    func testDecodesSyntheticProjectStatus() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/project_status_synthetic.json")
+        let status = try ProjectStatus.decode(Data(contentsOf: url))
+        XCTAssertEqual(status.headline, "Label recordings in Review")
+        XCTAssertEqual(status.steps.first?.app, "review")
+        XCTAssertEqual(ProjectStatus.place(of: "review", in: "review"), "This app")
+        XCTAssertEqual(status.checks.count, 3)
+    }
+
+    func testFindsTheLoopFileFromAReviewWorkspace() {
+        let loop = URL(fileURLWithPath: "/tmp/ws/loop")
+        XCTAssertEqual(ProjectStatusStore.candidates(workspace: loop.appending(path: "blind")).first,
+                       loop.appending(path: "project_status.json"))
+        XCTAssertEqual(ProjectStatusStore.candidates(workspace: URL(fileURLWithPath: "/tmp/ws")).first,
+                       loop.appending(path: "project_status.json"))
+    }
+}

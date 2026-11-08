@@ -89,14 +89,20 @@ struct RootView: View {
         if state.workspaceRoot == nil {
             workspacePrompt
         } else if state.selectedSession == nil {
-            VStack(spacing: 16) {
-                ContentUnavailableView(
-                    "Pick a session",
-                    systemImage: "video.circle",
-                    description: Text("Choose a session in the sidebar to start labeling chews.")
-                )
-                ReviewGuidanceView(stage: .workspace)
-                    .frame(maxWidth: 560)
+            ScrollView {
+                VStack(spacing: 16) {
+                    ProjectStatusBox()
+                        .frame(maxWidth: 560)
+                    ContentUnavailableView(
+                        "Pick a session",
+                        systemImage: "video.circle",
+                        description: Text("Choose a session in the sidebar to start labeling chews.")
+                    )
+                    ReviewGuidanceView(stage: .workspace)
+                        .frame(maxWidth: 560)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
             }
         } else if state.selectedSession?.videoURL == nil {
             ContentUnavailableView(

@@ -119,6 +119,17 @@ struct GuidedCollectionTests {
         #expect(status.nextExperimentId == "baseline-90s")
     }
 
+    @Test func sharedProjectStatusDecodesTheMacMessage() throws {
+        let data = Data(#"{"schema_version":1,"updated_at":"2026-11-08T10:49:53.294120+00:00","phase":"collect","headline":"Collect more recordings","summary":"The next model is waiting for more verified data.","stages":[{"id":"collect","title":"Collect","app":"collect","current":true,"detail":"13 experiments still requested"}],"steps":[{"id":"record-baseline-90s","stage":"collect","app":"collect","experiment_id":"baseline-90s","title":"Record 90-Second Baseline","detail":"1 of 3 complete."},{"id":"try-live","stage":"test","app":"live","optional":true,"title":"Optional: try the experimental model in Live","detail":"Live → New model check."}],"checks":[{"id":"more_data","question":"Do we need more data?","state":"blocked","answer":"Yes."}]}"#.utf8)
+        let status = try ProjectStatus.decode(data)
+        #expect(status.headline == "Collect more recordings")
+        #expect(status.steps.first?.experimentId == "baseline-90s")
+        #expect(status.steps.last?.optional == true)
+        #expect(ProjectStatus.place(of: status.steps[0].app, in: "collect") == "This app")
+        #expect(ProjectStatus.place(of: status.steps[1].app, in: "collect") == "In Live")
+        #expect(try ProjectStatus.decode(status.encoded()) == status)
+    }
+
     private static var seedURL: URL {
         get throws {
             try #require(Bundle(for: ExperimentCatalogStore.self)

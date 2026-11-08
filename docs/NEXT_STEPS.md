@@ -1,3 +1,82 @@
+# Checkpoint — November 8, 2026: assisted span review saved; one shared status in every app
+
+**Assisted chewing-span review of the 90-Second Baseline (Nov 2) is saved and audited.**
+`loop/assisted/sessions/raw/Guided-baseline-90s-20261102-171334-F83AB32C/annotations/coarse-review-v0001.json`
+(saved 10:36 UTC) cites proposal revision `coarse-proposals-v0002.json` by its
+content hash (`2a36e45f…`, matches). All 13 spans are decided: 7 agreements
+accepted in one batch, 6 flagged clips labelled individually, no automatic
+proposal overturned. Active time **31.9 s** for a 94.5 s recording (the
+earlier blind pass was untimed, so no saving is claimed). Independent check:
+all 45 frozen blind chew cycles fall inside the 33.0 s confirmed as chewing
+(27 in 24.75–43.75 s, 18 in 61.75–75.75 s). The recording is in the locked
+test split, so this refines evaluation labels and adds no training data. The
+frozen blind review is unchanged.
+
+**Where the process is (answers to the three questions):**
+- *Can a model be tested?* Yes, as an experiment. Live already carries the
+  exported AirPods chewing-span detector (`eating-hgb-20261104-015911-7a28dd15`,
+  development F1 0.87, one wearer, shadow mode). Its accuracy in real use is
+  unmeasured; no labelled Live check exists yet.
+- *Is visual chew detection working?* Partly. Vision runs automatically on every
+  recording. Against the 45 hand-marked chews it found 28 (F1 0.73 at ±250 ms;
+  target 0.85). It is a labelling assistant, not a chew counter.
+- *More data?* Yes. Loop gates before the next model: verified chewing
+  recordings 0/20, verified talking/walking/drinking/head-movement recordings
+  0/20, blind-reviewed test recordings 1/6, hand-marked chews 45/300.
+
+**One message in Collect, Review and Live.** New
+`pipelines/vision/chewsense/loop/project_status.py` derives a single status
+from existing loop files: phase (Collect → Label → Train → Test), numbered next
+steps tagged with the app they happen in, and the three answers above. It never
+analyzes, trains or publishes a catalog.
+- Service: `GET /v1/status` adds `pipeline.project`. The legacy `next_action`
+  line and `next_experiment_id` are now taken from it, so even the installed
+  Collect 1.2 (7) shows the aligned message after a service restart. The
+  periodic tick rewrites `workspace/loop/project_status.json` when it changes.
+  `chewsense-vision loop project-status` writes it without the service.
+- Collect: the shared card leads **What happens next**; older details moved
+  under **Details**. PinnedTrust/Keychain moved unchanged to
+  `apps/shared-capture/LoopServiceTrust.swift`.
+- Review: sidebar line, empty main window, and the top of Pipeline (⇧⌘P) and
+  Training (⇧⌘T). It compiles the same `apps/shared-capture/ProjectStatus.swift`.
+- Live: new **Where we are** section with a status-only Mac pairing (same
+  code/certificate proofs as Collect; Bonjour in `Config/Live-Info.plist`, Local
+  Network description added). The last message stays visible offline.
+
+Current message (written to `loop/project_status.json`): **Label recordings in
+Review** — 1. Blind review: Not eating (Oct 26) · 2. Check suggested chews:
+90-Second Baseline (Nov 2) · 3. Record 90-Second Baseline (1 of 3) · 4. Record
+Natural Meal (0 of 3) · optional: try the experimental model in Live.
+
+**Training-status fixes.** `pipeline-status` no longer asks for a development
+re-run when only locked-test labels changed: runs now store per-recording
+fingerprints (`sessions_overview[].fingerprint`) and status reports
+`development_current` / `development_changed_recordings`. Incomplete or
+diagnostic takes are no longer queued for span review.
+Dev-only run `eating-20261108-105237` (fingerprints recorded) reproduced HGB development F1 .8683, AUC-PR .9444, 7 false bouts; locked test untouched (consultations still 2; `splits.json` and `latest.json` hashes unchanged). `pipeline-status` now reports trained on current data.
+
+**Verification.** Python: 67 loop tests, 8 project-status tests and 5 status
+tests passed. Swift: Review 8/8 focused tests plus the opt-in snapshot render
+(`build/ProjectStatus-Review.xcresult`, `build/ProjectStatus-ReviewSnapshot.xcresult`);
+Collect 19/19 `GuidedCollectionTests` (`build/ProjectStatus-Collect.xcresult`);
+Live 12/12 focused tests (`build/ProjectStatus-Live.xcresult`). Simulator and
+macOS only. No physical-device run, Live pairing or service restart was done.
+
+**Done with your approval (Nov 8, ~11:00 UTC):** loop service restarted (same
+port 48765 and certificate `8da810cf…`; catalog still v11; no analysis ran) and it
+now rewrites `loop/project_status.json`. Review was quit normally, rebuilt with the
+README command and relaunched; the card shows on the main window. Collect and
+Live development builds were installed on the iPhone 16 Pro Max, replacing
+TestFlight Collect 1.2 (7). Still open: pair Live once (Live → Where we are →
+Connect to your Mac, with a code from Review → Pipeline → Pair iPhone) and confirm
+the card on both phones. No on-device check of the card has been done yet.
+
+**Your next steps (same as the apps):** the two short Review tasks above, then
+record the 90-Second Baseline and a complete three-nod Natural Meal v2, then
+hard negatives (talking, drinking, head movement, gum, talking while eating).
+
+---
+
 # Autonomous checkpoint — November 7, 2026
 
 Details and reproduction: [device/pipeline report](DEVICE_PIPELINE_2026-11-06.md).

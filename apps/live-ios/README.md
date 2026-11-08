@@ -82,3 +82,14 @@ chewsense-motion deploy
 ```
 
 See [`../../docs/RUNBOOK.md`](../../docs/RUNBOOK.md).
+
+## Where we are (Mac connection)
+
+Live's first section, **Where we are**, shows the same project status as Collect
+and Review: the current step, the next steps and which app each one happens
+in. Tap **Connect to your Mac**, open Review → Pipeline → Pair iPhone on the
+Mac, choose the Mac and enter the six-digit code. Live pairs as its own device,
+uses the same pinned-certificate proof as Collect and only calls
+`GET /v1/status`. It never uploads recordings. The first discovery asks for
+Local Network access (`Config/Live-Info.plist` declares `_chewsense._tcp`).
+The last received message stays visible offline and is marked as such.

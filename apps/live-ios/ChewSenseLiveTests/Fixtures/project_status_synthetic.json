@@ -1,0 +1,91 @@
+{
+ "schema_version": 1,
+ "updated_at": "2026-11-08T10:49:53.294120+00:00",
+ "phase": "label",
+ "headline": "Label recordings in Review",
+ "summary": "1 labelling task(s) are waiting in Review. After that, keep collecting recordings.",
+ "stages": [
+  {
+   "id": "collect",
+   "title": "Collect",
+   "app": "collect",
+   "current": false,
+   "detail": "3 experiments still requested"
+  },
+  {
+   "id": "label",
+   "title": "Label",
+   "app": "review",
+   "current": true,
+   "detail": "1 waiting"
+  },
+  {
+   "id": "train",
+   "title": "Train",
+   "app": "mac",
+   "current": false,
+   "detail": "waiting for data gates"
+  },
+  {
+   "id": "test",
+   "title": "Test",
+   "app": "live",
+   "current": false,
+   "detail": "experimental model in Live"
+  }
+ ],
+ "steps": [
+  {
+   "id": "blind-Not-eating-20261026-174428-SYNTH",
+   "stage": "label",
+   "app": "review",
+   "session_id": "Not-eating-20261026-174428-SYNTH",
+   "title": "Blind review: Not eating (Oct 26)",
+   "detail": "Open it in Review's blind workspace and mark every chew, or confirm there are none. Predictions stay hidden."
+  },
+  {
+   "id": "record-baseline-90s",
+   "stage": "collect",
+   "app": "collect",
+   "experiment_id": "baseline-90s",
+   "title": "Record 90-Second Baseline",
+   "detail": "1 of 3 complete. Follow the on-screen prompts to the end, then send it to the Mac."
+  },
+  {
+   "id": "record-natural-meal",
+   "stage": "collect",
+   "app": "collect",
+   "experiment_id": "natural-meal",
+   "title": "Record Natural Meal",
+   "detail": "0 of 3 complete. Follow the on-screen prompts to the end, then send it to the Mac."
+  },
+  {
+   "id": "try-live",
+   "stage": "test",
+   "app": "live",
+   "optional": true,
+   "title": "Optional: try the experimental model in Live",
+   "detail": "Live \u2192 Connect AirPods \u2192 New model check. It shows what the model detects; it is not an accuracy test yet."
+  }
+ ],
+ "checks": [
+  {
+   "id": "test_model",
+   "question": "Can I test a model?",
+   "state": "partial",
+   "answer": "Yes, as an experiment: Live has the AirPods chewing-span model. Development F1 0.87 on one wearer's labels. Its accuracy in real use is not measured yet."
+  },
+  {
+   "id": "vision",
+   "question": "Is visual chew detection working?",
+   "state": "partial",
+   "answer": "Partly. It runs on every recording and suggests chews. On 45 hand-marked chews it found 28 (F1 0.73 within \u00b1250 ms; target 0.85). Use it as labelling help, not a chew counter yet."
+  },
+  {
+   "id": "more_data",
+   "question": "Do we need more data?",
+   "state": "blocked",
+   "answer": "Yes. Have/need before the next model: verified chewing recordings 0/20, verified talking/walking/drinking/head-movement recordings 0/20, blind-reviewed test recordings 1/6, hand-marked chews 45/300."
+  }
+ ]
+}

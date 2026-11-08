@@ -59,6 +59,21 @@ dashboard:
 .venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
 ```
 
+**Where we are (same message in every app, November 8).** The loop service
+computes one status: the current step (Collect → Label → Train → Test), the
+numbered next steps with the app each happens in, and plain answers to "Can I
+test a model?", "Is visual chew detection working?" and "Do we need more
+data?". Collect shows it under **What happens next**. Review shows it in the
+sidebar, on the empty main window and at the top of the Pipeline and Training
+windows. Live shows it under **Where we are** after a one-time, status-only
+pairing (Review → Pipeline → Pair iPhone, then Live → **Connect to your Mac**).
+The service rewrites `workspace/loop/project_status.json` whenever the evidence
+changes. Without the service, refresh it with:
+
+```sh
+.venv/bin/chewsense-vision loop project-status    # reads loop files only; no analysis or catalog publish
+```
+
 November 6 [physical-device and pipeline validation](docs/DEVICE_PIPELINE_2026-11-06.md):
 Collect and Live were installed on iPhone. Eighteen Collect and 22 Live fixture
 tests passed on the phone. Two real recordings, including a short Natural Meal,

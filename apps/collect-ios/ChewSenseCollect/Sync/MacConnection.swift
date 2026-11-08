@@ -54,6 +54,9 @@ final class MacConnection: NSObject, ObservableObject {
     @Published private(set) var discoveryError: String?
     @Published private(set) var lastSync: Date?
     @Published private(set) var pipeline: PipelineStatus?
+    /// The shared "where we are" message, also shown by Review and Live.
+    /// Decoded separately so an unexpected shape never hides `pipeline`.
+    @Published private(set) var project: ProjectStatus?
 
     struct PipelineStatus: Decodable {
         struct Goal: Decodable, Identifiable {
@@ -230,6 +233,7 @@ final class MacConnection: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: defaultsKey)
         paired = nil
         pipeline = nil
+        project = nil
         state = .unpaired
     }
 
@@ -252,10 +256,13 @@ final class MacConnection: NSObject, ObservableObject {
         if case .offline = state {} else if case .connected = state {} else { state = .connecting }
         do {
             let status = try JSONSerialization.jsonObject(with: try await request("GET", "v1/status")) as? [String: Any]
-            if let summary = status?["pipeline"] as? [String: Any] {
+            if var summary = status?["pipeline"] as? [String: Any] {
+                let shared = summary.removeValue(forKey: "project")
                 let decoder = JSONDecoder()
                 decoder.keyDecodingStrategy = .convertFromSnakeCase
                 pipeline = try decoder.decode(PipelineStatus.self, from: JSONSerialization.data(withJSONObject: summary))
+                project = shared.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                    .flatMap { try? ProjectStatus.decode($0) }
             }
             let since = catalog.source == .bundledSeed ? nil : "since=\(catalog.catalog.catalogVersion)"
             let data = try await request("GET", "v1/catalog", query: since)
@@ -303,69 +310,4 @@ final class MacConnection: NSObject, ObservableObject {
     }
 }
 
-/// Accepts only the pinned self-signed certificate; with no pin (pairing), it
-/// records the presented fingerprint for the HMAC binding.
-nonisolated final class PinnedTrust: NSObject, URLSessionDelegate, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _expected: String?
-    private var _observed: String?
-    private var _pinFailed = false
-
-    var expected: String? {
-        get { lock.withLock { _expected } }
-        set { lock.withLock { _expected = newValue; _pinFailed = false } }
-    }
-    var observed: String? { lock.withLock { _observed } }
-    var pinFailed: Bool { lock.withLock { _pinFailed } }
-
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust,
-              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
-              let leaf = chain.first else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        let der = SecCertificateCopyData(leaf) as Data
-        let fingerprint = SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
-        let pin = expected
-        lock.withLock { _observed = fingerprint }
-        if let pin, pin != fingerprint {
-            lock.withLock { _pinFailed = true }
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        completionHandler(.useCredential, URLCredential(trust: trust))
-    }
-}
-
-nonisolated enum Keychain {
-    private static let service = "ChewSenseLoop"
-    private static let account = "device-token"
-
-    static func save(token: String) throws {
-        delete()
-        let status = SecItemAdd([
-            kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueData: Data(token.utf8),
-        ] as CFDictionary, nil)
-        guard status == errSecSuccess else { throw Err("Could not store the pairing token (\(status)).") }
-    }
-
-    static func token() -> String? {
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching([
-            kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
-            kSecReturnData: true,
-        ] as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func delete() {
-        SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service,
-                       kSecAttrAccount: account] as CFDictionary)
-    }
-}
+// PinnedTrust and Keychain live in apps/shared-capture/LoopServiceTrust.swift (shared with Live).

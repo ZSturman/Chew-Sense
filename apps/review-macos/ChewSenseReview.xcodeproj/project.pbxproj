@@ -25,6 +25,7 @@
 		A1000010 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010 /* SessionSidebar.swift */; };
 		A1000011 /* HelpPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011 /* HelpPanel.swift */; };
 		A1000024 /* PipelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000024 /* PipelineStore.swift */; };
+		A1000090 /* ProjectStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000090 /* ProjectStatus.swift */; };
 		A1000025 /* PipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000025 /* PipelineView.swift */; };
 		A1000026 /* CoarseAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000026 /* CoarseAssistStore.swift */; };
 		A1000027 /* CoarseAssistPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000027 /* CoarseAssistPanel.swift */; };
@@ -71,6 +72,7 @@
 		B1000010 /* SessionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSidebar.swift; sourceTree = "<group>"; };
 		B1000011 /* HelpPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPanel.swift; sourceTree = "<group>"; };
 		B1000024 /* PipelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineStore.swift; sourceTree = "<group>"; };
+		B1000090 /* ProjectStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProjectStatus.swift; path = "../shared-capture/ProjectStatus.swift"; sourceTree = SOURCE_ROOT; };
 		B1000026 /* CoarseAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoarseAssistStore.swift; sourceTree = "<group>"; };
 		B1000027 /* CoarseAssistPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoarseAssistPanel.swift; sourceTree = "<group>"; };
 		B1000028 /* TrainingStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingStatusStore.swift; sourceTree = "<group>"; };
@@ -110,6 +112,7 @@
 			children = (
 				E1000002 /* ChewSenseReview */,
 				E2000001 /* ChewSenseReviewTests */,
+				B1000090 /* ProjectStatus.swift */,
 				E1000099 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -310,6 +313,7 @@
 				A1000010 /* SessionSidebar.swift in Sources */,
 				A1000011 /* HelpPanel.swift in Sources */,
 				A1000024 /* PipelineStore.swift in Sources */,
+				A1000090 /* ProjectStatus.swift in Sources */,
 				A1000025 /* PipelineView.swift in Sources */,
 				A1000020 /* TimelineViewport.swift in Sources */,
 				A1000021 /* ReviewQueueSheet.swift in Sources */,

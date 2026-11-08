@@ -30,6 +30,7 @@ from .importer import sha256_file
 from .lmstudio import LMStudio
 from .pairing import DeviceRegistry, ServiceIdentity
 from .processing import Processor
+from .project_status import compute_project_status, write_project_status
 from .review_tasks import review_state
 from .requirements import build_requirements
 from .store import LoopPaths, read_json
@@ -119,6 +120,8 @@ class LoopService:
             self._analysis_requested.set()
         if self._analysis_requested.is_set():
             self.analyze()
+        write_project_status(self.paths, compute_project_status(
+            self.paths, self.config, records=self.controller.records()))
 
     # ---------------------------------------------------------- uploads
     def _upload_dir(self, upload_id: str) -> Path:
@@ -218,6 +221,9 @@ class LoopService:
                 report["synchronization"], readiness, report["training"]["history"], tasks, self.config,
                 eating=report.get("eating_detector"))
         actions = requirements.get("actions", [])
+        project = compute_project_status(self.paths, self.config, records=self.controller.records(),
+                                         service_status=status)
+        first = next((s for s in project["steps"] if not s.get("optional")), None)
         # Send only wearer-facing status, never local paths, tokens or raw reviews.
         pipeline = {
             "review_tasks": len(tasks),
@@ -233,17 +239,12 @@ class LoopService:
             "complete_sessions": requirements.get("complete_sessions", 0),
             "incomplete_sessions": requirements.get("incomplete_sessions", 0),
             "available_review_tasks": requirements.get("review_tasks", 0),
-            "next_experiment_id": next((a["experiment_id"] for a in actions if a.get("experiment_id")), None),
-            "next_action": (
-                "Resolve processing errors on the Mac before recording more."
-                if status.get("attention") else
-                "Processing your recording on the Mac. Requests update after its checks finish."
-                if status.get("current") else
-                f"{actions[0]['title']}. {actions[0]['detail']}" if actions else
-                "Open Review → Pipeline on your Mac and complete the pending reviews, including clock confirmation."
-                if tasks else
-                "Choose a requested experiment below. Follow the overlays, review the recording, then send it to your Mac."
-            ),
+            # The first Collect step, so the Start button matches the shared next steps.
+            "next_experiment_id": next((s["experiment_id"] for s in project["steps"] if s.get("experiment_id")), None),
+            # Older Collect builds show only this line; keep it identical to the shared message.
+            "next_action": (f"{project['headline']}: {first['title']}. {first['detail']}" if first
+                            else f"{project['headline']}. {project['summary']}"),
+            "project": project,
         }
         return {"service": "chewsense-loop", "api_version": API_VERSION, "state": status.get("state"),
                 "pending": len(status.get("pending", [])), "catalog_version": catalog.get("catalog_version"),

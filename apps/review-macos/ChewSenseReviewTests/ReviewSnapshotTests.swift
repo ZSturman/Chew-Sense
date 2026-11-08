@@ -45,6 +45,11 @@ final class ReviewSnapshotTests: XCTestCase {
                     .environmentObject(assist),
                    size: CGSize(width: 380, height: 860), to: output.appending(path: "review-chewing-spans.png"))
 
+        let shared = try ProjectStatus.decode(Data(contentsOf: workspace.appending(path: "loop/project_status.json")))
+        try render(ProjectStatusCard(status: shared, app: "review").padding(16)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   size: CGSize(width: 560, height: 760), to: output.appending(path: "review-project-status.png"))
+
         let training = TrainingStatusStore()
         training.adopt(reviewRoot: assistedRoot)
         XCTAssertNotNil(training.status, training.loadError ?? "")

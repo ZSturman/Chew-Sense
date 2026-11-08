@@ -23,8 +23,11 @@ struct TrainingStatusView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    TrainingStatusContent(store: store, initialSelection: initialSelection)
-                        .padding(20)
+                    VStack(alignment: .leading, spacing: 16) {
+                        ProjectStatusBox()
+                        TrainingStatusContent(store: store, initialSelection: initialSelection)
+                    }
+                    .padding(20)
                 }
             }
         }

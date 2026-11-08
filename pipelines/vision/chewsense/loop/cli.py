@@ -94,6 +94,20 @@ def status():
                           indent=2))
 
 
+@loop.command("project-status")
+def project_status_cmd():
+    """Write and print the shared "where we are" message without analyzing."""
+    from .controller import LoopController
+    from .project_status import compute_project_status, project_status_path, write_project_status
+
+    paths = _paths()
+    config = _config(paths)
+    status = compute_project_status(paths, config, records=LoopController(paths, config).records())
+    write_project_status(paths, status)
+    click.echo(json.dumps(status, indent=2))
+    click.echo(f"Wrote {project_status_path(paths)}", err=True)
+
+
 @loop.command("import")
 @click.argument("archive", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 def import_cmd(archive: Path):

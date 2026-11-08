@@ -142,3 +142,50 @@ final class PipelineStore: ObservableObject {
         return object
     }
 }
+
+/// Reads `loop/project_status.json`: the "where we are" message the loop
+/// service also sends to Collect and Live, so all three apps agree.
+@MainActor
+final class ProjectStatusStore: ObservableObject {
+    @Published private(set) var status: ProjectStatus?
+    @Published private(set) var fileURL: URL?
+    private var workspace: URL?
+    private var lastData: Data?
+    private var timer: AnyCancellable?
+
+    func start(workspace: URL?) {
+        self.workspace = workspace
+        reload()
+        if timer == nil {
+            timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect().sink { [weak self] _ in
+                self?.reload()
+            }
+        }
+    }
+
+    func reload() {
+        fileURL = Self.candidates(workspace: workspace).first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let fileURL, let data = try? Data(contentsOf: fileURL) else { status = nil; lastData = nil; return }
+        guard data != lastData else { return }
+        lastData = data
+        status = try? ProjectStatus.decode(data)
+    }
+
+    /// `…/loop/assisted|blind` → `…/loop`; a workspace root → `<root>/loop`;
+    /// otherwise the loop folder chosen in the Pipeline window.
+    static func candidates(workspace: URL?) -> [URL] {
+        var roots: [URL] = []
+        if let workspace {
+            if ["assisted", "blind"].contains(workspace.lastPathComponent),
+               workspace.deletingLastPathComponent().lastPathComponent == "loop" {
+                roots.append(workspace.deletingLastPathComponent())
+            }
+            if workspace.lastPathComponent == "loop" { roots.append(workspace) }
+            roots.append(workspace.appending(path: "loop"))
+        }
+        if let path = UserDefaults.standard.string(forKey: "ChewSenseReview.loopRoot") {
+            roots.append(URL(fileURLWithPath: path))
+        }
+        return roots.map { $0.appending(path: "project_status.json") }
+    }
+}

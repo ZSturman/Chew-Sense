@@ -13,6 +13,7 @@ struct MainContentView: View {
     @StateObject private var motionManager = MotionManager()
     @StateObject private var config = DetectionConfiguration()
     @StateObject private var sessionLibrary = SessionLibraryViewModel()
+    @StateObject private var mac = LiveMacStatus()
 
     @State private var sessionNotes = ""
     @State private var selectedSessionURL: URL?
@@ -139,6 +140,7 @@ struct MainContentView: View {
     /// `selectedSessionURL` and triggers the `navigationDestination(item:)` push.
     private var phoneSidebar: some View {
         List {
+            LiveProjectStatusSection(mac: mac)
             Section { capturePanel.padding(.vertical, 8) }
             Section("Recent checks") {
                 if sessionLibrary.sessions.isEmpty {
@@ -234,6 +236,7 @@ struct MainContentView: View {
 
     private var sidebar: some View {
         List(selection: $selectedSessionURL) {
+            LiveProjectStatusSection(mac: mac)
             Section { capturePanel.padding(.vertical, 8) }
             Section("Recent checks") {
                 if sessionLibrary.sessions.isEmpty {
