@@ -109,22 +109,27 @@ struct ChewSenseCollectTests {
     func recorderController_allSessionFolders_sortedNewestFirst() throws {
         let controller = RecorderController()
         let olderFolder = try makeTemporarySessionFolder(nameSuffix: "Older")
+        // These live in the app's real Documents folder: always remove them.
+        defer { controller.deleteSessionFolder(olderFolder) }
         // Ensure the creation date of the second folder is later.
         sleep(1)
         let newerFolder = try makeTemporarySessionFolder(nameSuffix: "Newer")
+        defer { controller.deleteSessionFolder(newerFolder) }
 
-        let all = controller.allSessionFolders()
+        // On a device the listing reports /private/var/... for /var/...; compare resolved paths.
+        let all = controller.allSessionFolders().map(Self.resolvedPath)
 
-        guard let olderIndex = all.firstIndex(of: olderFolder),
-              let newerIndex = all.firstIndex(of: newerFolder) else {
+        guard let olderIndex = all.firstIndex(of: Self.resolvedPath(olderFolder)),
+              let newerIndex = all.firstIndex(of: Self.resolvedPath(newerFolder)) else {
             #expect(Bool(false), "Expected both test folders to be present in allSessionFolders()")
             return
         }
 
         #expect(newerIndex < olderIndex, "Newer folder should appear before older folder in the list.")
+    }
 
-        controller.deleteSessionFolder(olderFolder)
-        controller.deleteSessionFolder(newerFolder)
+    private static func resolvedPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     // MARK: - RecorderController session folder discovery
@@ -133,6 +138,7 @@ struct ChewSenseCollectTests {
     func recorderController_allSessionFolders_ignoresHiddenDirectories() throws {
         let controller = RecorderController()
         let visibleFolder = try makeTemporarySessionFolder(nameSuffix: "Visible")
+        defer { controller.deleteSessionFolder(visibleFolder) }
 
         // Create a hidden directory (name starts with ".") that should be ignored.
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -141,16 +147,14 @@ struct ChewSenseCollectTests {
         try? FileManager.default.removeItem(at: hiddenFolder)
         try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
 
-        let all = controller.allSessionFolders()
+        defer { try? FileManager.default.removeItem(at: hiddenFolder) }
+
+        let all = controller.allSessionFolders().map(Self.resolvedPath)
 
         // Non-hidden test folder should be present.
-        #expect(all.contains(visibleFolder))
+        #expect(all.contains(Self.resolvedPath(visibleFolder)))
         // Hidden folder should not be reported as a session folder.
-        #expect(all.contains(hiddenFolder) == false)
-
-        // Cleanup
-        controller.deleteSessionFolder(visibleFolder)
-        try? FileManager.default.removeItem(at: hiddenFolder)
+        #expect(all.contains(Self.resolvedPath(hiddenFolder)) == false)
     }
     
     // MARK: - VideoEditorViewModel marker semantics
