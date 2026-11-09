@@ -142,6 +142,7 @@ struct RootView: View {
             }
             .background(Color.black).clipped()
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(alignment: .topTrailing) { rotateButton }
             if showSignals && !state.isBlindReview && !isSpansStep {
                 CycleShapeChart()
                     .frame(height: 110)
@@ -151,6 +152,24 @@ struct RootView: View {
         .padding(12)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay { KeyCaptureView(handler: handleKey).frame(width: 0, height: 0) }
+    }
+
+    /// Turns the picture a quarter turn clockwise; remembered for this recording.
+    private var rotateButton: some View {
+        Button { playback.rotateDisplay(by: 1) } label: {
+            Image(systemName: "rotate.right")
+                .font(.body.weight(.semibold))
+                .padding(7)
+                .background(.black.opacity(0.45), in: Circle())
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .padding(8)
+        .help(playback.rotationIsAutomatic
+              ? "Turned automatically because the video is stored sideways. Click to turn it a quarter turn if it's still wrong; your choice is remembered."
+              : "Turn the picture a quarter turn clockwise. Remembered for this recording; the video file isn't changed.")
+        .accessibilityLabel("Rotate video")
+        .accessibilityIdentifier("rotateVideo")
     }
 
     // MARK: - Helpers
@@ -193,7 +212,8 @@ struct RootView: View {
             ?? session.videoURL
         guard let url else { return }
         let savedTime = preserveTime ? playback.currentTime : 0
-        playback.load(url: url)
+        playback.load(url: url, recordingID: session.id,
+                      suggestedQuarterTurns: VideoOrientation.suggestion(for: session, workspaceRoot: state.workspaceRoot))
         if preserveTime, savedTime > 0 {
             playback.seek(to: savedTime)
         }
@@ -422,9 +442,11 @@ struct RootView: View {
     }
 
     private func quickAddAtPlayhead() {
-        let t = playback.currentTime
-        let half = 0.21
-        state.addChew(start: max(0, t - half), end: t + half, peak: t)
+        // While checking suggestions, stay on the suggestion being checked.
+        let current = state.selectedChewID
+        if state.addChewFitting(at: playback.currentTime), step == .chews, let current {
+            state.selectChew(id: current)
+        }
     }
 
     private func seekToLastMarker() {

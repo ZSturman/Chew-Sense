@@ -12,7 +12,7 @@ through the current one:
 
 | Task | Steps |
 | --- | --- |
-| Suggestions shown (assisted) | **Check suggestions** (one looped chew at a time with Replay (R), Play/Pause (Space) and a remembered Loop toggle (off: play once and pause) above the answers: Yes / Not a chew / Can't tell, optional *Fix the timing*) → **Watch and finish** (play the whole recording, add missed chews, Finish review) → optional **Chewing spans** |
+| Suggestions shown (assisted) | **Check suggestions** (one looped chew at a time with Replay (R), Play/Pause (Space) and a remembered Loop toggle (off: play once and pause) above the answers: Yes / Not a chew / Can't tell; *Split in two here* for one suggestion that is two chews, *Add a chew here* (A) fitted between neighbours, optional *Fix the timing*) → **Watch and finish** (play the whole recording, add missed chews, Finish review) → optional **Chewing spans** |
 | Blind | **Mark chews** (suggestions hidden; none is a valid answer) → **Finish** |
 
 The step follows the saved draft, so a review resumes at the first undecided
@@ -24,6 +24,13 @@ chewing spans, mismatched files: nothing is saved and details are under
 *Technical details*). Sections, unclear ranges, timing nods and the labelling
 timer are under **More options**; signal charts, annotated video and rotation
 are in the header's ⋯ menu. ⌘0 returns to Up next, ⌘1 shows all recordings.
+
+Videos stored sideways (portrait file, landscape picture, no rotation metadata)
+are turned automatically when Vision's face pose reads about ±90° across the
+recording (checked on the Nov 2 baseline; the other direction by symmetry).
+The rotate button on the video turns it a quarter turn; the choice is
+remembered per recording (shared by blind and assisted copies) and always
+wins over the automatic one. Display only: the file is never changed.
 
 ![Up next](../../docs/images/review-guided-up-next.png)
 

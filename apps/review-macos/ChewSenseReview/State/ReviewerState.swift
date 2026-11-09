@@ -646,6 +646,61 @@ final class ReviewerState: ObservableObject {
         statusMessage = "Added \(id)"
     }
 
+    /// Add a missed chew around `time` (where the mouth is open widest), fitted
+    /// into the free space between neighbours. Refused inside an existing chew.
+    @discardableResult
+    func addChewFitting(at time: Double, halfWidth: Double = 0.21) -> Bool {
+        let active = chews.filter { $0.disposition == nil || $0.disposition?.contributesPhaseSupervision == true }
+        if let inside = active.first(where: { $0.startTS < time && time < $0.endTS }) {
+            statusMessage = "Add blocked: a chew (\(inside.id)) is already there. If it is really two chews, use Split in two."
+            return false
+        }
+        let start = max(active.filter { $0.endTS <= time }.map(\.endTS).max() ?? 0, time - halfWidth)
+        let end = min(active.filter { $0.startTS >= time }.map(\.startTS).min() ?? .infinity, time + halfWidth)
+        guard end - start >= 0.1, start < time, time < end else {
+            statusMessage = "Add blocked: not enough room between the neighbouring chews here."
+            return false
+        }
+        let before = overrides.addedChews.count
+        addChew(start: start, end: end, peak: time)
+        return overrides.addedChews.count > before
+    }
+
+    /// One chew that is really two: it becomes two chews meeting at `time`
+    /// (the closed moment between them). One undo step reverses it.
+    @discardableResult
+    func splitChew(id: String, at time: Double) -> Bool {
+        let margin = 0.05
+        guard let chew = chews.first(where: { $0.id == id }),
+              time - chew.startTS >= margin, chew.endTS - time >= margin else {
+            statusMessage = "Split blocked: pause inside the chew, where the mouth closes between the two chews."
+            return false
+        }
+        let gap = Self.minimumMarkerGap
+        let firstPeak = chew.peakTS < time - gap && chew.peakTS > chew.startTS ? chew.peakTS : (chew.startTS + time) / 2
+        let secondPeak = chew.peakTS > time + gap && chew.peakTS < chew.endTS ? chew.peakTS : (time + chew.endTS) / 2
+        pushUndo()
+        invalidateCompletion()
+        if chew.source == .added {
+            guard let index = overrides.addedChews.firstIndex(where: { $0.id == id }) else { return false }
+            overrides.addedChews[index].endClosedTS = time
+            overrides.addedChews[index].openPeakTS = firstPeak
+        } else {
+            overrides.chewDecisions.removeAll { $0.candidateID == id }
+            overrides.chewDecisions.append(.init(
+                candidateID: id, disposition: .edited,
+                startClosedTS: chew.startTS, openPeakTS: firstPeak, endClosedTS: time
+            ))
+        }
+        let newID = nextManualChewID()
+        overrides.addedChews.append(.init(id: newID, startClosedTS: time, openPeakTS: secondPeak, endClosedTS: chew.endTS))
+        rebuildPreview()
+        selectedChewID = id
+        isDirty = true
+        statusMessage = "Split \(id) into two chews at \(String(format: "%.2f", time)) s"
+        return true
+    }
+
     @discardableResult
     func updateMarker(
         chewID: String,

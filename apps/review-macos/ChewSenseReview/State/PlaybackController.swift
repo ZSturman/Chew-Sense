@@ -12,12 +12,31 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var isLooping = false
     @Published var playbackRate: Double = 1.0
     @Published private(set) var displayQuarterTurns = 0
+    /// True while the display follows Vision's suggestion rather than a choice the reviewer made.
+    @Published private(set) var rotationIsAutomatic = false
+    private var recordingID: String?
 
+    /// Display-only rotation, remembered per recording so blind and assisted
+    /// copies share it. Never changes the video file.
     func rotateDisplay(by turns: Int) {
         displayQuarterTurns = ((displayQuarterTurns + turns) % 4 + 4) % 4
-        if let currentURL {
-            UserDefaults.standard.set(displayQuarterTurns, forKey: "ReviewDisplayRotation:\(currentURL.path)")
+        rotationIsAutomatic = false
+        if let key = recordingID.map(Self.rotationKey) ?? currentURL.map({ "ReviewDisplayRotation:\($0.path)" }) {
+            UserDefaults.standard.set(displayQuarterTurns, forKey: key)
         }
+    }
+
+    static func rotationKey(recordingID: String) -> String { "ReviewDisplayRotation.recording:\(recordingID)" }
+
+    /// The reviewer's saved choice (per recording, then the older per-file key), else the suggestion.
+    static func initialRotation(url: URL, recordingID: String?, suggested: Int?) -> (turns: Int, automatic: Bool) {
+        let defaults = UserDefaults.standard
+        if let recordingID, let saved = defaults.object(forKey: rotationKey(recordingID: recordingID)) as? Int {
+            return (saved, false)
+        }
+        if let saved = defaults.object(forKey: "ReviewDisplayRotation:\(url.path)") as? Int { return (saved, false) }
+        if let suggested { return (((suggested % 4) + 4) % 4, true) }
+        return (0, false)
     }
 
     /// Set to true while a marker drag is in progress. While true, loop logic
@@ -40,12 +59,14 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func load(url: URL) {
+    func load(url: URL, recordingID: String? = nil, suggestedQuarterTurns: Int? = nil) {
         guard currentURL != url else { return }
         pause()
         removeTimeObserver()
         currentURL = url
-        displayQuarterTurns = UserDefaults.standard.integer(forKey: "ReviewDisplayRotation:\(url.path)")
+        self.recordingID = recordingID
+        (displayQuarterTurns, rotationIsAutomatic) = Self.initialRotation(
+            url: url, recordingID: recordingID, suggested: suggestedQuarterTurns)
         currentTime = 0
         duration = 0
         pendingSeek = nil

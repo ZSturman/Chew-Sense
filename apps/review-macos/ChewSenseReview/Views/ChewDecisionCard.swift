@@ -73,6 +73,23 @@ struct ChewDecisionCard: View {
                 .help("Unclear chews are left out of timing training; nothing is guessed.")
             }
             .controlSize(.large)
+            HStack {
+                Button { split(chew) } label: {
+                    Label("Split in two here", systemImage: "scissors").frame(maxWidth: .infinity)
+                }
+                .disabled(!canSplit(chew))
+                .help("For one suggestion that is really two chews: pause where the mouth closes between them, then split. Both chews are kept.")
+                .accessibilityIdentifier("splitChew")
+                Button { addMissed(keeping: chew) } label: {
+                    Label("Add a chew here", systemImage: "plus").frame(maxWidth: .infinity)
+                }
+                .help("Add a missed chew at the paused video position, fitted between the chews around it (A)")
+                .accessibilityIdentifier("addChewHere")
+            }
+            if !canSplit(chew) {
+                Text("Two chews in one? Pause where the mouth closes between them, then split.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             DisclosureGroup("Fix the timing", isExpanded: $showTiming) { timingEditor(chew) }
                 .font(.callout)
             HStack {
@@ -304,6 +321,22 @@ struct ChewDecisionCard: View {
         default: state.acceptChew(id: chew.id)
         }
         advance(from: chew)
+    }
+
+    private func canSplit(_ chew: ReviewChew) -> Bool {
+        let t = playback.currentTime
+        return !playback.isPlaying && t - chew.startTS >= 0.05 && chew.endTS - t >= 0.05
+    }
+
+    private func split(_ chew: ReviewChew) {
+        if state.splitChew(id: chew.id, at: playback.currentTime) {
+            ChewCue.loop(state.chews.first { $0.id == chew.id } ?? chew, state: state, playback: playback, viewport: viewport)
+        }
+    }
+
+    private func addMissed(keeping chew: ReviewChew) {
+        playback.pause()
+        if state.addChewFitting(at: playback.currentTime) { state.selectChew(id: chew.id) }
     }
 
     private func reject(_ chew: ReviewChew) {

@@ -54,6 +54,7 @@ struct HelpPanel: View {
                         bullet("The current suggestion loops automatically; the timeline zooms to fit it. Replay (R) starts it over; Play/Pause (Space) pauses or resumes. Turn Loop off to play each clip once and pause at its end.")
                         bullet("Yes (Return) accepts it and moves on. Not a chew rejects it. Can't tell marks it unclear or hidden.")
                         bullet("Fix the timing nudges each marker by a frame, or sets it to the paused video position.")
+                        bullet("One suggestion that is really two chews: pause where the mouth closes between them and press Split in two here. Add a chew here (A) adds a missed chew, fitted between its neighbours.")
                         bullet("Hold S, P, or E and tap ← / → to nudge that marker by one frame (⇧ for 5 frames).")
                         bullet("All suggestions lists every one, so you can revisit and change any answer.")
                     }

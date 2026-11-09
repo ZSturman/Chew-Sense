@@ -529,8 +529,7 @@ struct GuidePanel: View {
     }
 
     private func addChewAtPlayhead() {
-        let t = playback.currentTime
-        state.addChew(start: max(0, t - 0.21), end: t + 0.21, peak: t)
+        state.addChewFitting(at: playback.currentTime)
     }
 }
 

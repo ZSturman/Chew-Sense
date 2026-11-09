@@ -117,6 +117,10 @@ final class ReviewContractTests: XCTestCase {
         playback.load(url: try await makeVideo(frames: 50, in: directory))
         try await waitForPlayback("duration") { playback.duration > 0 }
         let viewport = TimelineViewport()
+        // The reviewer's own Loop preference lives in the same defaults; pin it and restore it.
+        let savedLoop = UserDefaults.standard.object(forKey: ChewCue.loopKey)
+        defer { UserDefaults.standard.set(savedLoop, forKey: ChewCue.loopKey) }
+        UserDefaults.standard.set(true, forKey: ChewCue.loopKey)
         let clip = ChewCue.window(chew, state: state, playback: playback)
         XCTAssertLessThan(clip.start, chew.startTS)  // context before the chew
         XCTAssertGreaterThan(clip.end, chew.endTS)    // and after it
@@ -144,8 +148,6 @@ final class ReviewContractTests: XCTestCase {
         playback.pause()
 
         // Loop off: the clip plays once and waits at its end; Play then starts it over.
-        let savedLoop = UserDefaults.standard.object(forKey: ChewCue.loopKey)
-        defer { UserDefaults.standard.set(savedLoop, forKey: ChewCue.loopKey) }
         UserDefaults.standard.set(false, forKey: ChewCue.loopKey)
         ChewCue.loop(chew, state: state, playback: playback, viewport: viewport)
         XCTAssertFalse(playback.isLooping)
@@ -443,6 +445,78 @@ final class ReviewContractTests: XCTestCase {
         state.closeSession()
         XCTAssertNil(state.selectedSession)
         XCTAssertEqual(try Data(contentsOf: fixture.session.overridesURL), before)
+    }
+
+    @MainActor
+    func testSplitTurnsOneSuggestionIntoTwoChewsInOneUndoStep() throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.30, 0.70), chew("ch_0002", 0.70, 0.80, 0.90)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        XCTAssertFalse(state.splitChew(id: "ch_0001", at: 0.12))  // too close to the start
+        XCTAssertTrue(state.statusMessage.contains("Split blocked"))
+
+        XCTAssertTrue(state.splitChew(id: "ch_0001", at: 0.45))
+        let first = try XCTUnwrap(state.chews.first { $0.id == "ch_0001" })
+        XCTAssertEqual([first.startTS, first.peakTS, first.endTS], [0.10, 0.30, 0.45])
+        XCTAssertEqual(state.disposition(for: "ch_0001"), .edited)
+        let added = try XCTUnwrap(state.overrides.addedChews.first)
+        XCTAssertEqual(added.startClosedTS, 0.45)
+        XCTAssertEqual(added.endClosedTS, 0.70)          // keeps the original end; neighbour untouched
+        XCTAssertEqual(added.openPeakTS, 0.575, accuracy: 1e-9)
+        XCTAssertEqual(state.chews.first { $0.id == "ch_0002" }?.startTS, 0.70)
+        XCTAssertNil(state.disposition(for: "ch_0002"))  // other suggestions stay pending
+        XCTAssertEqual(state.selectedChewID, "ch_0001")
+        XCTAssertFalse(state.overrides.verified)
+
+        state.undo()
+        XCTAssertTrue(state.overrides.addedChews.isEmpty)
+        XCTAssertNil(state.disposition(for: "ch_0001"))
+    }
+
+    @MainActor
+    func testAddedChewFitsBetweenNeighboursAndIsRefusedInsideOne() throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30), chew("ch_0002", 0.60, 0.70, 0.80)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        XCTAssertFalse(state.addChewFitting(at: 0.20))
+        XCTAssertTrue(state.statusMessage.contains("Split in two"))
+        XCTAssertTrue(state.addChewFitting(at: 0.45))
+        let added = try XCTUnwrap(state.overrides.addedChews.first)
+        // Fitted into the gap: starts where ch_0001 ends, ends where ch_0002 starts.
+        XCTAssertEqual([added.startClosedTS, added.openPeakTS, added.endClosedTS], [0.30, 0.45, 0.60])
+        XCTAssertFalse(state.addChewFitting(at: 0.31))   // no room left
+    }
+
+    @MainActor
+    func testDisplayRotationPrefersTheReviewersChoiceThenVision() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func predictions(_ yaw: Double, face: String = "True") throws -> URL {
+            let url = directory.appending(path: "\(UUID().uuidString).csv")
+            let rows = (0..<20).map { "\($0),\(face),0.0,\(yaw),0.1" }
+            try (["frame_idx,face_detected,head_roll,head_yaw,head_pitch"] + rows).joined(separator: "\n")
+                .write(to: url, atomically: true, encoding: .utf8)
+            return url
+        }
+        XCTAssertEqual(VideoOrientation.suggestedQuarterTurns(framePredictions: try predictions(1.52)), 1)
+        XCTAssertEqual(VideoOrientation.suggestedQuarterTurns(framePredictions: try predictions(-1.5)), -1)
+        XCTAssertNil(VideoOrientation.suggestedQuarterTurns(framePredictions: try predictions(0.05)))
+        XCTAssertNil(VideoOrientation.suggestedQuarterTurns(framePredictions: try predictions(1.52, face: "False")))
+
+        let id = "rotation-test-\(UUID().uuidString)"
+        let url = directory.appending(path: "video.mov")
+        defer {
+            UserDefaults.standard.removeObject(forKey: PlaybackController.rotationKey(recordingID: id))
+            UserDefaults.standard.removeObject(forKey: "ReviewDisplayRotation:\(url.path)")
+        }
+        XCTAssertTrue(PlaybackController.initialRotation(url: url, recordingID: id, suggested: -1) == (3, true))
+        UserDefaults.standard.set(0, forKey: "ReviewDisplayRotation:\(url.path)")   // older per-file choice
+        XCTAssertTrue(PlaybackController.initialRotation(url: url, recordingID: id, suggested: 1) == (0, false))
+        UserDefaults.standard.set(2, forKey: PlaybackController.rotationKey(recordingID: id))
+        XCTAssertTrue(PlaybackController.initialRotation(url: url, recordingID: id, suggested: 1) == (2, false))
     }
 
     func testRecordingNamesAreReadable() {
