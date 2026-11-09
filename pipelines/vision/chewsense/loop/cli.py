@@ -108,6 +108,44 @@ def project_status_cmd():
     click.echo(f"Wrote {project_status_path(paths)}", err=True)
 
 
+@loop.command("retire-recording")
+@click.argument("session_id")
+@click.option("--category", required=True, type=click.Choice(sorted(__import__("chewsense.loop.retirement", fromlist=["CATEGORIES"]).CATEGORIES)))
+@click.option("--reason", required=True, help="Why it can't serve as training or evaluation data.")
+@click.option("--evidence", multiple=True, help="One observation per option; stored verbatim.")
+def retire_recording_cmd(session_id: str, category: str, reason: str, evidence: tuple[str, ...]):
+    """Remove one recording from review queues, training and evaluation. Deletes nothing."""
+    from ..paths import workspace_root
+    from .controller import LoopController
+    from .project_status import compute_project_status, write_project_status
+    from .retirement import retire_recording, retirement_path
+
+    paths = _paths()
+    config = _config(paths)
+    record = retire_recording(paths, session_id, category=category, reason=reason, evidence=list(evidence),
+                              split_root=workspace_root() / "experiments" / "eating")
+    controller = LoopController(paths, config)
+    from .processing import refresh_review_tasks
+
+    refresh_review_tasks(paths)
+    write_project_status(paths, compute_project_status(paths, config, records=controller.records()))
+    click.echo(f"Retired {session_id} ({record['category_title']}); "
+               f"{len(record['preserved_files_sha256'])} files preserved unchanged.")
+    click.echo(f"Record: {retirement_path(paths.root, session_id)}", err=True)
+
+
+@loop.command("retired")
+def retired_cmd():
+    """List retired recordings and check their preserved files are unchanged."""
+    from .retirement import load_retirements, verify_preserved
+
+    paths = _paths()
+    for session_id, record in load_retirements(paths.root).items():
+        changed = verify_preserved(paths, session_id)
+        click.echo(f"{session_id}: {record['category_title']} — {record['reason']} "
+                   f"[{'intact' if not changed else f'{len(changed)} files changed'}]")
+
+
 @loop.command("import")
 @click.argument("archive", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 def import_cmd(archive: Path):

@@ -1,3 +1,49 @@
+# Checkpoint — November 9, 2026 (retired the mimed-chewing recording)
+
+- **Retired** `Not-eating-20261026-174428-C27C9380` (mimed chewing, no food) at the wearer's
+  request. The record is in [SPLIT_CHANGES.md](SPLIT_CHANGES.md). Nothing was deleted or modified:
+  95 protected files (all loop annotations and drafts, the recording's files, `splits.json`,
+  `index.json`, pairing/TLS files, session records) were byte-identical before and after.
+  New: `chewsense-vision loop retire-recording` / `loop retired`; the loop, the eating experiment
+  (rejects it with the reason, including byte-identical copies) and Review (watch-only "Kept for
+  research") all honour `state/retired/`.
+- Loop service restarted in place (`launchctl kickstart -k`, same plist, ports and certificate
+  fingerprint; catalog still v12). Up next is now the 90-Second Baseline's suggested chews.
+- Review: playback no longer shows "Pause" after the video ends; Play at the end restarts.
+  Reinstalled in `/Applications` (Apple Development signed).
+- Tests: Review 39 passed + 2 opt-in skips (`build/Review-Guided.xcresult`); Python loop + motion
+  171 passed (new `test_loop_retirement.py`, eating-dataset retirement test).
+- **Not verified on the iPhone:** the Mac is on the iPhone's Personal Hotspot (172.20.10.x) and
+  Live's request to it timed out, so Live showed its cached status ("2 labelling tasks") in
+  `build/Device-Retirement-Live.xcresult`. On a shared Wi-Fi network, rerun Live `DeviceStatusTests`
+  and Collect `DeviceStatusUITests` with `TEST_RUNNER_CHEWSENSE_EXPECTED_HEADLINE` and the new
+  optional `TEST_RUNNER_CHEWSENSE_EXPECTED_SUMMARY` from `workspace/loop/project_status.json`.
+- Pre-existing, not changed: a race in `write_json_atomic` (fixed temp name) once logged a
+  `status.json` traceback in `~/Library/Logs/ChewSense/loop.log`; the service survived it.
+
+---
+
+# Checkpoint — November 9, 2026 (guided Review)
+
+- Review redesigned around one next action: **Up next** home (from `project_status.json`,
+  locally finished tasks hidden), then per-recording steps with a guide panel
+  (assisted: Check suggestions → Watch and finish → optional Chewing spans; blind: Mark
+  chews → Finish). Autosave of the working draft (never sets verified), save on Up next /
+  recording switch / quit; unsaved span decisions are saved before switching recordings
+  (previously discarded). Old toolbar, Review Queue and Sections panels folded into the guide,
+  More options and the ⋯ menu. Validation rules, finish blocker and file formats unchanged.
+  Details and images: `apps/review-macos/README.md`.
+- Tests: Review 37 passed + 2 opt-in snapshot skips (`build/Review-Guided.xcresult`); new tests
+  cover step derivation and resume, blind/empty/required-spans/blocked recordings, autosave,
+  names and Up next filtering. The snapshot render left all drafts byte-identical.
+- Installed: Release, Apple Development signed, at `/Applications/Chew Sense Review.app` and
+  launched (old instance had no unsaved changes: green save dot, nothing marked). 14 annotation
+  files hash-identical before and after.
+- Not verified by the agent: clicking through a real review (it would write ground truth);
+  the user's own pass through the blind and assisted tasks is the remaining check.
+
+---
+
 # Checkpoint — November 8, 2026 (review simplification)
 
 - Review: **Finish review** replaces the separate Full pass and Verify toggles. One

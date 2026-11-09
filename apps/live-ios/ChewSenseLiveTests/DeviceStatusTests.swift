@@ -26,6 +26,9 @@ final class DeviceStatusTests: XCTestCase {
         XCTAssertEqual(mac.state, .connected)
         let status = try XCTUnwrap(mac.project)
         XCTAssertEqual(status.headline, headline)
+        if let summary = ProcessInfo.processInfo.environment["CHEWSENSE_EXPECTED_SUMMARY"] {
+            XCTAssertEqual(status.summary, summary)
+        }
         XCTAssertTrue(status.steps.contains { $0.app == "live" })
 
         let renderer = ImageRenderer(content: ProjectStatusCard(status: status, app: "live")

@@ -21,6 +21,9 @@ final class DeviceStatusUITests: XCTestCase {
         entry.tap()
         let title = app.staticTexts[headline]
         XCTAssertTrue(title.waitForExistence(timeout: 30), "shared headline not shown: \(headline)")
+        if let summary = ProcessInfo.processInfo.environment["CHEWSENSE_EXPECTED_SUMMARY"] {
+            XCTAssertTrue(app.staticTexts[summary].waitForExistence(timeout: 10), "shared summary not shown: \(summary)")
+        }
         XCTAssertTrue(app.staticTexts["Same message in Collect, Review and Live."].exists
                       || app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Same message in Collect'")).count > 0)
         let shot = XCTAttachment(screenshot: app.screenshot())

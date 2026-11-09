@@ -37,6 +37,7 @@ from .experiments import (
 from .guided import write_json_atomic
 from .lmstudio import LMStudio
 from .requirements import build_requirements, timing_check_definition
+from .retirement import retired_ids
 from .store import LoopPaths, read_json, write_once
 from .eating_detector import eating_detector_summary
 from .training import readiness
@@ -62,9 +63,11 @@ class LoopController:
         self.trainer = trainer
 
     # ------------------------------------------------------------------ data
-    def records(self) -> list[dict[str, Any]]:
+    def records(self, *, include_retired: bool = False) -> list[dict[str, Any]]:
+        """Session records; retired recordings are left out of every dataset unless asked for."""
+        retired = set() if include_retired else retired_ids(self.paths.root)
         return [r for r in (read_json(p, {}) for p in sorted(self.paths.session_state.glob("*.json")))
-                if r and r.get("session_id")]
+                if r and r.get("session_id") and r["session_id"] not in retired]
 
     def _session(self, workspace: Path, session_id: str) -> Path:
         return workspace / "sessions/raw" / session_id

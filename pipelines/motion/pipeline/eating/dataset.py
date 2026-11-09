@@ -550,6 +550,26 @@ def read_loop_roles(loop_root: Path | None) -> dict[str, str]:
     return roles
 
 
+def read_loop_retirements(loop_root: Path | None) -> dict[str, dict[str, Any]]:
+    """``state/retired/*.json`` from the loop: recordings withdrawn from all datasets.
+
+    Retirement never deletes data or edits ``splits.json``; the recording is
+    reported as rejected so every run shows what was left out and why.
+    """
+    retired: dict[str, dict[str, Any]] = {}
+    folder = Path(loop_root) / "state" / "retired" if loop_root is not None else None
+    if folder is None or not folder.is_dir():
+        return retired
+    for path in sorted(folder.glob("*.json")):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and record.get("session_id"):
+            retired[str(record["session_id"])] = record
+    return retired
+
+
 def discover_sessions(
     *,
     canonical_roots: Iterable[Path] = (),
@@ -564,12 +584,25 @@ def discover_sessions(
     """
 
     roles = read_loop_roles(loop_root)
+    retired = read_loop_retirements(loop_root)
+    retired_motion = {
+        digest for record in retired.values()
+        for name, digest in (record.get("preserved_files_sha256") or {}).items()
+        if name.endswith(f"/{record['session_id']}.csv")
+    }
     sessions: list[EatingSession] = []
     rejected: list[dict[str, str]] = []
     seen_hash: dict[str, str] = {}
     seen_id: set[str] = set()
 
     def accept(session: EatingSession) -> None:
+        # Copies of a retired capture under another folder or ID are retired too.
+        record = retired.get(session.session_id)
+        if record is not None or session.motion_sha256 in retired_motion:
+            reason = (f"retired ({record['category_title']}): {record['reason']}" if record
+                      else "retired: identical motion bytes to a retired recording")
+            rejected.append({"session_id": session.session_id, "path": session.source_path, "reason": reason})
+            return
         if session.motion_sha256 in seen_hash:
             rejected.append({
                 "session_id": session.session_id,

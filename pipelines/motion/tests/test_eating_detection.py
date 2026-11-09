@@ -8,6 +8,7 @@ about real-world detection performance.
 from __future__ import annotations
 
 import hashlib
+import shutil
 import json
 import sys
 from pathlib import Path
@@ -398,3 +399,33 @@ def test_guided_contexts_keep_confounds_apart():
     assert guided_context_name("drink", "drink-1", "water", "drinking") == "guided:drink:water"
     assert guided_context_name("other", "meal-1", "meal", "natural-meal") == "guided:other:natural-meal"
     assert guided_context_name("talk", "talk-1", None, "talking") == "guided:talk"
+
+
+def test_retired_recordings_and_their_copies_are_rejected_with_the_reason(tmp_path):
+    raw = tmp_path / "raw"
+    kept = make_canonical(raw, "kept", intervals=[_span(0, 60, "not_chewing")], seed=1)
+    retired = make_canonical(raw, "mimed", intervals=[_span(0, 60, "not_chewing")], seed=2)
+    copy_root = tmp_path / "copies"
+    copy_root.mkdir()
+    shutil.copytree(retired, copy_root / "mimed-copy")
+    (copy_root / "mimed-copy" / "mimed.csv").rename(copy_root / "mimed-copy" / "mimed-copy.csv")
+    manifest = json.loads((copy_root / "mimed-copy" / "session.json").read_text())
+    manifest.update(session_id="mimed-copy", motion={"path": "mimed-copy.csv"})
+    (copy_root / "mimed-copy" / "session.json").write_text(json.dumps(manifest))
+    labels_path = copy_root / "mimed-copy" / "annotations" / "coarse_labels.json"
+    labels_path.write_text(json.dumps(dict(json.loads(labels_path.read_text()), session_id="mimed-copy")))
+    loop = tmp_path / "loop"
+    (loop / "state" / "retired").mkdir(parents=True)
+    (loop / "state" / "retired" / "mimed.json").write_text(json.dumps({
+        "session_id": "mimed", "category_title": "Mimed chewing / chewing-like movement without food",
+        "reason": "mimed chewing, no food",
+        "preserved_files_sha256": {"assisted/sessions/raw/mimed/mimed.csv":
+                                   hashlib.sha256((retired / "mimed.csv").read_bytes()).hexdigest()},
+    }))
+    before = {p: p.read_bytes() for p in retired.rglob("*") if p.is_file()}
+    sessions, rejected = discover_sessions(canonical_roots=[raw, copy_root], loop_root=loop)
+    assert [s.session_id for s in sessions] == [kept.name]
+    reasons = {r["session_id"]: r["reason"] for r in rejected}
+    assert reasons["mimed"].startswith("retired (Mimed chewing")
+    assert "identical motion bytes" in reasons["mimed-copy"]
+    assert {p: p.read_bytes() for p in retired.rglob("*") if p.is_file()} == before

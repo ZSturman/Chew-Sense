@@ -38,6 +38,7 @@ from .guided import (
     write_json_atomic,
 )
 from .importer import ArchiveError, import_archive
+from .retirement import retired_ids
 from .review_tasks import review_state, tasks_for_session
 from .store import LoopPaths, read_json, update_record
 from .sync_assess import assess_markers
@@ -148,6 +149,23 @@ def enqueue_job(paths: LoopPaths, archive: Path, *, archive_sha256: str, device:
     }
     write_json_atomic(paths.jobs / f"{job['job_id']}.json", job)
     return job
+
+
+def refresh_review_tasks(paths: LoopPaths) -> list[dict[str, Any]]:
+    """Rewrite ``review_tasks.json`` from the session records. Retired recordings get no tasks."""
+    tasks = []
+    retired = retired_ids(paths.root)
+    for path in sorted(paths.session_state.glob("*.json")):
+        record = read_json(path, {}) or {}
+        if record.get("session_id") in retired:
+            continue
+        if record.get("processing") != "completed" and record.get("vision") != "completed":
+            continue
+        reports = paths.session_reports(record["session_id"])
+        tasks.extend(tasks_for_session(record, paths.assisted, paths.blind, reports))
+    tasks.sort(key=lambda t: (t["blocked"], t["priority"], t["session_id"]))
+    write_json_atomic(paths.review_tasks, {"generated_at": utc_now(), "tasks": tasks})
+    return tasks
 
 
 def _role_bucket(session_id: str) -> float:
@@ -366,9 +384,12 @@ class Processor:
                 definition.labeling.blind_evaluation_eligible
                 and "evaluation" in definition.evaluation_purpose)
             roles = self.config["roles"]
+            # Retired recordings no longer count toward the evaluation quota.
+            retired = retired_ids(self.paths.root)
             evaluation_count = sum(
                 1 for p in self.paths.session_state.glob("*.json")
-                if (read_json(p, {}) or {}).get("role") == "evaluation")
+                if (record := read_json(p, {}) or {}).get("role") == "evaluation"
+                and record.get("session_id") not in retired)
             fraction = (roles["boosted_evaluation_fraction"]
                         if evaluation_count < roles["min_evaluation_sessions"]
                         else roles["evaluation_fraction"])
@@ -459,16 +480,7 @@ class Processor:
 
     # ----- review follow-up ----------------------------------------------
     def refresh_review_tasks(self) -> list[dict[str, Any]]:
-        tasks = []
-        for path in sorted(self.paths.session_state.glob("*.json")):
-            record = read_json(path, {}) or {}
-            if record.get("processing") != "completed" and record.get("vision") != "completed":
-                continue
-            reports = self.paths.session_reports(record["session_id"])
-            tasks.extend(tasks_for_session(record, self.paths.assisted, self.paths.blind, reports))
-        tasks.sort(key=lambda t: (t["blocked"], t["priority"], t["session_id"]))
-        write_json_atomic(self.paths.review_tasks, {"generated_at": utc_now(), "tasks": tasks})
-        return tasks
+        return refresh_review_tasks(self.paths)
 
     def finalize_verified_drafts(self) -> list[str]:
         """Freeze drafts a human marked verified with a full pass."""

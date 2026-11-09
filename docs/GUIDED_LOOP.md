@@ -304,3 +304,14 @@ publication never depend on it. Disable with `lmstudio.enabled: false`.
 * The sync-marker check and review prioritization are untested on real nods.
 * Single wearer: cross-person generalization cannot be assessed.
 * No independent accuracy, time savings or synchronization accuracy is claimed.
+
+## Retiring a recording
+
+A recording that can't serve as ground truth (for example, mimed chewing filed as
+"not eating") is retired, not deleted:
+`chewsense-vision loop retire-recording <id> --category mimed_chewing_no_food --reason "…" --evidence "…"`.
+It leaves the review queues, loop evaluation and training, and the eating
+experiment, and its files stay byte-identical. `chewsense-vision loop retired`
+re-checks them. Restart the service afterwards so it uses the change. The log
+of retirements and their effect on the locked split is [SPLIT_CHANGES.md](SPLIT_CHANGES.md).
+
