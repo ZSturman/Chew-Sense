@@ -1,3 +1,45 @@
+# Checkpoint — November 8, 2026 (night): false-alarm decoder, one-nod protocols
+
+**AirPods false alarms: decoder persistence (pre-registered, confirmed once).**
+Development out-of-fold predictions of `eating-20261108-105237` (22 recordings,
+17 human bouts): 4 of 7 false bouts were 1–2 s blips. Requiring 3 s of
+persistence before a bout starts (`min_start_windows` 3 → 6) gave 17/17 bouts,
+false bouts 7 → 3 (9.1 → 3.9 per negative hour), chewing-time recall .782 → .711,
+median onset 4.1 → 5.6 s. The choice was committed before any test result
+(`docs/preregistrations/decoder-persistence-2026-11-08.md`, SHA-256 `e9e1aeef…`).
+It was then confirmed once on the saved locked-test predictions of the run behind Live's detector
+(`eating-20261104-015911`; 9 recordings, 7 bouts, only 0.11 negative hours):
+7/7 bouts both; false bouts 2 → 0; chewing-time recall .872 → .811; onset 2.1 → 3.6 s.
+Locked-test consultations: 3 (recorded in `index.json`). Tool:
+`chewsense-motion eating-decoder-study`. **Not deployed:** Live still uses 3
+windows. Adopting 6 needs your approval and a new Live check.
+
+**Video chew detector diagnosis (no tuning: all gold chews are locked test).**
+Opening-peak precision is .97 (31/32); recall .69. 12 of 14 misses fall in the
+first bout (Vision found 15 of 27), where the AirPods cadence count got 28.
+Misses, not false proposals, limit it. A recall change needs development
+recordings with hand-marked chews.
+
+**One-nod protocols published (catalog v12).** 11 of 13 experiments had only
+two nods, so their timing could never pass the three-marker check. Baseline,
+Talking, Slow & Fast Chewing and Head Movement are now v2. They use Natural
+Meal v2's prompt ("Nod down once, then slowly return upright"), and the three
+that had two nods gain a midpoint nod. Every other activity is identical to v1;
+v1 digests are unchanged and progress was kept (baseline still 1/3). Registry
+backup: `workspace/backups/loop-experiments-20261108-pre-v2/`. The phone synced
+catalog v12. Verified read-only from the iPhone's stored copy (`xcrun devicectl device copy from --domain-identifier zachary-sturman.ChewSense-DataCollectionAndLabeling --source "Library/Application Support/Guided/experiment-catalog.json"`): v12, all four v2 one-nod prompts. The device UI status test passed again; a UI scroll test for the catalog was dropped as flaky while another project's UI tests shared the phone.
+
+**Smallest useful next batch (≈ 15 min of recording, one sitting):**
+90-Second Baseline ×2 (completes 3/3; the loop's hash makes some evaluation,
+some training), Talking ×1 and Head Movement ×1 (the two largest false-alarm
+contexts), Slow & Fast Chewing ×1 (speed), Natural Meal v2 ×1 (realistic
+meal). Expected yield after review: evaluation recordings 1 → about 3–4,
+first development recordings with hand-checked chews, first labelled
+talking/head-movement negatives. Full gates (6 evaluation, 300 gold chews,
+20 + 20 verified recordings) need about 3–4 such sittings.
+
+---
+
 # Checkpoint — November 8, 2026 (evening): timing, existing data, device suites
 
 **Timing (video ↔ AirPods), 90-Second Baseline.** Not misaligned, but not
