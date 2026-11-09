@@ -377,34 +377,3 @@ struct ProjectStatusBox: View {
         return ("Open \(workspace == "blind" ? "blind review" : "recording")", { state.openSession(id, workspace: workspace) })
     }
 }
-
-/// One line for the session sidebar; the full card is in the Pipeline window.
-struct ProjectStatusLine: View {
-    @EnvironmentObject var state: ReviewerState
-    @Environment(\.openWindow) private var openWindow
-    @StateObject private var project = ProjectStatusStore()
-
-    var body: some View {
-        Group {
-            if let status = project.status {
-                Button { openWindow(id: "pipeline") } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Now: \(status.headline)").font(.caption.weight(.semibold))
-                        if let step = status.steps.first(where: { $0.optional != true }) {
-                            Text("Next: \(step.title) · \(ProjectStatus.place(of: step.app, in: "review"))")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .help("Open the Pipeline window for all next steps")
-                .accessibilityIdentifier("projectStatusLine")
-            }
-        }
-        .onAppear { project.start(workspace: state.workspaceRoot) }
-        .onChange(of: state.workspaceRoot) { _, root in project.start(workspace: root) }
-    }
-}

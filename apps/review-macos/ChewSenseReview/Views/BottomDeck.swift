@@ -8,34 +8,7 @@ struct BottomDeck: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                Picker("Timeline mode", selection: $state.timelineEditingEnabled) {
-                    Text("Scrub").tag(false)
-                    Text("Edit chews").tag(true)
-                }
-                .pickerStyle(.segmented).frame(width: 190)
-                .accessibilityIdentifier("timelineMode")
-                Spacer()
-                Button("Add chew", systemImage: "plus") {
-                    let t = playback.currentTime
-                    state.addChew(start: max(0, t - 0.21), end: t + 0.21, peak: t)
-                    state.timelineEditingEnabled = true
-                }
-                Button("Delete selected", systemImage: "trash") {
-                    if let id = state.selectedBiteID { state.rejectBite(id: id) }
-                    else { state.deleteSelectedOrAt(videoTime: playback.currentTime) }
-                }
-                .disabled(state.selectedChewID == nil && state.selectedBiteID == nil)
-                .accessibilityIdentifier("deleteSelectedEvent")
-                Button("Undo", systemImage: "arrow.uturn.backward") { state.undo() }
-                    .disabled(!state.canUndo)
-            }
-            .controlSize(.small)
-            Text(state.timelineEditingEnabled
-                 ? "Edit mode: click a chew to select it; drag empty space to add one, or drag its handles to adjust it."
-                 : "Scrub mode: clicking or dragging only moves playback. Switch to Edit chews to select or change events.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if state.retirement == nil { editRow }
             ChewStripView()
                 .frame(height: 80)
             TransportBar()
@@ -43,6 +16,47 @@ struct BottomDeck: View {
         }
         .padding(10)
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Mode, delete and undo. Hidden for retired recordings, which are watch-only.
+    private var editRow: some View {
+        HStack(spacing: 10) {
+            Picker("Timeline mode", selection: $state.timelineEditingEnabled) {
+                Text("Move playhead").tag(false)
+                Text("Edit chews").tag(true)
+            }
+            .pickerStyle(.segmented).frame(width: 220)
+            .labelsHidden()
+            .help("Move playhead: clicking the timeline only moves the video. Edit chews: select, drag or draw chews.")
+            .accessibilityIdentifier("timelineMode")
+            if let feedback {
+                Label(feedback, systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange).lineLimit(1)
+            } else if state.timelineEditingEnabled {
+                Text("Click a chew to select it, drag its markers, or drag empty space to draw one.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if state.selectedChewID != nil || state.selectedBiteID != nil {
+                Button("Delete selected", systemImage: "trash") {
+                    if let id = state.selectedBiteID { state.rejectBite(id: id) }
+                    else { state.deleteSelectedOrAt(videoTime: playback.currentTime) }
+                }
+                .help("Remove your own addition, or reject a suggestion (D)")
+                .accessibilityIdentifier("deleteSelectedEvent")
+            }
+            Button { state.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                .disabled(!state.canUndo)
+                .help("Undo (⌘Z)")
+                .accessibilityLabel("Undo")
+        }
+        .controlSize(.small)
+    }
+
+    /// Only refusals are worth interrupting for ("Edit blocked: …"); routine messages stay quiet.
+    private var feedback: String? {
+        let message = state.statusMessage
+        return message.contains("blocked") && state.candidateIntegrityError == nil ? message : nil
     }
 }
 
@@ -252,7 +266,7 @@ struct ChewStripView: View {
                 }
 
                 // Label
-                if (x1 - x0) > 36 {
+                if isSelected, (x1 - x0) > 36 {
                     Text(chew.id.replacingOccurrences(of: "manual_", with: "M"))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.white)
@@ -639,11 +653,6 @@ struct TransportBar: View {
             }
             .buttonStyle(.plain).help("Previous chew (P)")
 
-            Button { playback.skip(by: -1) } label: {
-                Image(systemName: "gobackward.1")
-            }
-            .buttonStyle(.plain).help("−1 s (J)")
-
             Button { playback.stepFrames(by: -1) } label: { Image(systemName: "backward.frame") }
                 .buttonStyle(.plain).accessibilityLabel("Previous video frame").help("Previous frame (←)")
 
@@ -655,11 +664,6 @@ struct TransportBar: View {
 
             Button { playback.stepFrames(by: 1) } label: { Image(systemName: "forward.frame") }
                 .buttonStyle(.plain).accessibilityLabel("Next video frame").help("Next frame (→)")
-
-            Button { playback.skip(by: 1) } label: {
-                Image(systemName: "goforward.1")
-            }
-            .buttonStyle(.plain).help("+1 s (L)")
 
             Button { if let c = state.selectNextChew() { playback.seek(to: c.startTS) } } label: {
                 Image(systemName: "forward.end.fill")
@@ -682,12 +686,13 @@ struct TransportBar: View {
             .labelsHidden()
             .frame(width: 84)
 
-            Toggle(isOn: $state.loopSelectedChew) {
-                Image(systemName: "repeat")
+            if state.selectedChew != nil {
+                Toggle(isOn: $state.loopSelectedChew) {
+                    Image(systemName: "repeat")
+                }
+                .toggleStyle(.button)
+                .help("Loop selected chew (R)")
             }
-            .toggleStyle(.button)
-            .help("Loop selected chew (R)")
-            .disabled(state.selectedChew == nil)
 
             Divider().frame(height: 18)
 
@@ -697,10 +702,6 @@ struct TransportBar: View {
                 .buttonStyle(.plain).help("Fit (0)")
             Button { viewport.zoomIn(pivot: playback.currentTime) } label: { Image(systemName: "plus.magnifyingglass") }
                 .buttonStyle(.plain).help("Zoom in (=)")
-            Text(String(format: "%.1fx", viewport.zoom))
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 36)
         }
         .foregroundStyle(.white)
     }

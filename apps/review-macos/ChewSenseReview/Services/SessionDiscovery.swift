@@ -30,7 +30,9 @@ struct SessionDiscovery {
             let aligned = derivedDir.appending(path: "motion_aligned_labels.csv")
             let alignedURL = fm.fileExists(atPath: aligned.path) ? aligned : nil
             let status: Session.Status
-            if candidates == nil {
+            if RecordingRetirement.load(sessionID: sid, workspaceRoot: paths.root) != nil {
+                status = .retired
+            } else if candidates == nil {
                 status = .migrationRequired
             } else if draft?.verified == true {
                 status = .verified

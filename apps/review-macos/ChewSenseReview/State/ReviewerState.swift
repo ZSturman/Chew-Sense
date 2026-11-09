@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import AppKit
 
 /// Authoritative v2 review state. Automatic candidates stay immutable; every
 /// reviewer action is represented as an explicit decision in `ReviewDraft`.
@@ -17,6 +19,8 @@ final class ReviewerState: ObservableObject {
         sessionID: "", candidateRevision: 0, candidateSHA256: ""
     )
     @Published private(set) var candidateIntegrityError: String?
+    /// Set when the recording was retired: it can be watched but nothing is saved.
+    @Published private(set) var retirement: RecordingRetirement?
     private var loadedCandidateHash: String?
 
     /// Compatibility name retained for existing playback UI while the file
@@ -48,6 +52,16 @@ final class ReviewerState: ObservableObject {
     @Published var chewingSectionsOnly = true
     @Published var focusedSectionID: String?
     @Published var timelineEditingEnabled = false
+    /// The guided step the reviewer picked; nil follows the recommended step.
+    @Published var chosenStep: GuidedStep?
+    /// Whole seconds of the recording played so far in this visit (a hint, never a gate).
+    @Published private(set) var watchedSeconds: Set<Int> = []
+
+    func noteWatched(_ time: Double) {
+        guard time.isFinite, time >= 0 else { return }
+        let second = Int(time)
+        if !watchedSeconds.contains(second) { watchedSeconds.insert(second) }
+    }
 
     var visibleReviewSections: [ReviewSection] {
         reviewSections.filter {
@@ -141,6 +155,8 @@ final class ReviewerState: ObservableObject {
 
     private static let rootDefaultsKey = "ChewSenseReview.workspaceRoot"
     private static let minimumMarkerGap = 0.001
+    private var autosave: AnyCancellable?
+    private var terminateObserver: NSObjectProtocol?
 
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.rootDefaultsKey) {
@@ -149,6 +165,23 @@ final class ReviewerState: ObservableObject {
                 setWorkspaceRoot(url)
             }
         }
+        // Drafts save themselves shortly after each decision and when the app
+        // quits, so a review always resumes where it stopped. Saving never sets
+        // `verified`; only Finish review does.
+        autosave = $overrides.dropFirst()
+            .debounce(for: .seconds(1.5), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.saveIfDirty() }
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveIfDirty() }
+        }
+    }
+
+    /// Saves the working draft if it has unsaved decisions and loaded cleanly.
+    func saveIfDirty() {
+        guard isDirty, candidates != nil, candidateIntegrityError == nil, retirement == nil else { return }
+        saveOverrides()
     }
 
     // MARK: - Workspace
@@ -184,13 +217,23 @@ final class ReviewerState: ObservableObject {
     }
 
     /// Opens one recording in the right workspace (from a link or a shared next step).
-    func openSession(_ id: String, workspace kind: String) {
+    func openSession(_ id: String, workspace kind: String, step: GuidedStep? = nil) {
         guard openReviewWorkspace(kind) else { return }
         guard let session = sessions.first(where: { $0.id == id }) else {
-            statusMessage = "\(id) is not in the \(kind) workspace yet."
+            statusMessage = "\(RecordingName.of(id)) isn't ready to review yet. The Mac may still be processing it."
             return
         }
         if selectedSession?.id != id { loadSession(session) }
+        chosenStep = step
+    }
+
+    /// Back to Up next. Unsaved decisions are saved first.
+    func closeSession() {
+        guard saveBeforeLeavingSession() else { return }
+        selectedSession = nil
+        resetLoadedState()
+        statusMessage = ""
+        refreshSessions()
     }
 
     func refreshSessions() {
@@ -201,6 +244,12 @@ final class ReviewerState: ObservableObject {
     // MARK: - Loading
 
     private func saveBeforeLeavingSession() -> Bool {
+        if retirement != nil {
+            // Nothing from a retired recording is written; leaving discards any scratch edits.
+            accumulateReviewTime()
+            isDirty = false
+            return true
+        }
         let wasTiming = reviewTimerRunning
         accumulateReviewTime()
         if wasTiming { isDirty = true }
@@ -213,6 +262,9 @@ final class ReviewerState: ObservableObject {
         accumulateReviewTime()
         selectedSession = session
         resetLoadedState()
+        if let workspaceRoot {
+            retirement = RecordingRetirement.load(sessionID: session.id, workspaceRoot: workspaceRoot)
+        }
         guard let candidateURL = session.candidatesJSON else {
             candidateIntegrityError = "Legacy v1 labels cannot be reviewed automatically. Run the explicit v1 migration, rerun vision, and review from scratch."
             statusMessage = candidateIntegrityError ?? "Migration required"
@@ -288,11 +340,14 @@ final class ReviewerState: ObservableObject {
         reviewSections = []
         focusedSectionID = nil
         timelineEditingEnabled = false
+        chosenStep = nil
+        watchedSeconds = []
         baseRows = []
         alignedRows = []
         candidates = nil
         loadedCandidateHash = nil
         candidateIntegrityError = nil
+        retirement = nil
         overrides = .empty(sessionID: selectedSession?.id ?? "", candidateRevision: 0, candidateSHA256: "")
         chews = []
         bites = []
@@ -323,6 +378,11 @@ final class ReviewerState: ObservableObject {
         accumulateReviewTime()
         if overrides.reviewContext == nil { overrides.reviewContext = .init() }
         if resume { reviewTimerStart = ProcessInfo.processInfo.systemUptime; reviewTimerRunning = true }
+        if retirement != nil {
+            // A retired recording is preserved exactly as it was; its draft is never rewritten.
+            statusMessage = "Not saved: this recording is retired and kept unchanged."
+            return
+        }
         guard let session = selectedSession,
               let candidateURL = session.candidatesJSON,
               let candidates,
@@ -395,15 +455,16 @@ final class ReviewerState: ObservableObject {
 
     /// Why "Finish review" is not available yet; nil when it is.
     var finishBlocker: String? {
+        if retirement != nil { return "This recording is retired, so it isn't reviewed." }
         if let candidateIntegrityError { return "This recording's files don't match (\(candidateIntegrityError))." }
         guard let candidates else { return "Open a recording first." }
-        if candidates.requiresFullCoarseReview { return "Label the chewing sections first (Chewing spans)." }
+        if candidates.requiresFullCoarseReview { return "Label the chewing spans first. The Mac then prepares new suggestions." }
         let decidedChews = Set(overrides.chewDecisions.map(\.candidateID))
         let chews = candidates.chews.filter { !decidedChews.contains($0.id) }.count
-        if chews > 0 { return "Accept, fix or reject the \(chews) suggested chew\(chews == 1 ? "" : "s") first (Review chews)." }
+        if chews > 0 { return "Accept, fix or reject the \(chews) suggested chew\(chews == 1 ? "" : "s") first." }
         let decidedEntries = Set(overrides.foodEntryDecisions.map(\.candidateID))
         let entries = candidates.foodEntries.filter { !decidedEntries.contains($0.id) }.count
-        if entries > 0 { return "Decide the \(entries) suggested food entr\(entries == 1 ? "y" : "ies") first (Review chews)." }
+        if entries > 0 { return "Decide the \(entries) suggested food entr\(entries == 1 ? "y" : "ies") first." }
         return nil
     }
 

@@ -20,7 +20,7 @@
 		A100000B /* OverridePersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000B /* OverridePersistence.swift */; };
 		A100000C /* OverrideApplier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000C /* OverrideApplier.swift */; };
 		A100000D /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000D /* RootView.swift */; };
-		A100000E /* HUDTop.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000E /* HUDTop.swift */; };
+		A100000E /* ReviewHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000E /* ReviewHeader.swift */; };
 		A100000F /* BottomDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000F /* BottomDeck.swift */; };
 		A1000010 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010 /* SessionSidebar.swift */; };
 		A1000011 /* HelpPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000011 /* HelpPanel.swift */; };
@@ -35,7 +35,8 @@
 		A2000003 /* ReviewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* ReviewSnapshotTests.swift */; };
 		A1000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000012 /* Assets.xcassets */; };
 		A1000020 /* TimelineViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000020 /* TimelineViewport.swift */; };
-		A1000021 /* ReviewQueueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000021 /* ReviewQueueSheet.swift */; };
+		A1000021 /* ChewDecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000021 /* ChewDecisionCard.swift */; };
+		A1000030 /* GuidedReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000030 /* GuidedReview.swift */; };
 		A1000022 /* FramePredictionsLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000022 /* FramePredictionsLoader.swift */; };
 		A1000023 /* CycleShapeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000023 /* CycleShapeChart.swift */; };
 		A2000001 /* ReviewContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* ReviewContractTests.swift */; };
@@ -67,7 +68,7 @@
 		B100000B /* OverridePersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverridePersistence.swift; sourceTree = "<group>"; };
 		B100000C /* OverrideApplier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideApplier.swift; sourceTree = "<group>"; };
 		B100000D /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		B100000E /* HUDTop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDTop.swift; sourceTree = "<group>"; };
+		B100000E /* ReviewHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHeader.swift; sourceTree = "<group>"; };
 		B100000F /* BottomDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomDeck.swift; sourceTree = "<group>"; };
 		B1000010 /* SessionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSidebar.swift; sourceTree = "<group>"; };
 		B1000011 /* HelpPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPanel.swift; sourceTree = "<group>"; };
@@ -83,7 +84,8 @@
 		B1000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000020 /* TimelineViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineViewport.swift; sourceTree = "<group>"; };
-		B1000021 /* ReviewQueueSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQueueSheet.swift; sourceTree = "<group>"; };
+		B1000021 /* ChewDecisionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChewDecisionCard.swift; sourceTree = "<group>"; };
+		B1000030 /* GuidedReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuidedReview.swift; sourceTree = "<group>"; };
 		B1000022 /* FramePredictionsLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePredictionsLoader.swift; sourceTree = "<group>"; };
 		B1000023 /* CycleShapeChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleShapeChart.swift; sourceTree = "<group>"; };
 		B2000001 /* ReviewContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewContractTests.swift; sourceTree = "<group>"; };
@@ -179,11 +181,12 @@
 			isa = PBXGroup;
 			children = (
 				B100000D /* RootView.swift */,
-				B100000E /* HUDTop.swift */,
+				B100000E /* ReviewHeader.swift */,
 				B100000F /* BottomDeck.swift */,
 				B1000010 /* SessionSidebar.swift */,
 				B1000011 /* HelpPanel.swift */,
-				B1000021 /* ReviewQueueSheet.swift */,
+				B1000021 /* ChewDecisionCard.swift */,
+				B1000030 /* GuidedReview.swift */,
 				B1000023 /* CycleShapeChart.swift */,
 				B1000024 /* PipelineStore.swift */,
 				B1000025 /* PipelineView.swift */,
@@ -308,7 +311,7 @@
 				A100000B /* OverridePersistence.swift in Sources */,
 				A100000C /* OverrideApplier.swift in Sources */,
 				A100000D /* RootView.swift in Sources */,
-				A100000E /* HUDTop.swift in Sources */,
+				A100000E /* ReviewHeader.swift in Sources */,
 				A100000F /* BottomDeck.swift in Sources */,
 				A1000010 /* SessionSidebar.swift in Sources */,
 				A1000011 /* HelpPanel.swift in Sources */,
@@ -316,7 +319,8 @@
 				A1000090 /* ProjectStatus.swift in Sources */,
 				A1000025 /* PipelineView.swift in Sources */,
 				A1000020 /* TimelineViewport.swift in Sources */,
-				A1000021 /* ReviewQueueSheet.swift in Sources */,
+				A1000021 /* ChewDecisionCard.swift in Sources */,
+				A1000030 /* GuidedReview.swift in Sources */,
 				A1000022 /* FramePredictionsLoader.swift in Sources */,
 				A1000023 /* CycleShapeChart.swift in Sources */,
 				A1000026 /* CoarseAssistStore.swift in Sources */,

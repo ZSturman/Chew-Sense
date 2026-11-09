@@ -77,6 +77,47 @@ final class ReviewContractTests: XCTestCase {
     }
 
     @MainActor
+    func testPlaybackStopsShowingPauseAtTheEndAndPlayRestarts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "short.mov")
+        let writer = try AVAssetWriter(url: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32,
+        ])
+        let pixels = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 32, kCVPixelBufferHeightKey as String: 32,
+        ])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        let pool = try XCTUnwrap(pixels.pixelBufferPool)
+        for frame in 0..<10 {
+            try await waitForPlayback { input.isReadyForMoreMediaData }
+            var buffer: CVPixelBuffer?
+            XCTAssertEqual(CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer), kCVReturnSuccess)
+            XCTAssertTrue(pixels.append(try XCTUnwrap(buffer), withPresentationTime: CMTime(value: Int64(frame), timescale: 25)))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+
+        let playback = PlaybackController()
+        playback.load(url: url)
+        try await waitForPlayback("duration") { playback.duration > 0 }
+        playback.play()
+        XCTAssertTrue(playback.isPlaying)
+        try await waitForPlayback("end of video, \(playback.currentTime)") { !playback.isPlaying }
+        XCTAssertGreaterThan(playback.currentTime, playback.duration - 0.05)
+        // Play at the end starts again from the beginning.
+        playback.play()
+        XCTAssertTrue(playback.isPlaying)
+        XCTAssertLessThan(playback.currentTime, 0.05)
+        playback.pause()
+    }
+
+    @MainActor
     private func waitForPlayback(_ description: @autoclosure () -> String = "encoder ready", _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(3)
         while !condition(), ContinuousClock.now < deadline {
@@ -188,15 +229,193 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertFalse(saved.verified)
     }
 
-    func testGuidanceNamesTheRequiredReviewHandoff() {
-        XCTAssertEqual(ReviewGuidanceStage.workspace.title, "Open a review workspace")
-        // One confirmation; the Mac service freezes finished reviews (auto_finalize_verified_drafts).
-        XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("Finish review"))
-        XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("automatically"))
-        XCTAssertEqual(
-            ReviewGuidanceStage.decisions(remainingStatus: "2 candidates remain").doneWhen,
-            "Done when 2 candidates remain."
-        )
+    @MainActor
+    func testGuidedStepsFollowSavedStateAndResume() throws {
+        let fixture = try makeSessionFixture(chews: [
+            chew("ch_0001", 0.10, 0.20, 0.30),
+            chew("ch_0002", 0.30, 0.42, 0.55),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        XCTAssertEqual(state.guidedPlan(spansPending: false), GuidedPlan(steps: [.chews, .finish], current: .chews))
+        XCTAssertEqual(state.pendingChews.map(\.id), ["ch_0001", "ch_0002"])
+
+        state.acceptChew(id: "ch_0001")
+        state.saveOverrides()
+        // Reopening resumes at the first undecided suggestion, not at the start.
+        let reopened = ReviewerState()
+        reopened.setWorkspaceRoot(fixture.root)
+        reopened.loadSession(fixture.session)
+        XCTAssertEqual(reopened.pendingChews.map(\.id), ["ch_0002"])
+        XCTAssertEqual(reopened.guidedPlan(spansPending: false).current, .chews)
+
+        // An edit is a decision: it completes the step without becoming an acceptance.
+        reopened.updateMarker(chewID: "ch_0002", marker: .peak, to: 0.44)
+        XCTAssertEqual(reopened.disposition(for: "ch_0002"), .edited)
+        XCTAssertEqual(reopened.guidedPlan(spansPending: false).current, .finish)
+        XCTAssertTrue(reopened.isComplete(.chews, spansPending: false))
+        XCTAssertFalse(reopened.overrides.verified)  // nothing is finished until Finish review
+
+        // Optional span labels follow the finished chew review.
+        reopened.finishReview()
+        XCTAssertEqual(reopened.guidedPlan(spansPending: true), GuidedPlan(steps: [.chews, .finish, .spans], current: .spans))
+        XCTAssertEqual(reopened.guidedPlan(spansPending: false).current, .done)
+    }
+
+    @MainActor
+    func testGuidedStepsForBlindAndEmptyProposalReviews() throws {
+        let fixture = try makeSessionFixture(chews: [])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        // No suggestions: straight to watching and finishing; Finish is allowed (none is a valid answer).
+        XCTAssertEqual(state.guidedPlan(spansPending: false), GuidedPlan(steps: [.finish], current: .finish))
+        XCTAssertNil(state.finishBlocker)
+
+        var draft = ReviewDraft.empty(sessionID: "golden_session", candidateRevision: 1,
+                                      candidateSHA256: state.overrides.candidateSHA256)
+        draft.reviewContext = .init(mode: "blind")
+        try OverridePersistence.save(draft, session: fixture.session)
+        let blind = ReviewerState()
+        blind.setWorkspaceRoot(fixture.root)
+        blind.loadSession(fixture.session)
+        XCTAssertTrue(blind.isBlindReview)
+        XCTAssertEqual(blind.guidedPlan(spansPending: true), GuidedPlan(steps: [.mark, .finish], current: .mark))
+        blind.addChew(start: 0.2, end: 0.6, peak: 0.4)
+        blind.finishReview()
+        XCTAssertEqual(blind.guidedPlan(spansPending: false).current, .done)
+    }
+
+    @MainActor
+    func testRequiredSpansComeFirstAndBlockFinishing() throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30)], requiresFullCoarseReview: true)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        XCTAssertEqual(state.guidedPlan(spansPending: true), GuidedPlan(steps: [.spans, .chews, .finish], current: .spans))
+        state.acceptChew(id: "ch_0001")
+        XCTAssertEqual(state.finishBlocker?.contains("chewing spans first"), true)
+        state.finishReview()
+        XCTAssertFalse(state.overrides.verified)
+    }
+
+    @MainActor
+    func testBlockedRecordingSavesNothing() throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // The draft names a revision that does not exist: loading is blocked, never substituted.
+        var draft = ReviewDraft.empty(sessionID: "golden_session", candidateRevision: 7, candidateSHA256: "abc")
+        draft.chewDecisions = [.init(candidateID: "ch_0001", disposition: .accepted)]
+        try OverridePersistence.save(draft, session: fixture.session)
+        let before = try Data(contentsOf: fixture.session.overridesURL)
+        let missing = Session(id: "golden_session", rawDir: fixture.session.rawDir, derivedDir: fixture.session.derivedDir,
+                              videoURL: nil, annotatedVideoURL: nil, framePredictionsCSV: nil, motionCSV: nil, alignedCSV: nil,
+                              candidatesJSON: fixture.session.derivedDir.appending(path: "candidates-v0007.json"),
+                              overridesURL: fixture.session.overridesURL, status: .inReview)
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(missing)
+        XCTAssertNotNil(state.candidateIntegrityError)
+        XCTAssertNotNil(state.finishBlocker)
+        state.saveIfDirty()
+        state.closeSession()
+        XCTAssertEqual(try Data(contentsOf: fixture.session.overridesURL), before)
+    }
+
+    @MainActor
+    func testAutosaveWritesTheDraftButNeverFinishes() async throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        state.loadSession(fixture.session)
+        state.acceptChew(id: "ch_0001")
+        XCTAssertTrue(state.isDirty)
+        try await Task.sleep(for: .seconds(2.2))
+        XCTAssertFalse(state.isDirty)
+        let saved = try XCTUnwrap(OverridePersistence.loadIfPresent(fixture.session.overridesURL))
+        XCTAssertEqual(saved.chewDecisions.first?.disposition, .accepted)
+        XCTAssertFalse(saved.verified || saved.fullVideoPassCompleted)
+        // Closing (Up next) saves any pending change first.
+        state.markChewUncertain(id: "ch_0001")
+        state.closeSession()
+        XCTAssertNil(state.selectedSession)
+        XCTAssertEqual(try OverridePersistence.loadIfPresent(fixture.session.overridesURL)?.chewDecisions.first?.disposition, .uncertain)
+    }
+
+    @MainActor
+    func testRetiredRecordingIsWatchOnlyAndNeverSaved() throws {
+        let fixture = try makeSessionFixture(chews: [], loopWorkspace: "blind")
+        let loop = fixture.root.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: loop.deletingLastPathComponent()) }
+        var draft = ReviewDraft.empty(sessionID: "golden_session", candidateRevision: 1, candidateSHA256: "")
+        let probe = ReviewerState()
+        probe.setWorkspaceRoot(fixture.root)
+        probe.loadSession(fixture.session)
+        draft = ReviewDraft.empty(sessionID: "golden_session", candidateRevision: 1,
+                                  candidateSHA256: probe.overrides.candidateSHA256)
+        draft.reviewContext = .init(mode: "blind")
+        try OverridePersistence.save(draft, session: fixture.session)
+        let retired = loop.appending(path: "state/retired")
+        try FileManager.default.createDirectory(at: retired, withIntermediateDirectories: true)
+        try Data(#"{"session_id":"golden_session","retired_at":"2026-11-09T00:00:00Z","category":"mimed_chewing_no_food","category_title":"Mimed chewing / chewing-like movement without food","reason":"Mimed chewing, no food"}"#.utf8)
+            .write(to: retired.appending(path: "golden_session.json"))
+        let before = try Data(contentsOf: fixture.session.overridesURL)
+
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        XCTAssertEqual(state.sessions.first?.status, .retired)
+        state.loadSession(try XCTUnwrap(state.sessions.first))
+        XCTAssertEqual(state.retirement?.category, "mimed_chewing_no_food")
+        XCTAssertEqual(state.guidedPlan(spansPending: false).steps, [])
+        XCTAssertNotNil(state.finishBlocker)
+        state.addChew(start: 0.2, end: 0.6, peak: 0.4)  // even a stray edit is never written
+        state.saveOverrides()
+        state.finishReview()
+        state.closeSession()
+        XCTAssertNil(state.selectedSession)
+        XCTAssertEqual(try Data(contentsOf: fixture.session.overridesURL), before)
+    }
+
+    func testRecordingNamesAreReadable() {
+        XCTAssertEqual(RecordingName.of("Guided-baseline-90s-20261102-171334-F83AB32C"), "Baseline 90s (Nov 2)")
+        XCTAssertEqual(RecordingName.of("Not-eating-20261026-174428-C27C9380"), "Not eating (Oct 26)")
+        XCTAssertEqual(RecordingName.of("golden_session"), "Golden_session")
+    }
+
+    func testSharedStepsFinishedHereDisappearFromUpNext() throws {
+        let loop = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: loop) }
+        func step(_ id: String, _ session: String?) -> ProjectStatus.Step {
+            .init(id: id, stage: "label", app: "review", title: id, detail: "", optional: nil, experimentId: nil, sessionId: session)
+        }
+        let blind = step("blind-S1", "S1"), assisted = step("assisted-S1", "S1"), spans = step("spans-S2", "S2")
+        let status = ProjectStatus(schemaVersion: 1, updatedAt: "", phase: "label", headline: "", summary: "",
+                                   stages: [], steps: [blind, assisted, spans,
+                                                       .init(id: "record-x", stage: "collect", app: "collect", title: "", detail: "",
+                                                             optional: nil, experimentId: "x", sessionId: nil)],
+                                   checks: [])
+        XCTAssertEqual(ReviewTaskProgress.openSteps(status, loopRoot: loop).map(\.id), ["blind-S1", "assisted-S1", "spans-S2"])
+
+        let blindAnnotations = loop.appending(path: "blind/sessions/raw/S1/annotations")
+        try FileManager.default.createDirectory(at: blindAnnotations, withIntermediateDirectories: true)
+        var draft = ReviewDraft.empty(sessionID: "S1", candidateRevision: 1, candidateSHA256: "h")
+        draft.verified = true
+        try JSONEncoder().encode(draft).write(to: blindAnnotations.appending(path: "review-draft.json"))
+        XCTAssertEqual(ReviewTaskProgress.openSteps(status, loopRoot: loop).map(\.id), ["blind-S1", "assisted-S1", "spans-S2"],
+                       "verified without the full pass is not finished")
+        draft.fullVideoPassCompleted = true
+        try JSONEncoder().encode(draft).write(to: blindAnnotations.appending(path: "review-draft.json"))
+        let spanAnnotations = loop.appending(path: "assisted/sessions/raw/S2/annotations")
+        try FileManager.default.createDirectory(at: spanAnnotations, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: spanAnnotations.appending(path: "coarse-review-v0001.json"))
+        XCTAssertEqual(ReviewTaskProgress.openSteps(status, loopRoot: loop).map(\.id), ["assisted-S1"])
+        XCTAssertEqual(ReviewTaskProgress.destination(of: spans)?.step, .spans)
+        XCTAssertEqual(ReviewTaskProgress.destination(of: blind)?.workspace, "blind")
     }
 
     func testCanonicalMarkerSemantics() {
@@ -527,7 +746,8 @@ final class ReviewContractTests: XCTestCase {
 
     private func makeCandidateArtifact(
         chews: [[String: Any]],
-        foodEntries: [[String: Any]] = []
+        foodEntries: [[String: Any]] = [],
+        requiresFullCoarseReview: Bool = false
     ) throws -> Data {
         var object: [String: Any] = [
             "schema_version": "2.0.0",
@@ -536,8 +756,8 @@ final class ReviewContractTests: XCTestCase {
             "candidate_revision": 1,
             "generated_at": "2026-07-12T00:00:00Z",
             "model_versions": ["jaw_fusion": "fixture-v1"],
-            "coarse_label_state": "reviewed_intervals",
-            "requires_full_coarse_review": false,
+            "coarse_label_state": requiresFullCoarseReview ? "missing" : "reviewed_intervals",
+            "requires_full_coarse_review": requiresFullCoarseReview,
             "chews": chews,
             "food_entries": foodEntries,
             "debug_telemetry": [String: Any](),
@@ -565,15 +785,17 @@ final class ReviewContractTests: XCTestCase {
         return url
     }
 
-    private func makeSessionFixture(chews: [[String: Any]]) throws -> (root: URL, session: Session) {
-        let root = FileManager.default.temporaryDirectory
+    private func makeSessionFixture(chews: [[String: Any]], requiresFullCoarseReview: Bool = false,
+                                    loopWorkspace: String? = nil) throws -> (root: URL, session: Session) {
+        var root = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        if let loopWorkspace { root = root.appending(path: "loop/\(loopWorkspace)", directoryHint: .isDirectory) }
         let raw = root.appending(path: "sessions/raw/golden_session")
         let derived = root.appending(path: "derived/vision/golden_session")
         try FileManager.default.createDirectory(at: raw, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: derived, withIntermediateDirectories: true)
         let candidateURL = derived.appending(path: "candidates-v0001.json")
-        try makeCandidateArtifact(chews: chews).write(to: candidateURL)
+        try makeCandidateArtifact(chews: chews, requiresFullCoarseReview: requiresFullCoarseReview).write(to: candidateURL)
         return (root, Session(
             id: "golden_session", rawDir: raw, derivedDir: derived,
             videoURL: nil, annotatedVideoURL: nil, framePredictionsCSV: nil,

@@ -25,6 +25,7 @@ final class PlaybackController: ObservableObject {
     var suppressLoop: Bool = false
 
     private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
     private var durationTask: Task<Void, Never>?
     private var rangeStart: Double?
     private var rangeEnd: Double?
@@ -33,6 +34,7 @@ final class PlaybackController: ObservableObject {
 
     deinit {
         durationTask?.cancel()
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
@@ -54,13 +56,33 @@ final class PlaybackController: ObservableObject {
         isLooping = false
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.didPlayToEnd() }
+        }
         installTimeObserver()
         loadDuration(for: item.asset)
     }
 
     func play() {
+        // At the very end with no clip range, Play starts the recording again.
+        if rangeStart == nil, duration > 0, currentTime >= duration - 0.05 { seek(to: 0) }
         player.playImmediately(atRate: Float(playbackRate))
         isPlaying = true
+    }
+
+    /// The video ran out: loop a clip that reaches the end, otherwise stop so
+    /// the controls show Play again instead of a stale Pause.
+    func didPlayToEnd() {
+        if isLooping, !suppressLoop, let rangeStart {
+            seek(to: rangeStart)
+            play()
+            return
+        }
+        isPlaying = false
+        if duration > 0 { currentTime = duration }
     }
 
     func pause() {

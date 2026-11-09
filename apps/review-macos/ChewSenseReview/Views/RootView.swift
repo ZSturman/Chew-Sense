@@ -2,44 +2,41 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-/// Dedicated video area, toolbar, section navigator and optional evidence panels.
+/// Up next when no recording is open; otherwise the video, a slim header with
+/// the review's steps, the timeline, and the guide panel for the current step.
 /// Playback shortcuts are scoped to the review window.
 struct RootView: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
     @EnvironmentObject var viewport: TimelineViewport
     @EnvironmentObject var assist: CoarseAssistStore
+    @EnvironmentObject var project: ProjectStatusStore
 
-    @State private var showSidebar: Bool = true
-    @State private var showAssist = false
+    @State private var showSidebar = false
     @State private var showHelp: Bool = false
-    @State private var showReviewQueue: Bool = false
-    @State private var showSections = true
     @State private var showSignals = false
+
+    private var plan: GuidedPlan { state.guidedPlan(spansPending: assist.needsReview) }
+    /// The step on screen: the reviewer's choice if it is part of this review, else the recommended one.
+    private var step: GuidedStep {
+        if let chosen = state.chosenStep, plan.steps.contains(chosen) || chosen == .done { return chosen }
+        return plan.current
+    }
+    private var isSpansStep: Bool { step == .spans && state.candidateIntegrityError == nil }
 
     var body: some View {
         HStack(spacing: 0) {
             if showSidebar {
-                SessionSidebar()
-                    .frame(width: 240)
+                SessionSidebar(onClose: { showSidebar = false })
+                    .frame(width: 260)
                     .transition(.move(edge: .leading))
                 Divider()
             }
             mainStage
-            if showAssist, state.selectedSession != nil {
+            if state.selectedSession?.videoURL != nil {
                 Divider()
-                CoarseAssistPanel(onClose: { withAnimation { showAssist = false } },
-                                  onPlayClip: playOrPauseFromSelectedCycleStart)
-                    .frame(width: 380)
-                    .transition(.move(edge: .trailing))
-            } else if showReviewQueue {
-                Divider()
-                ReviewQueuePanel(onClose: { withAnimation { showReviewQueue = false } })
-                    .frame(width: 360)
-                    .transition(.move(edge: .trailing))
-            } else if showSections, state.selectedSession != nil {
-                Divider()
-                ReviewSectionsPanel().frame(width: 250)
+                GuidePanel(plan: plan, step: step, onPlayClip: playOrPauseFromSelectedCycleStart)
+                    .frame(width: 340)
             }
         }
         .overlay(alignment: .trailing) {
@@ -52,7 +49,8 @@ struct RootView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .animation(.easeInOut(duration: 0.18), value: showSidebar)
         .animation(.easeInOut(duration: 0.18), value: showHelp)
-        .animation(.easeInOut(duration: 0.18), value: showReviewQueue)
+        .onAppear { project.start(workspace: state.workspaceRoot) }
+        .onChange(of: state.workspaceRoot) { _, root in project.start(workspace: root) }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSidebar)) { _ in
             showSidebar.toggle()
         }
@@ -62,18 +60,28 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pickWorkspace)) { _ in
             pickWorkspaceRoot()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleReviewQueue)) { _ in
-            withAnimation { showReviewQueue.toggle() }
-        }
         .onChange(of: playback.isPlaying) { _, playing in
             if playing {
                 viewport.snapToPlayhead(playback.currentTime, duration: max(playback.duration, 1))
             }
         }
+        .onChange(of: playback.currentTime) { _, time in
+            if playback.isPlaying { state.noteWatched(time) }
+        }
         .onChange(of: state.selectedSession?.id) { _, _ in
+            // Keep span labels made so far before showing another recording's proposals.
+            assist.saveIfDirty()
             loadEffectiveVideo(preserveTime: false)
-            assist.load(session: state.isBlindReview ? nil : state.selectedSession, workspaceRoot: state.workspaceRoot)
+            assist.load(session: state.isBlindReview || state.retirement != nil ? nil : state.selectedSession,
+                        workspaceRoot: state.workspaceRoot)
             if state.selectedSession != nil { showSidebar = false }
+        }
+        // When the step on screen is finished (e.g. the last suggestion was decided),
+        // follow the recommended step instead of staying there.
+        .onChange(of: plan.current) { _, _ in
+            if let chosen = state.chosenStep, state.isComplete(chosen, spansPending: assist.needsReview) {
+                state.chosenStep = nil
+            }
         }
         .onChange(of: state.useAnnotatedVideo) { _, _ in
             loadEffectiveVideo(preserveTime: true)
@@ -89,27 +97,18 @@ struct RootView: View {
         if state.workspaceRoot == nil {
             workspacePrompt
         } else if state.selectedSession == nil {
-            ScrollView {
-                VStack(spacing: 16) {
-                    ProjectStatusBox()
-                        .frame(maxWidth: 560)
-                    ContentUnavailableView(
-                        "Pick a session",
-                        systemImage: "video.circle",
-                        description: Text("Choose a session in the sidebar to start labeling chews.")
-                    )
-                    ReviewGuidanceView(stage: .workspace)
-                        .frame(maxWidth: 560)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-            }
+            UpNextView(showRecordings: { showSidebar = true })
         } else if state.selectedSession?.videoURL == nil {
-            ContentUnavailableView(
-                "No video for this session",
-                systemImage: "video.slash",
-                description: Text("Place an .mp4 / .mov in the session’s raw folder.")
-            )
+            VStack(spacing: 16) {
+                ContentUnavailableView(
+                    "This recording has no video",
+                    systemImage: "video.slash",
+                    description: Text("Review needs the original .mp4 or .mov in the recording's folder. Nothing was changed.")
+                )
+                Button("Back to Up next") { state.closeSession() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             videoStage
         }
@@ -117,50 +116,39 @@ struct RootView: View {
 
     private var workspacePrompt: some View {
         VStack(spacing: 14) {
-            Text("ChewSense Review").font(.title2).bold()
-            Text("Choose the ChewSense workspace directory to discover sessions.")
+            Text("Chew Sense Review").font(.largeTitle.weight(.semibold))
+            Text("Choose your ChewSense workspace folder once. After that, Review opens straight to the next recording that needs you.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: 520)
+                .frame(maxWidth: 460)
             Button("Choose workspace…") { pickWorkspaceRoot() }
-                .buttonStyle(.borderedProminent)
-            ReviewGuidanceView(stage: .workspace)
-                .frame(maxWidth: 560)
+                .buttonStyle(.borderedProminent).controlSize(.large)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var videoStage: some View {
-        VStack(spacing: 8) {
-            if !showAssist {
-                HUDTop(toggleSidebar: { showSidebar.toggle() },
-                       toggleHelp: { showHelp.toggle() },
-                       toggleReviewQueue: { showReviewQueue.toggle(); if showReviewQueue { showSections = false } },
-                       toggleSections: { showSections.toggle(); if showSections { showReviewQueue = false } },
-                       toggleAssist: { showAssist = true; showReviewQueue = false; showSections = false },
-                       toggleSignals: { showSignals.toggle() })
-            }
-            Text(showAssist
-                 ? "Play each clip and label what you see."
-                 : state.isBlindReview
-                 ? "Play the recording and press Add chew for each chew you see (none is a valid answer). Then press Finish review."
-                 : "Check the suggested chews (Review chews): accept, fix or reject each, add any missed. Then press Finish review.")
-                .font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 10) {
+            ReviewHeader(plan: plan, step: step,
+                         isComplete: { state.isComplete($0, spansPending: assist.needsReview) },
+                         toggleSidebar: { showSidebar.toggle() },
+                         toggleHelp: { showHelp.toggle() },
+                         toggleSignals: { showSignals.toggle() })
             GeometryReader { geometry in
                 VideoSurface(player: playback.player, quarterTurns: playback.displayQuarterTurns)
                     .equatable()
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .background(Color.black).clipped()
-            if showSignals && !state.isBlindReview && !showAssist {
-                    CycleShapeChart()
-                        .frame(height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            if showSignals && !state.isBlindReview && !isSpansStep {
+                CycleShapeChart()
+                    .frame(height: 110)
             }
-            if !showAssist { BottomDeck() }
+            if !isSpansStep && state.candidateIntegrityError == nil { BottomDeck() }
         }
-        .padding(10)
+        .padding(12)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay { KeyCaptureView(handler: handleKey).frame(width: 0, height: 0) }
     }
@@ -214,7 +202,7 @@ struct RootView: View {
             playback.pause()
             return
         }
-        if showAssist {
+        if isSpansStep {
             guard let item = assist.selectedItem else { return }
             assist.startTimer()
             playback.setLoop(start: item.start, end: item.end, enabled: false)
@@ -233,6 +221,19 @@ struct RootView: View {
 
     private func handleKey(_ event: NSEvent, held: Set<String>) -> NSEvent? {
         guard state.selectedSession != nil else { return event }
+        if state.retirement != nil {
+            // Watch only: play/pause and frame or quarter-second steps.
+            let mods = event.modifierFlags.intersection([.command, .control, .option])
+            guard mods.isEmpty else { return event }
+            if event.charactersIgnoringModifiers == " " { playOrPauseFromSelectedCycleStart(); return nil }
+            if event.keyCode == 123 || event.keyCode == 124 {
+                let forward = event.keyCode == 124
+                if event.modifierFlags.contains(.shift) { playback.skip(by: forward ? 0.25 : -0.25) }
+                else { playback.stepFrames(by: forward ? 1 : -1) }
+                return nil
+            }
+            return event
+        }
         let chars = event.charactersIgnoringModifiers ?? ""
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             .subtracting([.numericPad, .function, .capsLock])
@@ -241,7 +242,7 @@ struct RootView: View {
         let shift = mods == .shift
         let option = mods == .option
 
-        if showAssist {
+        if isSpansStep {
             guard plain else { return event }
             if chars == " " {
                 playOrPauseFromSelectedCycleStart()
@@ -351,15 +352,17 @@ struct RootView: View {
             return nil
         case ("v", _) where plain:
             if let next = state.verifyAndAdvance() {
-                playback.seek(to: next.startTS)
-                viewport.focus(on: next, duration: max(playback.duration, 1))
+                if step == .chews {
+                    ChewCue.loop(next, state: state, playback: playback, viewport: viewport)
+                } else {
+                    playback.seek(to: next.startTS)
+                    viewport.focus(on: next, duration: max(playback.duration, 1))
+                }
             }
             return nil
         case ("V", _):
             if let id = state.selectedChewID { state.toggleChewVerified(id: id) }
             return nil
-        case ("m", _), ("M", _):
-            showReviewQueue.toggle(); return nil
         default: break
         }
 
@@ -412,125 +415,7 @@ struct RootView: View {
     }
 }
 
-enum ReviewGuidanceStage: Equatable {
-    case workspace
-    case decisions(remainingStatus: String)
-    case finalize
-
-    var title: String {
-        switch self {
-        case .workspace: "Open a review workspace"
-        case .decisions: "Review every proposed event"
-        case .finalize: "Finish this review"
-        }
-    }
-
-    var nextStep: String {
-        switch self {
-        case .workspace:
-            "Choose the workspace containing sessions/raw and derived/vision. Then select a session with an immutable candidate revision."
-        case .decisions:
-            "Accept, fix or reject each suggested chew (Review chews), add any it missed, watch the whole recording, then press Finish review."
-        case .finalize:
-            "Press Finish review. Recordings from the Mac service are checked and locked in automatically; a hand-prepared workspace still needs finalize-session."
-        }
-    }
-
-    var doneWhen: String {
-        switch self {
-        case .workspace: "Done when the session loads without a lineage error."
-        case .decisions(let status): "Done when \(status)."
-        case .finalize: "Done when audit-session passes after finalization."
-        }
-    }
-}
-
-private struct ReviewGuidanceView: View {
-    let stage: ReviewGuidanceStage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label(stage.title, systemImage: "list.number")
-                .font(.subheadline.weight(.semibold))
-            Text(stage.nextStep)
-            Text(stage.doneWhen)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .font(.footnote)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityIdentifier("reviewGuidanceCard")
-    }
-}
-
 // MARK: - Video surface (custom AVPlayerLayer-backed view)
-
-private struct ReviewSectionsPanel: View {
-    @EnvironmentObject var state: ReviewerState
-    @EnvironmentObject var playback: PlaybackController
-    @EnvironmentObject var viewport: TimelineViewport
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recording sections").font(.headline)
-            Toggle("Phone labels", isOn: $state.showPhoneSections)
-            Toggle("Requested actions", isOn: $state.showInstructionSections)
-            Toggle("Chewing sections only", isOn: $state.chewingSectionsOnly)
-            if state.isBlindReview {
-                Text("Detector predictions stay hidden for this benchmark. Optional requested actions help navigation; check what actually happened in the video.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text("Blue: your reviewed phone labels. Purple: requested actions, never verified labels.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Button("Whole recording") {
-                state.focusedSectionID = nil
-                playback.clearLoop()
-                viewport.fit()
-            }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(state.visibleReviewSections) { section in
-                        Button {
-                            playback.pause()
-                            state.selectChew(id: nil)
-                            state.focusedSectionID = section.id
-                            playback.setLoop(start: section.start, end: section.end, enabled: false)
-                            playback.seek(to: section.start)
-                            viewport.center = (section.start + section.end) / 2
-                            viewport.zoom = max(1, playback.duration / max(1, section.end - section.start + 1))
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(section.title).font(.callout.weight(.semibold))
-                                Text(String(format: "%.1f–%.1f s · %@", section.start, section.end,
-                                            section.source == .phone ? "Phone label" : "Requested"))
-                                    .font(.caption.monospacedDigit())
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                            .background((section.source == .phone ? Color.blue : Color.purple).opacity(state.focusedSectionID == section.id ? 0.3 : 0.1),
-                                        in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            if state.focusedReviewSection != nil {
-                Text("The chew queue is focused on this section. Other events stay pending; filtering never verifies or excludes them.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if !state.isBlindReview {
-                    Button("Accept proposals I reviewed here") { state.acceptReviewedSectionProposals() }
-                        .disabled(state.reviewQueueChews.allSatisfy { state.disposition(for: $0.id) != nil })
-                }
-            }
-        }
-        .toggleStyle(.checkbox)
-        .padding(14)
-        .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-}
 
 private struct VideoSurface: NSViewRepresentable, Equatable {
     let player: AVPlayer

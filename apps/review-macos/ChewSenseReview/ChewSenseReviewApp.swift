@@ -6,6 +6,7 @@ struct ChewSenseReviewApp: App {
     @StateObject private var playback = PlaybackController()
     @StateObject private var viewport = TimelineViewport()
     @StateObject private var assist = CoarseAssistStore()
+    @StateObject private var project = ProjectStatusStore()
 
     var body: some Scene {
         WindowGroup {
@@ -20,7 +21,8 @@ struct ChewSenseReviewApp: App {
                 .environmentObject(playback)
                 .environmentObject(viewport)
                 .environmentObject(assist)
-                .frame(minWidth: 980, minHeight: 640)
+                .environmentObject(project)
+                .frame(minWidth: 1080, minHeight: 680)
         }
         .windowToolbarStyle(.unifiedCompact)
 
@@ -45,25 +47,24 @@ struct ChewSenseReviewApp: App {
                     .disabled(!state.canRedo)
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Save Overrides") { state.saveOverrides() }
+                Button("Save Now") { state.saveOverrides() }
                     .keyboardShortcut("s", modifiers: [.command])
                     .disabled(state.selectedSession == nil)
             }
             CommandGroup(after: .sidebar) {
-                Button("Toggle Sidebar") {
+                Button("Show or Hide Recordings") {
                     NotificationCenter.default.post(name: .toggleSidebar, object: nil)
                 }
                 .keyboardShortcut("1", modifiers: [.command])
-                Button("Toggle Help") {
+                Button("Show or Hide Help") {
                     NotificationCenter.default.post(name: .toggleHelp, object: nil)
                 }
                 .keyboardShortcut("/", modifiers: [.command])
-                Button("Open Review Queue") {
-                    NotificationCenter.default.post(name: .toggleReviewQueue, object: nil)
-                }
-                .keyboardShortcut("m", modifiers: [.command])
             }
             CommandMenu("Go") {
+                Button("Up Next") { state.closeSession() }
+                    .keyboardShortcut("0", modifiers: [.command])
+                Divider()
                 Button("Assisted Review") { state.openReviewWorkspace("assisted") }
                     .keyboardShortcut("1", modifiers: [.command, .option])
                 Button("Blind Review") { state.openReviewWorkspace("blind") }
@@ -88,7 +89,6 @@ extension Notification.Name {
     static let toggleSidebar = Notification.Name("ChewSense.toggleSidebar")
     static let toggleHelp = Notification.Name("ChewSense.toggleHelp")
     static let pickWorkspace = Notification.Name("ChewSense.pickWorkspace")
-    static let toggleReviewQueue = Notification.Name("ChewSense.toggleReviewQueue")
 }
 
 /// Opens a single-instance window from a menu command.

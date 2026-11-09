@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 /// Immutable `coarse-proposals-vNNNN.json` written by `chewsense-motion assist-propose`.
 /// Proposals are never labels; only decisions saved here become labels, and they
@@ -215,8 +216,11 @@ final class CoarseAssistStore: ObservableObject {
     @Published private(set) var savedRevision: Int?
     @Published private(set) var isDirty = false
     @Published private(set) var isTiming = false
+    /// A saved span review exists, but for an earlier proposal file. Its labels still count.
+    @Published private(set) var savedForOlderProposals = false
 
     private var annotationsDirectory: URL?
+    private var terminateObserver: NSObjectProtocol?
     private var sessionID: String?
     private let now: () -> TimeInterval
     private var activeSince: TimeInterval?
@@ -224,6 +228,23 @@ final class CoarseAssistStore: ObservableObject {
 
     init(now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.now = now
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveIfDirty() }
+        }
+    }
+
+    /// True while this recording has span proposals that still need the reviewer.
+    /// A saved review (even of older proposals) counts as done, as in the shared status.
+    var needsReview: Bool {
+        proposals != nil && (isDirty || !(document.isComplete || savedForOlderProposals))
+    }
+
+    /// Saves decided spans as a new revision before leaving a recording or quitting.
+    func saveIfDirty() {
+        guard isDirty, document.decidedCount > 0 else { return }
+        save()
     }
 
     var activeSeconds: TimeInterval {
@@ -255,6 +276,7 @@ final class CoarseAssistStore: ObservableObject {
         document = CoarseAssistDocument(spans: [])
         selectedSpanID = nil
         savedRevision = nil
+        savedForOlderProposals = false
         isDirty = false
         accumulatedSeconds = 0
         guard let session, let workspaceRoot else {
@@ -295,6 +317,7 @@ final class CoarseAssistStore: ObservableObject {
         savedRevision = revision
         let proposalRef = json["proposals"] as? [String: Any]
         guard proposalRef?["content_sha256"] as? String == hash else {
+            savedForOlderProposals = true
             message = "Saved review v\(revision) used older proposals; its labels still count. These new proposals start undecided."
             return
         }

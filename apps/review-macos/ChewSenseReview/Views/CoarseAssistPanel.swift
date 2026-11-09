@@ -7,16 +7,17 @@ struct CoarseAssistPanel: View {
     @EnvironmentObject var assist: CoarseAssistStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSaveResult = false
-    let onClose: () -> Void
     let onPlayClip: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Chewing spans").font(.title2.bold())
-                Spacer()
-                Button("Close chewing spans", systemImage: "xmark", action: onClose)
-                    .labelStyle(.iconOnly).buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Chewing spans").font(.title2.weight(.semibold))
+                Text(state.candidates?.requiresFullCoarseReview == true
+                     ? "Required first: say where chewing happens. The Mac then prepares the chew suggestions."
+                     : "Optional, quick: say where chewing happens. It improves the AirPods chewing detector.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if state.isBlindReview {
                 Text("Proposals stay hidden during an independent benchmark.")

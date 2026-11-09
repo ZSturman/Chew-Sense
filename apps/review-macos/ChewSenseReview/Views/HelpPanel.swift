@@ -17,12 +17,21 @@ struct HelpPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    section(title: "How a review goes") {
+                        bullet("Up next shows the one task that needs you. Press Start.")
+                        bullet("The panel on the right walks you through the steps shown at the top. Click a step to go back to it.")
+                        bullet("Suggestions shown: accept, fix or reject each suggested chew, watch the whole recording for missed ones, then Finish review.")
+                        bullet("Blind review: suggestions are hidden. Mark every chew you see (none is a valid answer), then Finish review.")
+                        bullet("Your decisions save automatically; close the app any time and continue later. Finished reviews are locked in by the Mac.")
+                    }
+
                     section(title: "The basics") {
                         Text("Each chew is one closed → open → closed cycle. Closed start is the rest position immediately before opening, Maximum open is the largest observable jaw opening, and Closed end is the return to rest. Closed end is also the counted chew-event timestamp.")
                     }
 
                     section(title: "Add a chew") {
-                        bullet("The timeline starts in Scrub mode: click or drag to move playback without changing labels. Choose Edit chews before drawing a Closed start → Closed end range; Maximum open starts at the midpoint.")
+                        bullet("Pause where the mouth is open widest and press A (or Add chew in the panel). Then adjust its start and end if needed.")
+                        bullet("The timeline starts in Move playhead mode: click or drag to move playback without changing labels. Choose Edit chews before drawing a Closed start → Closed end range; Maximum open starts at the midpoint.")
                         bullet("Or, with no chew selected, press 1 / 2 / 3 to drop Closed start / Maximum open / Closed end markers at the playhead and create a chew.")
                     }
 
@@ -41,10 +50,12 @@ struct HelpPanel: View {
                         bullet("N / P jump between chews; [ / ] jump to start / end of the selected chew.")
                     }
 
-                    section(title: "Review queue") {
-                        bullet("Press M to open the Review Queue side panel — the video keeps playing in the main stage.")
-                        bullet("The current chew loops automatically; the timeline zooms to fit it.")
+                    section(title: "Check suggestions") {
+                        bullet("The current suggestion loops automatically; the timeline zooms to fit it.")
+                        bullet("Yes (Return) accepts it and moves on. Not a chew rejects it. Can't tell marks it unclear or hidden.")
+                        bullet("Fix the timing nudges each marker by a frame, or sets it to the paused video position.")
                         bullet("Hold S, P, or E and tap ← / → to nudge that marker by one frame (⇧ for 5 frames).")
+                        bullet("All suggestions lists every one, so you can revisit and change any answer.")
                     }
 
                     section(title: "Eating segments") {
@@ -55,7 +66,6 @@ struct HelpPanel: View {
                     section(title: "Decide & advance") {
                         bullet("Press V to accept the selected chew and jump to the next pending candidate.")
                         bullet("Use Unobservable when the anchors cannot be seen, and Uncertain when the video is ambiguous. Both decisions exclude the cycle from phase supervision.")
-                        bullet("Press M to open the Review Queue: a focused, looped per-chew review with progress.")
                     }
 
                     section(title: "Delete or revert") {
@@ -115,10 +125,11 @@ struct HelpPanel: View {
             ("F", "Focus selected chew"),
             ("V", "Accept selected chew & advance"),
             ("⇧V", "Return decision to pending / accept"),
-            ("M / ⌘M", "Open review queue"),
+            ("Return", "Yes, it's a chew (Check suggestions)"),
+            ("⌘0", "Back to Up next"),
             ("⌘Z / ⇧⌘Z", "Undo / redo"),
-            ("⌘S", "Save"),
-            ("⌘1", "Toggle sidebar"),
+            ("⌘S", "Save now (also automatic)"),
+            ("⌘1", "Show or hide all recordings"),
             ("⌘ /", "Toggle this help"),
         ]
         return VStack(alignment: .leading, spacing: 4) {

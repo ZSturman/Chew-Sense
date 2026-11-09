@@ -1,5 +1,37 @@
 # ChewSense Review
 
+## Guided review — November 9, 2026
+
+Review now opens on **Up next**: the one review task that needs you (from the
+loop service's shared status), what it involves, and **Start**. Tasks you
+finish disappear at once; the rest are listed under "After that". All
+recordings, Pipeline, Training and the full project status stay one click away.
+
+Inside a recording, the header shows its steps and a panel on the right walks
+through the current one:
+
+| Task | Steps |
+| --- | --- |
+| Suggestions shown (assisted) | **Check suggestions** (one looped chew at a time: Yes / Not a chew / Can't tell, optional *Fix the timing*) → **Watch and finish** (play the whole recording, add missed chews, Finish review) → optional **Chewing spans** |
+| Blind | **Mark chews** (suggestions hidden; none is a valid answer) → **Finish** |
+
+The step follows the saved draft, so a review resumes at the first undecided
+suggestion. Decisions save automatically (about 1.5 s after a change, on Up next,
+when switching recordings and on quit); only **Finish review** sets the
+verified/full-pass flags, behind the same one-sentence confirmation as before.
+Blocked states say why and what to do (undecided suggestions, required
+chewing spans, mismatched files: nothing is saved and details are under
+*Technical details*). Sections, unclear ranges, timing nods and the labelling
+timer are under **More options**; signal charts, annotated video and rotation
+are in the header's ⋯ menu. ⌘0 returns to Up next, ⌘1 shows all recordings.
+
+![Up next](../../docs/images/review-guided-up-next.png)
+
+Offscreen renders from `ReviewSnapshotTests.testRenderGuidedReview` (real
+workspace, read-only; the video is black in renders):
+[check suggestions](../../docs/images/review-guided-check-suggestions.png),
+[blind marking](../../docs/images/review-guided-blind-mark.png).
+
 ## Section-based review — November 2, 2026
 
 The video has a dedicated unobstructed area. **Sections** reuses the chewing
