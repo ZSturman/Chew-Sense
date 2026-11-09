@@ -61,7 +61,7 @@ struct MainContentView: View {
     private var phoneBody: some View {
         NavigationStack {
             phoneSidebar
-                .navigationTitle("ChewSense Live")
+                .navigationTitle("Chew Sense Live")
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -175,7 +175,7 @@ struct MainContentView: View {
     private var splitBody: some View {
         NavigationSplitView {
             sidebar
-                .navigationTitle("ChewSense Live")
+                .navigationTitle("Chew Sense Live")
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {

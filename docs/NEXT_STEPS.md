@@ -1,3 +1,39 @@
+# Checkpoint — November 8, 2026 (late): one ecosystem — names, links, installs
+
+Full inventory and how to move between apps: [APPS.md](APPS.md).
+
+**Installed and verified:**
+- `/Applications/Chew Sense Review.app`: Release build, Apple Development signed,
+  `codesign --verify --deep --strict` OK. Launch Services now resolves the bundle ID
+  there (build-folder copies unregistered, files kept). Settings carried over
+  (same bundle ID and preferences). After quit and relaunch it reopened the saved workspace.
+- iPhone: **Chew Sense Collect** 1.2 (7) and **Chew Sense Live** 1.0 (1), development builds
+  of `b079810`+, installed in place; data, pairing and Keychain preserved (Live's
+  device test fetched status with its existing pairing after reinstall).
+
+**Navigation added:** shared `ChewSenseLink` (`chewsense-collect://experiment/<id>`,
+`chewsense-live://status`, `chewsense-review://session/<id>?workspace=…`). The
+shared card's steps gain open buttons in each app; Review gains a **Go** menu.
+Links only navigate.
+
+**Verified on the iPhone (`build/Device-Links-Collect.xcresult`, `build/Device-Status-Live.xcresult`):**
+the Collect link opened the Talking v2 preparation sheet (nothing recording); the
+Live link brought Chew Sense Live forward with iOS's "◀ Chew Sense Collect" return;
+Live showed "Open in Chew Sense Collect" on record steps and "Connected to" the Mac;
+Collect showed the shared card. **On the Mac:** links opened the baseline (assisted)
+and Not-eating (blind: "predictions hidden", 0 candidates) recordings; 19 annotation
+files hash-identical before and after. Suites: Review 30 (+1 opt-in skip), Collect 30,
+Live 41 (+1 device-only skip) in the simulator.
+
+**Not done / limits:** removing the four empty legacy iPhone apps
+(`com.chewsense.archive.*`, `com.audit.howsmyeating…`) was blocked by the permission
+system as an irreversible deletion; their 3 KB of data is backed up in
+`workspace/backups/iphone-legacy-apps-20261108/`. "Companion app not installed" was
+checked in code (buttons hidden unless `canOpenURL`), not by uninstalling Live.
+No real recording or live model check was started.
+
+---
+
 # Checkpoint — November 8, 2026 (night): false-alarm decoder, one-nod protocols
 
 **AirPods false alarms: decoder persistence (pre-registered, confirmed once).**

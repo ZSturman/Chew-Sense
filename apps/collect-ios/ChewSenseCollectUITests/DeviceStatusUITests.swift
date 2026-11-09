@@ -45,8 +45,10 @@ final class DeviceStatusUITests: XCTestCase {
         XCUIDevice.shared.system.open(URL(string: "chewsense-collect://experiment/talking")!)
         let close = collect.buttons["Close"]
         XCTAssertTrue(close.waitForExistence(timeout: 15), "link did not open the experiment sheet")
+        XCTAssertTrue(collect.navigationBars["Talking"].waitForExistence(timeout: 10), "Talking preparation not shown")
         let prompt = collect.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Nod down once")).firstMatch
-        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "Talking preparation not shown")
+        for _ in 0..<8 where !prompt.isHittable { collect.swipeUp() }
+        XCTAssertTrue(prompt.exists, "v2 one-nod prompt not shown")
         XCTAssertFalse(collect.buttons["Stop"].exists)  // preparation only, nothing recording
         let shot = XCTAttachment(screenshot: collect.screenshot())
         shot.name = "collect-link-talking"
