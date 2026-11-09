@@ -11,7 +11,6 @@ struct ChewDecisionCard: View {
 
     @State private var showTiming = false
     @State private var showAll = false
-    @AppStorage(ChewCue.loopKey) private var loopClips = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -54,7 +53,7 @@ struct ChewDecisionCard: View {
                     .foregroundStyle(decisionColor(decision))
             }
             Text("Is this a real chew?").font(.headline)
-            clipControls(replay: { cue(chew) },
+            ClipControls(replay: { cue(chew) },
                          toggle: { ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport) })
             Button { acceptAndAdvance(chew) } label: {
                 Label("Yes, it's a chew", systemImage: "checkmark").frame(maxWidth: .infinity)
@@ -152,7 +151,7 @@ struct ChewDecisionCard: View {
             Text("\(state.pendingFoodEntries.count) of \(total) left")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             Text("Did food go into the mouth?").font(.headline)
-            clipControls(replay: { cue(entry) },
+            ClipControls(replay: { cue(entry) },
                          toggle: { ChewCue.toggle(entry, state: state, playback: playback) })
             Button {
                 if state.foodEntryDisposition(for: entry.id) == nil { state.acceptBite(id: entry.id) }
@@ -287,34 +286,6 @@ struct ChewDecisionCard: View {
         ChewCue.loop(entry, state: state, playback: playback)
     }
 
-    /// Replay from the clip's start, pause/resume and loop on/off, right above the answers.
-    @ViewBuilder
-    private func clipControls(replay: @escaping () -> Void, toggle: @escaping () -> Void) -> some View {
-        HStack {
-            Button(action: replay) {
-                Label("Replay", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
-            }
-            .help("Play this clip again from its start (R)")
-            .accessibilityIdentifier("replayClip")
-            Button(action: toggle) {
-                Label(playback.isPlaying ? "Pause" : "Play",
-                      systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .help("Pause or resume (Space)")
-            .accessibilityIdentifier("toggleClip")
-            Toggle(isOn: $loopClips) {
-                Label("Loop", systemImage: "repeat")
-            }
-            .toggleStyle(.button)
-            .help(loopClips ? "Looping: the clip repeats until you answer. Click to play each clip once and pause."
-                            : "Plays once and pauses at the end. Click to loop the clip until you answer.")
-            .accessibilityIdentifier("loopClips")
-        }
-        .controlSize(.large)
-        .onChange(of: loopClips) { _, loop in playback.setLooping(loop) }
-        SpeedControl()
-    }
 
     private func acceptAndAdvance(_ chew: ReviewChew) {
         // Keep a fix or an earlier acceptance; only change undecided or negative answers.
@@ -455,10 +426,58 @@ enum ChewCue {
         playback.resumeOrRestart(start: clip.start, end: clip.end, loop: loops)
     }
 
+    /// Any clip (e.g. a chewing span): play from its start, honouring the Loop choice.
+    static func play(start: Double, end: Double, playback: PlaybackController) {
+        playback.playRange(start: start, end: end, loop: loops)
+    }
+
+    static func toggle(start: Double, end: Double, playback: PlaybackController) {
+        if playback.isPlaying { playback.pause(); return }
+        playback.resumeOrRestart(start: start, end: end, loop: loops)
+    }
+
     static func toggle(_ entry: ReviewFoodEntry, state: ReviewerState, playback: PlaybackController) {
         if playback.isPlaying { playback.pause(); return }
         guard state.selectedBiteID == entry.id else { return loop(entry, state: state, playback: playback) }
         let clip = window(entry, playback: playback)
         playback.resumeOrRestart(start: clip.start, end: clip.end, loop: loops)
+    }
+}
+
+/// Replay, Play/Pause, Loop and speed for the clip being judged. Shared by every
+/// clip question (suggested chews, food entries, chewing spans) so they work alike.
+struct ClipControls: View {
+    @EnvironmentObject var playback: PlaybackController
+    @AppStorage(ChewCue.loopKey) private var loopClips = true
+    let replay: () -> Void
+    let toggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button(action: replay) {
+                    Label("Replay", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
+                }
+                .help("Play this clip again from its start (R)")
+                .accessibilityIdentifier("replayClip")
+                Button(action: toggle) {
+                    Label(playback.isPlaying ? "Pause" : "Play",
+                          systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .help("Pause or resume (Space)")
+                .accessibilityIdentifier("toggleClip")
+                Toggle(isOn: $loopClips) {
+                    Label("Loop", systemImage: "repeat")
+                }
+                .toggleStyle(.button)
+                .help(loopClips ? "Looping: the clip repeats until you answer. Click to play each clip once and pause."
+                                : "Plays once and pauses at the end. Click to loop the clip until you answer.")
+                .accessibilityIdentifier("loopClips")
+            }
+            .controlSize(.large)
+            .onChange(of: loopClips) { _, loop in playback.setLooping(loop) }
+            SpeedControl()
+        }
     }
 }

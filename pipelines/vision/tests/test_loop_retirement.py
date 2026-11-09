@@ -103,3 +103,13 @@ def test_cli_retires_and_lists(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     listing = CliRunner().invoke(cli.loop, ["retired"])
     assert "intact" in listing.output and "Mimed chewing" in listing.output
+
+
+def test_review_offers_only_categories_the_loop_knows():
+    import re
+    from pathlib import Path
+
+    swift = (Path(__file__).resolve().parents[3] / "apps/review-macos/ChewSenseReview/Models/Session.swift").read_text()
+    block = swift[swift.index("static let categories"):swift.index("enum Failure")]
+    offered = re.findall(r'\("([a-z_]+)", "', block)
+    assert offered and set(offered) <= set(CATEGORIES)

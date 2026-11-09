@@ -24,6 +24,7 @@ CATEGORIES = {
     "mimed_chewing_no_food": "Mimed chewing / chewing-like movement without food",
     "protocol_mismatch": "Recording does not match its labelled activity",
     "capture_defect": "Capture defect (video, motion or timing unusable)",
+    "reviewer_excluded": "Left out by the reviewer",
 }
 
 #: Everything a retirement removes the recording from (reported verbatim).

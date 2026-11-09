@@ -23,6 +23,10 @@ How retirement works:
     anything into it.
 - **Nothing is deleted or modified.** Sources, archives, working copies,
   drafts, Vision outputs, reports and the loop's session record keep their bytes.
+- **From Review:** ⋯ → *Don't use this recording…* runs the same command
+  with a required reason (category `reviewer_excluded` unless another fits).
+  `chewsense-vision loop retired` is the complete list. Entries below explain
+  retirements that changed the locked test set.
 - **Reversal (manual, deliberate).** Move the retirement file out of
   `state/retired/` and restart the loop service. Record that here too.
 

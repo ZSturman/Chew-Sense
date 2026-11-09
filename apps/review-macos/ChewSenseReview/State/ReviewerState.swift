@@ -227,6 +227,24 @@ final class ReviewerState: ObservableObject {
         chosenStep = step
     }
 
+    /// Leave the open recording out of review, training and tests (retirement).
+    /// Unsaved decisions are saved first so the preserved draft is complete.
+    func retireCurrentRecording(category: String, reason: String) async -> Bool {
+        guard let session = selectedSession, let workspaceRoot, retirement == nil else { return false }
+        saveIfDirty()
+        do {
+            try await RecordingRetirer.retire(sessionID: session.id, workspaceRoot: workspaceRoot,
+                                              category: category, reason: reason)
+        } catch {
+            statusMessage = "Not left out: \(error.localizedDescription)"
+            return false
+        }
+        refreshSessions()
+        if let reloaded = sessions.first(where: { $0.id == session.id }) { loadSession(reloaded) }
+        statusMessage = "Left out: kept for research, no longer reviewed, trained on or tested."
+        return true
+    }
+
     /// Back to Up next. Unsaved decisions are saved first.
     func closeSession() {
         guard saveBeforeLeavingSession() else { return }

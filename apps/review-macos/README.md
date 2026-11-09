@@ -33,6 +33,18 @@ Watch and finish has **Add food entry** (B) for missed ones. The eye button on t
 In a blind review only your own marks flash. A speed control (¼× to 2×, also
 `<` / `>`) sits in every step and is remembered.
 
+**Chewing spans** uses the same layout as Check suggestions (Replay, Play/Pause,
+Loop, speed; *Yes, chewing* / *No chewing* / *Can't tell – leave out*). Each
+clip says why it was flagged, e.g. "the AirPods felt chewing here (98% likely),
+but the video detector saw none". *Leave out* removes that clip from training
+and tests altogether (it overrides the phone label there); a skipped clip keeps
+the phone label.
+
+**⋯ → Don't use this recording…** retires the open recording through
+`chewsense-vision loop retire-recording` (reason required; nothing deleted; it
+leaves review, training and tests, including the locked test set). It is the
+one extra confirmation, because it changes what models are trained and tested on.
+
 Videos stored sideways (portrait file, landscape picture, no rotation metadata)
 are turned automatically when Vision's face pose reads about ±90° across the
 recording (checked on the Nov 2 baseline; the other direction by symmetry).

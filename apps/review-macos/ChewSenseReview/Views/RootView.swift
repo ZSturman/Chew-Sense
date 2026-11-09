@@ -247,8 +247,7 @@ struct RootView: View {
         if isSpansStep {
             guard let item = assist.selectedItem else { return }
             assist.startTimer()
-            playback.setLoop(start: item.start, end: item.end, enabled: false)
-            playback.playWithinCycle(start: item.start, end: item.end)
+            ChewCue.toggle(start: item.start, end: item.end, playback: playback)
             return
         }
         if step == .chews {
@@ -304,6 +303,11 @@ struct RootView: View {
             guard plain else { return event }
             if chars == " " {
                 playOrPauseFromSelectedCycleStart()
+                return nil
+            }
+            if chars.lowercased() == "r", let item = assist.selectedItem {
+                assist.startTimer()
+                ChewCue.play(start: item.start, end: item.end, playback: playback)
                 return nil
             }
             if event.keyCode == 123 || event.keyCode == 124 {

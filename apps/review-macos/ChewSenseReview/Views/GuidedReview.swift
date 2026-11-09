@@ -320,7 +320,7 @@ struct GuidePanel: View {
             } else if let error = state.candidateIntegrityError {
                 blocked(error)
             } else if step == .spans {
-                CoarseAssistPanel(onPlayClip: onPlayClip)
+                CoarseAssistPanel(onPlayClip: onPlayClip, stepNumber: stepNumber)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {

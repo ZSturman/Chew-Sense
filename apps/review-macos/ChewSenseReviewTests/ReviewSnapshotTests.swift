@@ -40,9 +40,11 @@ final class ReviewSnapshotTests: XCTestCase {
         let assist = CoarseAssistStore()
         assist.load(session: session, workspaceRoot: assistedRoot)
         XCTAssertNotNil(assist.proposals)
-        try render(CoarseAssistPanel(onPlayClip: {})
+        assist.selectedSpanID = assist.document.reviewClips.first?.id   // show one flagged clip
+        try render(CoarseAssistPanel(onPlayClip: {}, stepNumber: 3)
                     .environmentObject(state).environmentObject(playback)
-                    .environmentObject(assist),
+                    .environmentObject(assist)
+                    .background(Color(nsColor: .controlBackgroundColor)),
                    size: CGSize(width: 380, height: 860), to: output.appending(path: "review-chewing-spans.png"))
 
         let shared = try ProjectStatus.decode(Data(contentsOf: workspace.appending(path: "loop/project_status.json")))

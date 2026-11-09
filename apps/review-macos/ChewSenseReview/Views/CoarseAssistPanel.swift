@@ -1,49 +1,58 @@
 import SwiftUI
 
-/// Guide the reviewer through flagged clips, then suggest the agreement batch.
+/// Chewing spans, laid out like Check suggestions: one clip at a time with the
+/// same Replay / Play / Loop / speed controls, a short reason it was flagged,
+/// one prominent answer and the alternatives below. Flagged clips come first;
+/// clips where video and AirPods agree can then be accepted together.
 struct CoarseAssistPanel: View {
     @EnvironmentObject var state: ReviewerState
     @EnvironmentObject var playback: PlaybackController
     @EnvironmentObject var assist: CoarseAssistStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSaveResult = false
+    @State private var showEdges = false
+    @State private var showAll = false
     let onPlayClip: () -> Void
+    var stepNumber: Int = 1
+
+    /// Required when the recording has no reviewed chewing intervals yet; otherwise optional.
+    private var purpose: String {
+        state.candidates?.requiresFullCoarseReview == true
+            ? "Required: the Mac prepares chew suggestions from these answers."
+            : "Optional: these answers train the AirPods chewing detector."
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Chewing spans").font(.title2.weight(.semibold))
-                Text(state.candidates?.requiresFullCoarseReview == true
-                     ? "Required first: say where chewing happens. The Mac then prepares the chew suggestions."
-                     : "Optional, quick: say where chewing happens. It improves the AirPods chewing detector.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if state.isBlindReview {
-                Text("Proposals stay hidden during an independent benchmark.")
-            } else if let proposals = assist.proposals {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if state.isBlindReview {
+                        Text("Chewing spans stay hidden during a blind review.")
+                    } else if let proposals = assist.proposals {
                         if let item = assist.selectedItem {
                             clipCard(item)
                         } else if !assist.document.batchCandidates.isEmpty {
                             agreementCard
-                        } else if assist.document.isComplete {
-                            Text(assist.isDirty ? "Review complete. Save your labels below." : "All clips reviewed.")
-                                .font(.headline)
+                        } else {
+                            allDecided
                         }
-                        DisclosureGroup("All clips and evidence") { details(proposals) }
+                        DisclosureGroup("All clips (\(assist.document.items.count))", isExpanded: $showAll) {
+                            allClips(proposals)
+                        }
+                        .font(.callout)
+                    } else {
+                        StepHeading(number: stepNumber, title: "Chewing spans", detail: assist.message.isEmpty ? "Choose a recording." : assist.message)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                footer
-            } else {
-                Text(assist.message.isEmpty ? "Choose a recording." : assist.message)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if assist.proposals != nil, !state.isBlindReview {
+                Divider()
+                footer.padding(.horizontal, 18).padding(.vertical, 12)
             }
         }
-        .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .controlBackgroundColor))
         .onDisappear {
             assist.pauseTimer()
             playback.pause()
@@ -58,137 +67,184 @@ struct CoarseAssistPanel: View {
         }
     }
 
+    // MARK: One clip
+
     private func clipCard(_ item: CoarseAssistDocument.Item) -> some View {
         let flagged = assist.document.reviewClips.contains { $0.id == item.id }
         let clips = flagged ? assist.document.reviewClips : assist.document.agreementClips
         let index = clips.firstIndex { $0.id == item.id } ?? 0
-        return VStack(alignment: .leading, spacing: 12) {
-            Text(flagged ? "1. Check flagged clips" : "2. Check suggested labels")
-                .font(.headline)
-            Text("Clip \(index + 1) of \(clips.count) · \(timeRange(item))")
-                .font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
-
-            Button(playback.isPlaying ? "Pause clip" : "Play clip",
-                   systemImage: playback.isPlaying ? "pause.fill" : "play.fill", action: onPlayClip)
-                .buttonStyle(.borderedProminent)
-            Slider(value: Binding(
-                get: { min(max(playback.currentTime, item.start), item.end) },
-                set: { playback.seek(to: $0) }
-            ), in: item.start...item.end)
-            .accessibilityLabel("Clip position")
-            SpeedControl()
-
-            Text("Was there chewing in this clip?").font(.headline)
-            HStack(spacing: 6) {
-                decisionButton("Chewing", label: "chewing", for: item)
-                decisionButton("No chewing", label: "not_chewing", for: item)
-                decisionButton("Can't tell", label: "unknown", for: item)
+        let left = clips.filter { !$0.isDecided }.count
+        return VStack(alignment: .leading, spacing: 14) {
+            StepHeading(number: stepNumber, title: flagged ? "Check flagged clips" : "Check agreed clips",
+                        detail: "Is there chewing in this clip? Answer for the whole clip. \(purpose)")
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: Double(clips.count - left), total: Double(max(clips.count, 1)))
+                Text(left == 0 ? "All \(clips.count) answered" : "Clip \(index + 1) of \(clips.count) · \(left) left · \(timeRange(item))")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
-            if item.label != nil {
-                Text("Current choice: \(title(item.label ?? ""))").font(.caption).foregroundStyle(.secondary)
+            Label(Self.whyFlagged(item.span), systemImage: flagged ? "exclamationmark.bubble" : "checkmark.bubble")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let label = item.label {
+                Label("Your answer: \(title(label))", systemImage: label == "unknown" ? "minus.circle" : "checkmark.circle.fill")
+                    .foregroundStyle(label == "unknown" ? Color.secondary : Color.green)
             }
+            Text("Was there chewing?").font(.headline)
+            ClipControls(replay: { replay(item) }, toggle: onPlayClip)
+            Button { assist.setLabel(item.id, "chewing") } label: {
+                Label("Yes, chewing", systemImage: "checkmark").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
+            .keyboardShortcut(.return, modifiers: [])
+            .accessibilityIdentifier("spanChewing")
             HStack {
-                if index > 0 {
-                    Button("Previous clip") { assist.selectedSpanID = clips[index - 1].id }
-                }
-                if !flagged {
-                    Button("Back to suggestions") { assist.selectedSpanID = nil }
-                }
+                Button { assist.setLabel(item.id, "not_chewing") } label: { Text("No chewing").frame(maxWidth: .infinity) }
+                    .accessibilityIdentifier("spanNotChewing")
+                Button { assist.setLabel(item.id, "unknown") } label: { Text("Can't tell – leave out").frame(maxWidth: .infinity) }
+                    .accessibilityIdentifier("spanLeaveOut")
             }
-            .controlSize(.small)
+            .controlSize(.large)
+            Text("“Leave out” keeps this clip out of training and tests altogether, including your phone label for it. A clip you skip keeps your phone label.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Fix the clip edges", isExpanded: $showEdges) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("If the chewing starts or stops inside the clip, pause there and move the edge. The neighbouring clip moves with it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Start here") { assist.moveStart(of: item.id, to: playback.currentTime) }
+                        Button("End here") { assist.moveEnd(of: item.id, to: playback.currentTime) }
+                    }
+                }
+                .padding(.top, 6)
+            }
+            .font(.callout)
+            HStack {
+                Button("Previous") { if index > 0 { assist.selectedSpanID = clips[index - 1].id } }
+                    .disabled(index == 0)
+                Spacer()
+                if item.isDecided { Button("Mark as not answered") { assist.clear(item.id) } }
+                Button("Skip") { assist.selectedSpanID = clips[(index + 1) % clips.count].id }
+            }
+            .buttonStyle(.link).font(.callout)
         }
     }
 
-    private func decisionButton(_ title: String, label: String, for item: CoarseAssistDocument.Item) -> some View {
-        Button(title) {
-            assist.setLabel(item.id, label)
+    /// One plain sentence on why the clip needs a person.
+    static func whyFlagged(_ span: CoarseProposals.Span) -> String {
+        let e = span.evidence
+        let phone = span.existingLabel.map { " Your phone label here: \(phoneTitle($0))." } ?? ""
+        if span.conflictWithExistingLabel, let proposal = span.proposal {
+            return "Video and AirPods agree on \(phoneTitle(proposal)), but your phone label says \(phoneTitle(span.existingLabel ?? "something else"))."
         }
-        .buttonStyle(.bordered)
-        .tint(item.label == label ? .accentColor : nil)
+        if span.isAgreement, let proposal = span.proposal {
+            return "Video and AirPods agree: \(phoneTitle(proposal)).\(phone)"
+        }
+        if e.motionChewingWindows > 0 && e.videoChewingWindows == 0 {
+            let percent = e.motionMeanProbability.map { " (\(Int(($0 * 100).rounded()))% likely)" } ?? ""
+            return "Flagged: the AirPods felt chewing here\(percent), but the video detector saw none.\(phone)"
+        }
+        if e.videoChewingWindows > 0 && e.motionChewingWindows == 0 {
+            return "Flagged: the video detector saw chewing here, but the AirPods didn't.\(phone)"
+        }
+        if e.videoUnavailableWindows > 0 {
+            return "Flagged: the face wasn't clearly visible, so the video couldn't check this part.\(phone)"
+        }
+        return "Flagged: \(span.reason).\(phone)"
     }
+
+    private static func phoneTitle(_ label: String) -> String {
+        switch label {
+        case "chewing": "chewing"
+        case "not_chewing": "no chewing"
+        case "unknown": "can't tell"
+        case "mixed": "partly chewing"
+        default: label
+        }
+    }
+
+    // MARK: Agreed clips
 
     private var agreementCard: some View {
         let pending = assist.document.batchCandidates
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("2. Check suggested labels").font(.headline)
-            Text("Video and AirPods motion agree on these \(pending.count) remaining clips.")
-                .foregroundStyle(.secondary)
-            Text("\(pending.filter { $0.span.proposal == "chewing" }.count) chewing · \(pending.filter { $0.span.proposal == "not_chewing" }.count) no chewing")
-                .font(.subheadline.monospacedDigit())
-            Button("Use \(pending.count) suggested labels") { assist.batchAccept() }
-                .buttonStyle(.borderedProminent)
-            Button("Review one at a time") { assist.selectedSpanID = pending.first?.id }
+        let chewing = pending.filter { $0.span.proposal == "chewing" }.count
+        return VStack(alignment: .leading, spacing: 14) {
+            StepHeading(number: stepNumber, title: "Check agreed clips",
+                        detail: "Video and AirPods agree on these \(pending.count) clips: \(chewing) chewing, \(pending.count - chewing) no chewing. Accept them together, or check each one like the flagged clips.")
+            Button { assist.batchAccept() } label: {
+                Label("Use the \(pending.count) agreed answers", systemImage: "checkmark").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
+            Button("Check them one at a time") { assist.selectedSpanID = pending.first?.id }
+                .buttonStyle(.link)
         }
     }
 
-    private func details(_ proposals: CoarseProposals) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var allDecided: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Every clip is answered", systemImage: "checkmark.circle.fill")
+                .font(.title3.weight(.semibold)).foregroundStyle(.green)
+            Text(assist.isDirty ? "Save to keep these labels." : "Saved.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: All clips
+
+    private func allClips(_ proposals: CoarseProposals) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             AssistTimeline(proposals: proposals).frame(height: 92)
-            if let item = assist.selectedItem {
-                Text(item.span.reason).font(.caption).foregroundStyle(.secondary)
-                let evidence = item.span.evidence
-                Text("Video: \(evidence.videoChewingWindows) chewing windows · Motion: \(evidence.motionChewingWindows) chewing windows")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let label = item.span.existingLabel {
-                    Text("Phone label: \(title(label))").font(.caption)
-                }
-                HStack {
-                    Button("Start at playhead") { assist.moveStart(of: item.id, to: playback.currentTime) }
-                    Button("End at playhead") { assist.moveEnd(of: item.id, to: playback.currentTime) }
-                    if item.isDecided { Button("Clear choice") { assist.clear(item.id) } }
-                }
-                .controlSize(.small)
-            }
             ForEach(assist.document.reviewClips + assist.document.agreementClips) { item in
-                Button {
-                    assist.selectedSpanID = item.id
-                } label: {
-                    Label("\(timeRange(item)) · \(title(item.label ?? item.span.proposal ?? "needs review"))",
-                          systemImage: item.isDecided ? "checkmark.circle.fill" : "circle")
+                Button { assist.selectedSpanID = item.id } label: {
+                    HStack {
+                        Image(systemName: item.isDecided ? (item.label == "unknown" ? "minus.circle" : "checkmark.circle.fill") : "circle")
+                            .foregroundStyle(item.isDecided ? (item.label == "unknown" ? Color.secondary : Color.green) : Color.secondary)
+                        Text(item.isDecided ? title(item.label ?? "") : (item.span.isAgreement ? "agreed: \(title(item.span.proposal ?? ""))" : "flagged"))
+                        Spacer()
+                        Text(timeRange(item)).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 3).padding(.horizontal, 6)
+                    .background(item.id == assist.selectedSpanID ? Color.accentColor.opacity(0.15) : .clear,
+                                in: RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 6)
     }
+
+    // MARK: Save
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Divider()
             HStack {
-                Text("\(assist.document.decidedCount) of \(assist.document.items.count) labelled")
+                Text("\(assist.document.decidedCount) of \(assist.document.items.count) answered")
                 Spacer()
                 if assist.isTiming {
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in reviewTime }
-                    Button("Pause timing") { assist.pauseTimer() }.controlSize(.small)
-                } else {
-                    reviewTime
+                    Button("Pause timing") { assist.pauseTimer() }.buttonStyle(.link)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
-            if assist.document.isComplete {
-                saveButton("Save labels").buttonStyle(.borderedProminent)
-            } else {
-                saveButton("Save progress").buttonStyle(.bordered)
+            Button(assist.document.isComplete ? "Save labels" : "Save progress") {
+                playback.pause()
+                assist.save()
+                showSaveResult = true
             }
+            .modifier(Prominence(primary: assist.document.isComplete && assist.isDirty))
+            .disabled(assist.document.decidedCount == 0 || !assist.isDirty)
             if showSaveResult {
                 Text(assist.message).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private var reviewTime: some View {
-        Text(!assist.isTiming && assist.activeSeconds == 0 ? "Timer starts with Play" : "\(Int(assist.activeSeconds)) s timed")
-            .monospacedDigit()
-    }
+    // MARK: Playback
 
-    private func saveButton(_ title: String) -> some View {
-        Button(title) {
-            playback.pause()
-            assist.save()
-            showSaveResult = true
-        }
-        .disabled(assist.document.decidedCount == 0 || !assist.isDirty)
+    private func replay(_ item: CoarseAssistDocument.Item) {
+        assist.startTimer()
+        ChewCue.play(start: item.start, end: item.end, playback: playback)
     }
 
     private func cueSelected() {
@@ -197,8 +253,7 @@ struct CoarseAssistPanel: View {
             playback.clearLoop()
             return
         }
-        playback.setLoop(start: item.start, end: item.end, enabled: false)
-        playback.seek(to: item.start)
+        replay(item)
     }
 
     private func timeRange(_ item: CoarseAssistDocument.Item) -> String {
@@ -206,13 +261,7 @@ struct CoarseAssistPanel: View {
     }
 
     private func title(_ label: String) -> String {
-        switch label {
-        case "chewing": return "chewing"
-        case "not_chewing": return "no chewing"
-        case "unknown": return "can't tell"
-        case "mixed": return "mixed"
-        default: return label
-        }
+        label == "unknown" ? "left out" : Self.phoneTitle(label)
     }
 }
 

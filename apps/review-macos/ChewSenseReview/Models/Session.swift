@@ -88,3 +88,67 @@ enum VideoOrientation {
         return candidates.lazy.compactMap { FileManager.default.fileExists(atPath: $0.path) ? suggestedQuarterTurns(framePredictions: $0) : nil }.first
     }
 }
+
+/// Retires the open recording through the loop's own command
+/// (`chewsense-vision loop retire-recording`), so Review and the Mac service
+/// apply exactly the same rules: nothing deleted, a write-once record with the
+/// reason and file hashes, review tasks and shared status refreshed.
+enum RecordingRetirer {
+    /// Choices offered in Review (keys must exist in loop/retirement.py CATEGORIES).
+    static let categories: [(key: String, title: String)] = [
+        ("reviewer_excluded", "Left out by the reviewer"),
+        ("protocol_mismatch", "Doesn't match what was asked"),
+        ("capture_defect", "Video, motion or timing unusable"),
+        ("mimed_chewing_no_food", "Mimed chewing / chewing-like movement without food"),
+    ]
+
+    enum Failure: LocalizedError {
+        case notLoopWorkspace, missingTool(String), failed(String)
+        var errorDescription: String? {
+            switch self {
+            case .notLoopWorkspace: "Only recordings from the Mac's loop workspace can be left out here."
+            case .missingTool(let path): "The ChewSense tools weren't found at \(path)."
+            case .failed(let output): output.isEmpty ? "The Mac couldn't leave the recording out." : output
+            }
+        }
+    }
+
+    /// Executable, arguments and environment for one retirement.
+    static func command(sessionID: String, workspaceRoot: URL, category: String, reason: String,
+                        tool override: URL? = nil) throws
+        -> (executable: URL, arguments: [String], environment: [String: String]) {
+        let loop = workspaceRoot.deletingLastPathComponent()
+        guard ["assisted", "blind"].contains(workspaceRoot.lastPathComponent), loop.lastPathComponent == "loop" else {
+            throw Failure.notLoopWorkspace
+        }
+        let workspace = loop.deletingLastPathComponent()
+        let tool = override ?? workspace.deletingLastPathComponent().appending(path: ".venv/bin/chewsense-vision")
+        guard FileManager.default.isExecutableFile(atPath: tool.path) else { throw Failure.missingTool(tool.path) }
+        var environment = ProcessInfo.processInfo.environment
+        environment["CHEWSENSE_WORKSPACE"] = workspace.path
+        return (tool, ["loop", "retire-recording", sessionID, "--category", category, "--reason", reason], environment)
+    }
+
+    static func retire(sessionID: String, workspaceRoot: URL, category: String, reason: String,
+                       tool: URL? = nil) async throws {
+        let (executable, arguments, environment) = try command(
+            sessionID: sessionID, workspaceRoot: workspaceRoot, category: category, reason: reason, tool: tool)
+        try await Task.detached {
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = arguments
+            process.environment = environment
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let text = String(decoding: data, as: UTF8.self)
+                let lastLine = text.split(separator: "\n").last.map(String.init) ?? ""
+                throw Failure.failed(lastLine)
+            }
+        }.value
+    }
+}

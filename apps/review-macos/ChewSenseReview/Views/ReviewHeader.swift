@@ -12,6 +12,7 @@ struct ReviewHeader: View {
     let toggleSidebar: () -> Void
     let toggleHelp: () -> Void
     let toggleSignals: () -> Void
+    @State private var showRetire = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -49,6 +50,9 @@ struct ReviewHeader: View {
                 Divider()
                 Button("Pipeline") { openWindow(id: "pipeline") }
                 Button("Training and evaluation") { openWindow(id: "training") }
+                Divider()
+                Button("Don't use this recording…") { showRetire = true }
+                    .disabled(state.retirement != nil)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -57,6 +61,7 @@ struct ReviewHeader: View {
             .help("More")
         }
         .padding(.horizontal, 4)
+        .sheet(isPresented: $showRetire) { RetireRecordingSheet() }
     }
 
     @ViewBuilder
@@ -221,5 +226,61 @@ struct ReviewToolsSection: View {
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
         }
+    }
+}
+
+/// Leave one recording out for good, with a reason. This is the one deliberate
+/// confirmation here: it changes what the models are trained and tested on.
+struct RetireRecordingSheet: View {
+    @EnvironmentObject var state: ReviewerState
+    @Environment(\.dismiss) private var dismiss
+    @State private var category = RecordingRetirer.categories[0].key
+    @State private var reason = ""
+    @State private var working = false
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Don't use this recording?").font(.title2.weight(.semibold))
+            Text(RecordingName.of(state.selectedSession?.id ?? "")).font(.headline)
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Nothing is deleted: the video, motion and every label file stay as they are, kept for research.", systemImage: "archivebox")
+                Label("It leaves the review list, training and tests, including the locked test set if it's in it.", systemImage: "minus.circle")
+                Label("Undoing it needs a manual step on the Mac.", systemImage: "exclamationmark.triangle")
+            }
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+            Picker("Why", selection: $category) {
+                ForEach(RecordingRetirer.categories, id: \.key) { Text($0.title).tag($0.key) }
+            }
+            TextField("What's wrong with it (required)", text: $reason, axis: .vertical)
+                .lineLimit(2...4)
+            if let failure {
+                Label(failure, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(working ? "Leaving out…" : "Don't use it") {
+                    working = true
+                    failure = nil
+                    Task {
+                        let note = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if await state.retireCurrentRecording(category: category, reason: note) {
+                            dismiss()
+                        } else {
+                            failure = state.statusMessage
+                        }
+                        working = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(working || reason.trimmingCharacters(in: .whitespacesAndNewlines).count < 3)
+                .accessibilityIdentifier("confirmRetire")
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }

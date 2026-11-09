@@ -614,6 +614,56 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertEqual(SpeedControl.label(1.5), "1.5×")
     }
 
+    @MainActor
+    func testReviewLeavesARecordingOutThroughTheLoopCommandWithoutChangingFiles() async throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30)], loopWorkspace: "assisted")
+        let loop = fixture.root.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: loop.deletingLastPathComponent()) }
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let tool = repository.appending(path: ".venv/bin/chewsense-vision")
+        guard FileManager.default.isExecutableFile(atPath: tool.path) else { throw XCTSkip("repository .venv not installed") }
+        let records = loop.appending(path: "state/sessions")
+        try FileManager.default.createDirectory(at: records, withIntermediateDirectories: true)
+        try Data(#"{"session_id":"golden_session","role":"training","processing":"completed"}"#.utf8)
+            .write(to: records.appending(path: "golden_session.json"))
+        let candidates = try Data(contentsOf: try XCTUnwrap(fixture.session.candidatesJSON))
+
+        XCTAssertThrowsError(try RecordingRetirer.command(sessionID: "golden_session",
+            workspaceRoot: loop.deletingLastPathComponent(), category: "reviewer_excluded", reason: "x", tool: tool))
+        try await RecordingRetirer.retire(sessionID: "golden_session", workspaceRoot: fixture.root,
+                                          category: "reviewer_excluded", reason: "Out of frame", tool: tool)
+
+        let state = ReviewerState()
+        state.setWorkspaceRoot(fixture.root)
+        XCTAssertEqual(state.sessions.first?.status, .retired)
+        state.loadSession(try XCTUnwrap(state.sessions.first))
+        XCTAssertEqual(state.retirement?.categoryTitle, "Left out by the reviewer")
+        XCTAssertEqual(state.retirement?.reason, "Out of frame")
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(fixture.session.candidatesJSON)), candidates)
+        // A second retirement is refused by the loop (write-once).
+        do {
+            try await RecordingRetirer.retire(sessionID: "golden_session", workspaceRoot: fixture.root,
+                                              category: "capture_defect", reason: "again", tool: tool)
+            XCTFail("second retirement should fail")
+        } catch {}
+    }
+
+    func testFlaggedClipsSayWhyInPlainWords() throws {
+        func span(_ json: String) throws -> CoarseProposals.Span {
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(CoarseProposals.Span.self, from: Data(json.utf8))
+        }
+        let motionOnly = try span(#"{"id":"s1","start":24.8,"end":27.8,"state":"review","proposal":null,"reason":"video and motion disagree","windows":6,"evidence":{"video_chewing_windows":0,"video_not_chewing_windows":6,"video_unavailable_windows":0,"motion_chewing_windows":6,"motion_mean_probability":0.9757},"existing_label":"chewing","conflict_with_existing_label":false}"#)
+        XCTAssertEqual(CoarseAssistPanel.whyFlagged(motionOnly),
+                       "Flagged: the AirPods felt chewing here (98% likely), but the video detector saw none. Your phone label here: chewing.")
+        let videoOnly = try span(#"{"id":"s2","start":43.8,"end":44.2,"state":"review","proposal":null,"reason":"video and motion disagree","windows":1,"evidence":{"video_chewing_windows":1,"video_not_chewing_windows":0,"video_unavailable_windows":0,"motion_chewing_windows":0,"motion_mean_probability":0.3},"existing_label":"mixed","conflict_with_existing_label":false}"#)
+        XCTAssertTrue(CoarseAssistPanel.whyFlagged(videoOnly).hasPrefix("Flagged: the video detector saw chewing here, but the AirPods didn't."))
+        let conflict = try span(#"{"id":"s3","start":1,"end":4,"state":"review","proposal":"chewing","reason":"conflict","windows":3,"evidence":{"video_chewing_windows":3,"video_not_chewing_windows":0,"video_unavailable_windows":0,"motion_chewing_windows":3,"motion_mean_probability":0.9},"existing_label":"not_chewing","conflict_with_existing_label":true}"#)
+        XCTAssertEqual(CoarseAssistPanel.whyFlagged(conflict), "Video and AirPods agree on chewing, but your phone label says no chewing.")
+    }
+
     func testRecordingNamesAreReadable() {
         XCTAssertEqual(RecordingName.of("Guided-baseline-90s-20261102-171334-F83AB32C"), "Baseline 90s (Nov 2)")
         XCTAssertEqual(RecordingName.of("Not-eating-20261026-174428-C27C9380"), "Not eating (Oct 26)")
