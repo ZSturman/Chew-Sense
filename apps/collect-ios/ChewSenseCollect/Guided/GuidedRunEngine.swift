@@ -475,6 +475,43 @@ nonisolated final class GuidedRunEngine {
         return Validation(checks: checks.filter { !$0.passed } + checks.filter(\.passed), repeatActivityIDs: repeatIDs)
     }
 
+    // MARK: - Instructed labels
+
+    /// Video-relative coarse labels that assume the wearer did what each
+    /// instruction asked: `chewing` from when a chew instruction appeared
+    /// until it ended, `not_chewing` everywhere else. Nil when any planned
+    /// activity is free-form (intended label `unknown`, e.g. a natural meal);
+    /// only the wearer can mark those.
+    func instructedCoarseLabels(videoClockOrigin origin: Double, duration: Double) -> [[String: Any]]? {
+        guard duration.isFinite, duration > 0,
+              plan.allSatisfy({ definition.activities[$0].intendedLabel != "unknown" }) else { return nil }
+        let abandonedAt = events.last { $0.type == "experiment_abandoned" }?.hostTime
+        var chewing: [(start: Double, end: Double)] = []
+        for attempt in attempts where definition.activities[attempt.activityIndex].intendedLabel == "chewing" {
+            guard let ended = attempt.ended ?? abandonedAt else { continue }
+            let start = min(max(0, attempt.presented - origin), duration)
+            let end = min(max(0, ended - origin), duration)
+            guard end > start else { continue }
+            if let last = chewing.last, start <= last.end + 1e-6 {
+                chewing[chewing.count - 1].end = max(last.end, end)
+            } else {
+                chewing.append((start, end))
+            }
+        }
+        func interval(_ start: Double, _ end: Double, _ label: String) -> [String: Any] {
+            ["start_ts": start, "end_ts": end, "label": label, "source": "human_coarse", "basis": "guided_instruction"]
+        }
+        var intervals: [[String: Any]] = []
+        var cursor = 0.0
+        for span in chewing {
+            if span.start > cursor { intervals.append(interval(cursor, span.start, "not_chewing")) }
+            intervals.append(interval(span.start, span.end, "chewing"))
+            cursor = span.end
+        }
+        if cursor < duration { intervals.append(interval(cursor, duration, "not_chewing")) }
+        return intervals
+    }
+
     // MARK: - Sidecar
 
     func sidecar(sessionID: String, experimentSHA256: String, rawDefinition: Data, catalogVersion: Int?,

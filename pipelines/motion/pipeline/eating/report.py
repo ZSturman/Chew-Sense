@@ -451,6 +451,7 @@ def write_report(
     meanings = {
         "human_coarse": "wearer reviewed the video and marked chewing spans (shared clock)",
         "wearer_no_food_attestation": "wearer attested nothing was eaten (food-free guided take)",
+        "guided_instruction": "guided take labelled from its instructions, assuming the wearer followed them",
         "legacy_human_coarse": "2025 in-app spans; clock origin = first motion row (unverified)",
         "human_marked_segment": "span explicitly marked in a 2026 field-test review; unmarked time is unknown",
         "session_declared_negative": "whole recording captured as a declared non-eating scenario",

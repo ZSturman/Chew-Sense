@@ -1,7 +1,7 @@
 """Discover recordings, attach provenance-tiered coarse labels, cut windows.
 
 Label tiers (strongest first).  Every tier is a *human* statement; nothing a
-model, detector, or guided schedule produced is ever a label here.
+model or detector produced is ever a label here.
 
 ``human_coarse``
     The wearer watched the video and marked chewing / not-chewing spans
@@ -9,6 +9,12 @@ model, detector, or guided schedule produced is ever a label here.
 ``wearer_no_food_attestation``
     The wearer attested that nothing was eaten or chewed during a food-free
     guided take.
+``guided_instruction``
+    Collect saved a guided take's schedule as its labels, assuming the wearer
+    did what each instruction said (chewing while told to chew).  The wearer
+    could adjust them before sending; an adjusted take becomes
+    ``human_coarse``.  Boundaries carry reaction time, which the window guard
+    band absorbs.
 ``legacy_human_coarse``
     2025 in-app chewing spans.  Human, but the clock origin is the first
     motion row, so alignment is unverified.
@@ -30,8 +36,8 @@ Assisted tiers never enter evaluation: a label made while looking at the
 detectors cannot independently score them.  Where an assisted decision
 repeats an existing phone label, the phone label (and its tier) stands.
 
-Excluded, never labels: guided instructions, detector proposals,
-``automatic`` sources, field-test time the reviewer did not mark, and any span
+Excluded, never labels: detector proposals, ``automatic`` sources,
+guided instructions that Collect did not save as coarse labels, field-test time the reviewer did not mark, and any span
 marked ``unknown``.
 """
 
@@ -54,6 +60,7 @@ ASSISTED_TIERS = ("human_assisted", "human_batch_accepted")
 LABEL_TIERS = (
     "human_coarse",
     "wearer_no_food_attestation",
+    "guided_instruction",
     "legacy_human_coarse",
     "human_marked_segment",
     "session_declared_negative",
@@ -422,11 +429,8 @@ def load_canonical_session(
         if label not in {CHEWING, NOT_CHEWING} or not end > start:
             continue
         if source in {"human_coarse", "human", "human_edited"}:
-            tier = (
-                "wearer_no_food_attestation"
-                if item.get("basis") == "wearer_no_food_attestation"
-                else "human_coarse"
-            )
+            basis = item.get("basis")
+            tier = basis if basis in {"wearer_no_food_attestation", "guided_instruction"} else "human_coarse"
         elif source == "legacy":
             tier = (
                 "session_declared_negative"

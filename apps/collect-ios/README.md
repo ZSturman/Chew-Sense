@@ -92,11 +92,17 @@ duration, equipment, food, AirPods and camera needs, progress and priority.
 Each run is one continuous recording with timed overlays, a countdown, quality
 indicators and prompts; the instruction timer pauses when required evidence is
 missing while recording continues. A `guided_session.json` sidecar stores the
-actual timing (intended activity only, never labels). Pair once under **Mac
-Connection**; **Send to Mac** or automatic upload transfers the verified ZIP
-resumably after actual coarse review or an eligible explicit no-food attestation.
-The completion screen offers **Review chewing intervals**; finish labelling
-before sending. **What happens next** shows the next recording/review action,
+actual timing. When the take finishes, Collect also saves the schedule as the
+recording's chewing labels, assuming the wearer followed it: chewing from when
+each chew instruction appeared until it ended, not chewing elsewhere
+(`annotations/coarse_labels.json`, `basis: guided_instruction`). The completion
+screen lists the spans and offers **Adjust chewing spans** (Edit labels, drag
+the markers, Labelling finished; adjusted labels become plain `human_coarse`).
+The recording is sent when the completion screen closes, so adjust first; after
+that, adjust in Review. Free-form experiments (any `unknown` step, e.g. a
+natural meal) are not labelled automatically and still need **Review chewing
+intervals** before sending. Pair once under **Mac Connection**; **Send to Mac**
+or automatic upload transfers the verified ZIP resumably. **What happens next** shows the next recording/review action,
 received/complete/incomplete counts, verified positive/negative/evaluation/event
 goals, expandable pipeline stages and exact training blockers. A recommended
 recording opens its existing preparation and timed overlays directly. Counts

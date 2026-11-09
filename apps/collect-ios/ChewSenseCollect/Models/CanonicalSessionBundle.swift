@@ -224,6 +224,20 @@ enum CanonicalBundleWriter {
         }
     }
 
+    /// Chewing spans in the saved coarse labels, and whether every interval
+    /// still comes from the guided instructions (none edited by the wearer).
+    static func savedChewingSpans(in folder: URL) -> (spans: [ClosedRange<Double>], instructed: Bool)? {
+        let url = folder.appendingPathComponent("annotations/coarse_labels.json")
+        guard let intervals = (try? readJSON(url))?["intervals"] as? [[String: Any]] else { return nil }
+        let spans = intervals.filter { $0["label"] as? String == "chewing" }.compactMap { interval -> ClosedRange<Double>? in
+            guard let start = interval["start_ts"] as? Double, let end = interval["end_ts"] as? Double,
+                  start.isFinite, end > start else { return nil }
+            return start...end
+        }
+        let instructed = !intervals.isEmpty && intervals.allSatisfy { $0["basis"] as? String == "guided_instruction" }
+        return (spans, instructed)
+    }
+
     /// Returns video-relative time zero for absolute host-clock motion rows.
     /// Version 2 never infers this value from the first motion sample because a
     /// delayed AirPods sample would shift every human coarse label.

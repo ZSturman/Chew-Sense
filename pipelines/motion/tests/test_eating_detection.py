@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pipeline.eating.dataset import (  # noqa: E402
     build_windows,
     discover_sessions,
+    EVALUATION_TIERS,
     load_canonical_motion,
     load_canonical_session,
     load_field_test,
@@ -210,6 +211,18 @@ def test_attestation_and_diagnostic_role(tmp_path):
     assert load_canonical_session(folder).intervals[0].tier == "wearer_no_food_attestation"
     with pytest.raises(SessionRejected, match="diagnostic"):
         load_canonical_session(folder, loop_roles={"Guided-quiet-1": "diagnostic"})
+
+
+def test_instructed_guided_labels_keep_their_own_tier(tmp_path):
+    folder = make_canonical(tmp_path, "Guided-soft-1", intervals=[
+        _span(0, 20, "not_chewing", basis="guided_instruction"),
+        _span(20, 45, "chewing", basis="guided_instruction"),
+        _span(45, 60, "not_chewing", basis="guided_instruction"),
+    ])
+    session = load_canonical_session(folder)
+    assert [i.tier for i in session.intervals] == ["guided_instruction"] * 3
+    assert [i.label for i in session.intervals] == ["not_chewing", "chewing", "not_chewing"]
+    assert "guided_instruction" in EVALUATION_TIERS
 
 
 def _field_test(root: Path, name: str, *, segments, activity="", expected="", scenario="", seed=0) -> Path:

@@ -1,3 +1,24 @@
+# Checkpoint — November 9, 2026 (late): guided takes label themselves
+
+- **Collect:** a finished guided take saves its schedule as the chewing labels
+  (chew instruction on screen → `chewing`, everything else → `not_chewing`;
+  `source: human_coarse`, `basis: guided_instruction`). The spans preload as
+  ordinary markers, so the wearer can adjust them before the take is sent;
+  sending now happens when the completion screen closes. Free-form experiments
+  (`natural-meal`) still need manual marking. Code:
+  `GuidedRunEngine.instructedCoarseLabels`, `GuidedRecordingController.writeInstructedLabels`.
+- **Pipeline:** new eating label tier `guided_instruction` (training and
+  evaluation; the 1 s window guard absorbs reaction time). Adjusted takes stay
+  `human_coarse`. To keep it out of evaluation, drop it from `EVALUATION_TIERS`.
+- **Validation:** 4 new Collect simulator tests pass (`build/InstructedLabels-Collect.xcresult`);
+  `pipelines/motion/tests/test_eating_detection.py` 26 passed.
+  `LoopLinkTests/phoneAcceptsOnlyAValidHomeServerOfferAndForgetsIt` fails with
+  and without this change (pre-existing).
+- **Not done:** no device install or real guided take; Review was not changed
+  (instructed spans appear there as phone labels).
+
+---
+
 # Checkpoint — November 9, 2026 (night): Pi mailbox deployed and validated on devices
 
 - **Deployed:** Home Services `0.4.9-20261109T142058Z` (gateway only; built

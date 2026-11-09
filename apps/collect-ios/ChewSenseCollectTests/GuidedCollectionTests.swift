@@ -343,6 +343,77 @@ struct GuidedCollectionTests {
         #expect(engine.isTimerPaused)
     }
 
+    @Test func chewInstructionsBecomeChewingLabels() throws {
+        let engine = GuidedRunEngine(definition: try entry("baseline-90s").definition)
+        let end = run(engine)
+        #expect(engine.phase == .finished)
+        let origin = 999.0  // video starts 1 s before the experiment
+        let labels = try #require(engine.instructedCoarseLabels(videoClockOrigin: origin, duration: end - origin + 2))
+        let chewing = labels.filter { $0["label"] as? String == "chewing" }
+            .map { (($0["start_ts"] as? Double) ?? -1, ($0["end_ts"] as? Double) ?? -1) }
+        // Lead-in 3 s, nod 5, rest 15 → chew 20; stop 10, nod 5 → chew 15.
+        #expect(chewing.count == 2)
+        #expect(abs(chewing[0].0 - 24) < 0.15 && abs(chewing[0].1 - 44) < 0.15)
+        #expect(abs(chewing[1].0 - 59) < 0.15 && abs(chewing[1].1 - 74) < 0.15)
+        // Contiguous cover of the whole video, tagged as instruction-derived.
+        #expect(labels.first?["start_ts"] as? Double == 0)
+        #expect(labels.last?["end_ts"] as? Double == end - origin + 2)
+        for (a, b) in zip(labels, labels.dropFirst()) {
+            #expect(a["end_ts"] as? Double == b["start_ts"] as? Double)
+        }
+        #expect(labels.allSatisfy { $0["basis"] as? String == "guided_instruction" && $0["source"] as? String == "human_coarse" })
+    }
+
+    @Test func instructedChewingIncludesPausedTimeAndRestarts() throws {
+        let engine = GuidedRunEngine(definition: try entry("baseline-90s").definition)
+        // Face lost for 20 s during the first chew: paused past the limit, so the chew restarts.
+        _ = run(engine) { t in
+            var q = QualitySnapshot.good
+            if t > 28 && t < 48 { q.faceVisible = false }
+            return q
+        }
+        #expect(engine.events.contains { $0.type == "activity_restarted" })
+        let labels = try #require(engine.instructedCoarseLabels(videoClockOrigin: 1000, duration: 200))
+        let chewing = labels.filter { $0["label"] as? String == "chewing" }
+        // The interrupted and repeated attempts join into one span.
+        #expect(chewing.count == 2)
+        #expect(abs((chewing[0]["start_ts"] as? Double ?? 0) - 23) < 0.15)
+    }
+
+    @Test func freeFormAndFoodFreeExperiments() throws {
+        let meal = GuidedRunEngine(definition: try entry("natural-meal").definition)
+        _ = run(meal)
+        #expect(meal.instructedCoarseLabels(videoClockOrigin: 1000, duration: 400) == nil)
+
+        let quiet = GuidedRunEngine(definition: try entry("quiet-sitting").definition)
+        _ = run(quiet)
+        let labels = try #require(quiet.instructedCoarseLabels(videoClockOrigin: 1000, duration: 90))
+        #expect(labels.count == 1)
+        #expect(labels.first?["label"] as? String == "not_chewing")
+    }
+
+    @Test func savedInstructedSpansReloadAsMarkers() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("annotations"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let intervals: [[String: Any]] = [
+            ["start_ts": 0.0, "end_ts": 10.0, "label": "not_chewing", "basis": "guided_instruction"],
+            ["start_ts": 10.0, "end_ts": 30.0, "label": "chewing", "basis": "guided_instruction"],
+            ["start_ts": 30.0, "end_ts": 40.0, "label": "not_chewing", "basis": "guided_instruction"],
+        ]
+        try JSONSerialization.data(withJSONObject: ["intervals": intervals])
+            .write(to: folder.appendingPathComponent("annotations/coarse_labels.json"))
+        let saved = try #require(CanonicalBundleWriter.savedChewingSpans(in: folder))
+        #expect(saved.spans == [10.0...30.0])
+        #expect(saved.instructed)
+
+        let edited = intervals.enumerated().map { i, item in i == 1 ? item.merging(["end_ts": 28.0]) { $1 } : item }
+            .map { $0.filter { $0.key != "basis" } }
+        try JSONSerialization.data(withJSONObject: ["intervals": edited])
+            .write(to: folder.appendingPathComponent("annotations/coarse_labels.json"))
+        #expect(CanonicalBundleWriter.savedChewingSpans(in: folder)?.instructed == false)
+    }
+
     @Test func sidecarMatchesMacContract() throws {
         let entry = try entry("baseline-90s")
         let engine = GuidedRunEngine(definition: entry.definition)

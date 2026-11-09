@@ -397,13 +397,23 @@ final class VideoEditorViewModel: ObservableObject {
         {
             self.markers = dto.map { VideoMarker(id: $0.id, time: $0.time, kind: $0.kind) }
         } else {
-            self.markers = []
+            self.markers = markersFromSavedCoarseLabels()
         }
 
         normalizeMarkerKinds()
         originalMarkers = markers
 
         recomputeSegments()
+    }
+
+    /// Start/Stop markers for chewing spans already saved with the recording
+    /// (e.g. from guided instructions), so they can be adjusted like any marker.
+    private func markersFromSavedCoarseLabels() -> [VideoMarker] {
+        let spans = CanonicalBundleWriter.savedChewingSpans(in: asset.url.deletingLastPathComponent())?.spans ?? []
+        return spans.flatMap {
+            [VideoMarker(id: UUID(), time: $0.lowerBound, kind: .startChewing),
+             VideoMarker(id: UUID(), time: $0.upperBound, kind: .stopChewing)]
+        }
     }
 
     // MARK: - Formatting

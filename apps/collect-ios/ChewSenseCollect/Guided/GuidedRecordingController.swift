@@ -18,6 +18,8 @@ final class GuidedRecordingController: ObservableObject {
     @Published private(set) var stage: Stage = .ready
     @Published private(set) var now: Double = 0
     @Published private(set) var validation: GuidedRunEngine.Validation?
+    /// True once the instruction schedule was saved as the recording's chewing labels.
+    @Published private(set) var savedInstructedLabels = false
     @Published var cuesEnabled: Bool {
         didSet { UserDefaults.standard.set(cuesEnabled, forKey: "GuidedCuesEnabled") }
     }
@@ -182,12 +184,30 @@ final class GuidedRecordingController: ObservableObject {
             let result = engine.validate(motionCoverage: coverage)
             validation = result
             if result.complete { catalog.recordLocalCompletion(of: entry.definition.experimentID) }
+            writeInstructedLabels(folder: folder, manifest: manifest, origin: origin, duration: duration)
+            // Sent when the wearer closes the completion screen, so the
+            // instructed spans can still be adjusted first.
             stage = .completed(folder: folder, sessionID: sessionID)
-            uploads?.recordingFinished(folder)
         } catch {
             stage = .failed(error.localizedDescription)
         }
         teardown()
+    }
+
+    /// Saves the instruction schedule as the recording's chewing spans,
+    /// assuming the wearer followed it. The spans stay editable until the
+    /// recording is sent; free-form experiments are left for manual marking.
+    private func writeInstructedLabels(folder: URL, manifest: [String: Any], origin: Double, duration: Double) {
+        guard let motion = (manifest["motion"] as? [String: Any])?["path"] as? String,
+              let intervals = engine.instructedCoarseLabels(videoClockOrigin: origin, duration: duration) else { return }
+        do {
+            try CanonicalBundleWriter.writeCoarseLabels(intervals: intervals,
+                                                        forMotionCSV: folder.appendingPathComponent(motion))
+            recorder.setLabelled(true, for: folder)
+            savedInstructedLabels = true
+        } catch {
+            savedInstructedLabels = false  // Manual coarse review remains available.
+        }
     }
 
     /// The wearer's explicit statement that nothing was eaten or chewed during

@@ -10,6 +10,8 @@ struct GuidedCompletionView: View {
     let onClose: (GuidedRecordingController?) -> Void
     @State private var attested = false
     @State private var attestError: String?
+    @State private var adjusting = false
+    @State private var saved: (spans: [ClosedRange<Double>], instructed: Bool)?
 
     var body: some View {
         let validation = controller.validation
@@ -31,8 +33,9 @@ struct GuidedCompletionView: View {
                         .foregroundStyle(check.passed ? Color.primary : Color.red)
                         .font(.callout)
                 }
-                Text("Instruction times are stored as what you were asked to do, not as verified labels.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if controller.savedInstructedLabels, let saved {
+                    chewingLabels(saved.spans, instructed: saved.instructed)
+                }
 
                 if controller.entry.definition.labeling.wearerNoFoodAttestation {
                     GroupBox("Confirm") {
@@ -56,7 +59,7 @@ struct GuidedCompletionView: View {
 
                 if let repeatIDs = validation?.repeatActivityIDs, !repeatIDs.isEmpty {
                     Button {
-                        onClose(GuidedRecordingController(
+                        close(GuidedRecordingController(
                             entry: controller.entry, recorder: services.recorder, quality: services.quality,
                             catalog: services.catalog, uploads: services.uploads,
                             onlyActivityIDs: repeatIDs, repeatOf: sessionID))
@@ -67,13 +70,52 @@ struct GuidedCompletionView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("repeatSegmentsButton")
                 }
-                Button { onClose(nil) } label: { Text("Done").frame(maxWidth: .infinity) }
+                Button { close(nil) } label: { Text("Done").frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("guidedDoneButton")
             }
             .padding(20)
         }
         .background(.regularMaterial)
+        .onAppear { saved = CanonicalBundleWriter.savedChewingSpans(in: folder) }
+        .sheet(isPresented: $adjusting, onDismiss: { saved = CanonicalBundleWriter.savedChewingSpans(in: folder) }) {
+            RecordingDetailView(folder: folder)
+                .environmentObject(services)
+                .environmentObject(services.recorder)
+        }
+    }
+
+    private func chewingLabels(_ spans: [ClosedRange<Double>], instructed: Bool) -> some View {
+        GroupBox("Chewing labels") {
+            VStack(alignment: .leading, spacing: 6) {
+                let times = spans.isEmpty ? "no chewing" : spans.map(Self.format).joined(separator: ", ")
+                Text(instructed ? "Marked from the instructions: \(times)." : "Your labels: \(times).")
+                    .accessibilityIdentifier("instructedLabelsSummary")
+                if services.uploads.item(for: folder) == nil {
+                    Button("Adjust chewing spans") { adjusting = true }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("adjustInstructedLabelsButton")
+                    Text("Only needed if you didn't follow an instruction. Tap Edit labels, drag the markers, then Labelling finished.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Already sent. Adjust chewing spans in Review on the Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private static func format(_ span: ClosedRange<Double>) -> String {
+        func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
+        return "\(clock(span.lowerBound))–\(clock(span.upperBound))"
+    }
+
+    /// Sends the recording once the wearer is done with it (labels can no
+    /// longer change on the phone after the Mac imports it).
+    private func close(_ next: GuidedRecordingController?) {
+        if !UploadManager.needsCoarseReview(folder) { services.uploads.recordingFinished(folder) }
+        onClose(next)
     }
 }
 
@@ -87,7 +129,7 @@ struct UploadStatusView: View {
         let item = services.uploads.item(for: folder)
         VStack(alignment: .leading, spacing: 6) {
             if UploadManager.needsCoarseReview(folder) {
-                Text("Next: watch the recording and mark when you actually chewed. The instructions do not create labels.")
+                Text("Next: watch the recording and mark when you actually chewed. Free-form steps can't be labelled from the instructions.")
                 Button("Review chewing intervals") { showCoarseReview = true }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("reviewGuidedCoarseButton")
