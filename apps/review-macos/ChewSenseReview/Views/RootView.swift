@@ -170,6 +170,8 @@ struct RootView: View {
         // Cycle-selected state: when a chew is selected, bound playback so
         // pressing play starts at the cycle's start and ends at its end.
         // The loop toggle (R) optionally restarts at the end instead of pausing.
+        // In Check suggestions the card owns playback (a looping clip with context).
+        guard step != .chews else { return }
         guard let chew = state.selectedChew else {
             playback.clearLoop()
             return
@@ -207,6 +209,16 @@ struct RootView: View {
             assist.startTimer()
             playback.setLoop(start: item.start, end: item.end, enabled: false)
             playback.playWithinCycle(start: item.start, end: item.end)
+            return
+        }
+        if step == .chews {
+            if let entry = state.selectedBite {
+                ChewCue.toggle(entry, state: state, playback: playback)
+            } else if let chew = state.selectedChew {
+                ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
+            } else {
+                playback.play()
+            }
             return
         }
         if let chew = state.selectedChew {
@@ -317,7 +329,14 @@ struct RootView: View {
         case ("k", _), ("K", _):
             playOrPauseFromSelectedCycleStart(); return nil
         case ("r", _), ("R", _):
-            state.loopSelectedChew.toggle(); return nil
+            if step == .chews {
+                // Replay the current suggestion from the start of its clip.
+                if let entry = state.selectedBite { ChewCue.loop(entry, state: state, playback: playback) }
+                else if let chew = state.selectedChew { ChewCue.loop(chew, state: state, playback: playback, viewport: viewport) }
+            } else {
+                state.loopSelectedChew.toggle()
+            }
+            return nil
         case ("o", _), ("O", _):
             if state.selectedSession?.annotatedVideoURL != nil {
                 if !state.isBlindReview { state.useAnnotatedVideo.toggle() }

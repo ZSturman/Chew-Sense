@@ -12,7 +12,7 @@ through the current one:
 
 | Task | Steps |
 | --- | --- |
-| Suggestions shown (assisted) | **Check suggestions** (one looped chew at a time: Yes / Not a chew / Can't tell, optional *Fix the timing*) → **Watch and finish** (play the whole recording, add missed chews, Finish review) → optional **Chewing spans** |
+| Suggestions shown (assisted) | **Check suggestions** (one looped chew at a time with Replay (R) and Play/Pause (Space) above the answers: Yes / Not a chew / Can't tell, optional *Fix the timing*) → **Watch and finish** (play the whole recording, add missed chews, Finish review) → optional **Chewing spans** |
 | Blind | **Mark chews** (suggestions hidden; none is a valid answer) → **Finish** |
 
 The step follows the saved draft, so a review resumes at the first undecided

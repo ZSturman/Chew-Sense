@@ -76,12 +76,10 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertNil(layer.animation(forKey: "transform"))
     }
 
+    /// A tiny 25 fps H.264 clip for playback tests.
     @MainActor
-    func testPlaybackStopsShowingPauseAtTheEndAndPlayRestarts() async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appending(path: "short.mov")
+    private func makeVideo(frames: Int, in directory: URL) async throws -> URL {
+        let url = directory.appending(path: "clip.mov")
         let writer = try AVAssetWriter(url: url, fileType: .mov)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32,
@@ -94,7 +92,7 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertTrue(writer.startWriting())
         writer.startSession(atSourceTime: .zero)
         let pool = try XCTUnwrap(pixels.pixelBufferPool)
-        for frame in 0..<10 {
+        for frame in 0..<frames {
             try await waitForPlayback { input.isReadyForMoreMediaData }
             var buffer: CVPixelBuffer?
             XCTAssertEqual(CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer), kCVReturnSuccess)
@@ -102,6 +100,56 @@ final class ReviewContractTests: XCTestCase {
         }
         input.markAsFinished()
         await writer.finishWriting()
+        return url
+    }
+
+    @MainActor
+    func testSuggestionClipReplaysAndResumesAsALoop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.40, 0.55, 0.70)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        let chew = try XCTUnwrap(state.chews.first)
+        let playback = PlaybackController()
+        playback.load(url: try await makeVideo(frames: 50, in: directory))
+        try await waitForPlayback("duration") { playback.duration > 0 }
+        let viewport = TimelineViewport()
+        let clip = ChewCue.window(chew, state: state, playback: playback)
+        XCTAssertLessThan(clip.start, chew.startTS)  // context before the chew
+        XCTAssertGreaterThan(clip.end, chew.endTS)    // and after it
+
+        ChewCue.loop(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertTrue(playback.isPlaying && playback.isLooping)
+        XCTAssertEqual(state.selectedChewID, "ch_0001")
+        // Pause, then resume where it was: still the same loop.
+        ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertFalse(playback.isPlaying)
+        let paused = playback.currentTime
+        ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertTrue(playback.isPlaying && playback.isLooping)
+        XCTAssertEqual(playback.currentTime, paused, accuracy: 0.05)
+        // It keeps looping past the end of the clip instead of stopping once.
+        try await waitForPlayback("clip end, \(playback.currentTime)") { playback.currentTime > clip.end - 0.15 }
+        try await waitForPlayback("second pass, \(playback.currentTime)") { playback.currentTime < clip.start + 0.15 }
+        XCTAssertTrue(playback.isPlaying)
+        // Resuming after the playhead left the clip starts the clip over.
+        playback.pause()
+        playback.seek(to: 1.8)
+        ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertEqual(playback.currentTime, clip.start, accuracy: 0.001)
+        XCTAssertTrue(playback.isLooping)
+        playback.pause()
+    }
+
+    @MainActor
+    func testPlaybackStopsShowingPauseAtTheEndAndPlayRestarts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await makeVideo(frames: 10, in: directory)
 
         let playback = PlaybackController()
         playback.load(url: url)

@@ -53,6 +53,8 @@ struct ChewDecisionCard: View {
                     .foregroundStyle(decisionColor(decision))
             }
             Text("Is this a real chew?").font(.headline)
+            clipControls(replay: { cue(chew) },
+                         toggle: { ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport) })
             Button { acceptAndAdvance(chew) } label: {
                 Label("Yes, it's a chew", systemImage: "checkmark").frame(maxWidth: .infinity)
             }
@@ -132,6 +134,8 @@ struct ChewDecisionCard: View {
             Text("\(state.pendingFoodEntries.count) of \(total) left")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             Text("Did food go into the mouth?").font(.headline)
+            clipControls(replay: { cue(entry) },
+                         toggle: { ChewCue.toggle(entry, state: state, playback: playback) })
             Button {
                 if state.foodEntryDisposition(for: entry.id) == nil { state.acceptBite(id: entry.id) }
                 cueNext()
@@ -262,9 +266,26 @@ struct ChewDecisionCard: View {
     }
 
     private func cue(_ entry: ReviewFoodEntry) {
-        state.selectBite(id: entry.id)
-        let end = playback.duration > 0 ? min(playback.duration, entry.ts + 1.0) : entry.ts + 1.0
-        playback.playRange(start: max(0, entry.ts - 1.0), end: end, loop: true)
+        ChewCue.loop(entry, state: state, playback: playback)
+    }
+
+    /// Replay from the clip's start, and pause/resume, right above the answers.
+    private func clipControls(replay: @escaping () -> Void, toggle: @escaping () -> Void) -> some View {
+        HStack {
+            Button(action: replay) {
+                Label("Replay", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
+            }
+            .help("Play this clip again from its start (R)")
+            .accessibilityIdentifier("replayClip")
+            Button(action: toggle) {
+                Label(playback.isPlaying ? "Pause" : "Play",
+                      systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .help("Pause or resume the loop (Space)")
+            .accessibilityIdentifier("toggleClip")
+        }
+        .controlSize(.large)
     }
 
     private func acceptAndAdvance(_ chew: ReviewChew) {
@@ -349,14 +370,47 @@ struct ChewDecisionCard: View {
     }
 }
 
-/// Loops one chew with context in the main video and zooms the timeline to it.
+/// The looping clip for one suggestion: a chew with at least five frames of
+/// context, or two seconds around a food entry.
+@MainActor
 enum ChewCue {
-    @MainActor
+    static func window(_ chew: ReviewChew, state: ReviewerState, playback: PlaybackController) -> (start: Double, end: Double) {
+        let context = max(state.loopPadding, 5.0 / max(state.chewCycles?.fps ?? 30.0, 1.0))
+        let end = playback.duration > 0 ? min(playback.duration, chew.endTS + context) : chew.endTS + context
+        return (max(0, chew.startTS - context), end)
+    }
+
+    static func window(_ entry: ReviewFoodEntry, playback: PlaybackController) -> (start: Double, end: Double) {
+        let end = playback.duration > 0 ? min(playback.duration, entry.ts + 1.0) : entry.ts + 1.0
+        return (max(0, entry.ts - 1.0), end)
+    }
+
+    /// Select, zoom the timeline to it, and loop from the start.
     static func loop(_ chew: ReviewChew, state: ReviewerState, playback: PlaybackController, viewport: TimelineViewport) {
         state.selectChew(id: chew.id)
         viewport.focus(on: chew, duration: max(playback.duration, 1))
-        let context = max(state.loopPadding, 5.0 / max(state.chewCycles?.fps ?? 30.0, 1.0))
-        let end = playback.duration > 0 ? min(playback.duration, chew.endTS + context) : chew.endTS + context
-        playback.playRange(start: max(0, chew.startTS - context), end: end, loop: true)
+        let clip = window(chew, state: state, playback: playback)
+        playback.playRange(start: clip.start, end: clip.end, loop: true)
+    }
+
+    static func loop(_ entry: ReviewFoodEntry, state: ReviewerState, playback: PlaybackController) {
+        state.selectBite(id: entry.id)
+        let clip = window(entry, playback: playback)
+        playback.playRange(start: clip.start, end: clip.end, loop: true)
+    }
+
+    /// Pause, or resume where it paused (restarting the loop if the playhead left the clip).
+    static func toggle(_ chew: ReviewChew, state: ReviewerState, playback: PlaybackController, viewport: TimelineViewport) {
+        if playback.isPlaying { playback.pause(); return }
+        guard state.selectedChewID == chew.id else { return loop(chew, state: state, playback: playback, viewport: viewport) }
+        let clip = window(chew, state: state, playback: playback)
+        playback.resumeOrLoop(start: clip.start, end: clip.end)
+    }
+
+    static func toggle(_ entry: ReviewFoodEntry, state: ReviewerState, playback: PlaybackController) {
+        if playback.isPlaying { playback.pause(); return }
+        guard state.selectedBiteID == entry.id else { return loop(entry, state: state, playback: playback) }
+        let clip = window(entry, playback: playback)
+        playback.resumeOrLoop(start: clip.start, end: clip.end)
     }
 }

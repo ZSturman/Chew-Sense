@@ -92,6 +92,17 @@ final class PlaybackController: ObservableObject {
 
     func togglePlay() { isPlaying ? pause() : play() }
 
+    /// Resume inside an already-set clip range; otherwise start the clip over as a loop.
+    func resumeOrLoop(start: Double, end: Double) {
+        if let rangeStart, let rangeEnd, abs(rangeStart - start) < 1e-6, abs(rangeEnd - end) < 1e-6,
+           currentTime >= start, currentTime < end - 0.02 {
+            isLooping = true
+            play()
+        } else {
+            playRange(start: start, end: end, loop: true)
+        }
+    }
+
     func seek(to seconds: Double) {
         let target = clampedTime(seconds)
         let request = UUID()
