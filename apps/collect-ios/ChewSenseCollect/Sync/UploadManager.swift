@@ -126,16 +126,26 @@ final class UploadManager: ObservableObject {
             && !FileManager.default.fileExists(atPath: folder.appendingPathComponent("annotations/coarse_labels.json").path)
     }
 
-    func send(_ folder: URL) {
-        guard !Self.needsCoarseReview(folder) else { return }
+    @discardableResult
+    func send(_ folder: URL) -> Task<Void, Never>? {
+        guard !Self.needsCoarseReview(folder) else { return nil }
         let name = folder.lastPathComponent
         if let existing = items[name], ![.failed, .needsAttention].contains(existing.state) {
-            Task { await run() }
-            return
+            return Task { await run() }
         }
         items[name] = Item(folderName: name, state: .queued)
         save()
-        Task { await run() }
+        return Task { await run() }
+    }
+
+    /// Sends a recording again even after the Mac confirmed it; the Mac
+    /// recognizes the copy and imports nothing. For support and device tests (no UI).
+    @discardableResult
+    func requeue(_ folder: URL) -> Task<Void, Never>? {
+        guard !Self.needsCoarseReview(folder) else { return nil }
+        items[folder.lastPathComponent] = Item(folderName: folder.lastPathComponent, state: .queued)
+        save()
+        return Task { await run() }
     }
 
     func recordingFinished(_ folder: URL) {
@@ -157,12 +167,18 @@ final class UploadManager: ObservableObject {
             guard !recorder.isRecording else { return }
             let name = next.folderName
             do {
+                if Task.isCancelled { throw CancellationError() }
                 if macAway { throw URLError(.cannotConnectToHost) }  // checked once per run
                 guard connection.mayTransferRecordings else {
                     noteWaiting(Self.waitingForWiFi)
                     break
                 }
                 try await transfer(name)
+            } catch let error where Task.isCancelled || error is CancellationError
+                        || (error as? URLError)?.code == .cancelled {
+                // The app was suspended or closed mid-transfer: resume later, not a failure.
+                noteWaiting(Self.waitingForMac)
+                return
             } catch let error where LoopLink.isUnreachable(error) {
                 // The Mac is away. Not a failure: try the home server, else wait.
                 macAway = true

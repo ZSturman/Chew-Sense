@@ -30,6 +30,13 @@ final class DeviceStatusTests: XCTestCase {
             XCTAssertEqual(status.summary, summary)
         }
         XCTAssertTrue(status.steps.contains { $0.app == "live" })
+        if ProcessInfo.processInfo.environment["CHEWSENSE_EXPECT_HOME_SERVER"] != nil {
+            // Learned from the Mac's pinned status; reachable with the Pi's public certificate.
+            let config = try XCTUnwrap(mac.link.mailbox.config, "Live has not received the home server")
+            XCTAssertEqual(URL(string: config.url)?.host, "kiosk-lab.tailef7acc.ts.net")
+            let copy = try await mac.link.mailbox.status()
+            XCTAssertNotNil(copy.status["pipeline"])
+        }
 
         let renderer = ImageRenderer(content: ProjectStatusCard(status: status, app: "live")
             .padding().frame(width: 390).background(Color(.systemBackground)))

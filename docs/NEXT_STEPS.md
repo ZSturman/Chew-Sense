@@ -1,3 +1,30 @@
+# Checkpoint — November 9, 2026 (night): Pi mailbox deployed and validated on devices
+
+- **Deployed:** Home Services `0.4.9-20261109T142058Z` (gateway only; built
+  from the deployed 0.4.8 code plus the relay; `0.4.8` kept for rollback).
+  `doctor` passed. Existing clients, workers and the Opportunity backend were
+  unaffected.
+- **Tokens:** `Chew Sense Mac` (`chewsense-mac`) and `Chew Sense iPhone`
+  (`chewsense-phone`). Their secrets went straight from the Pi into
+  `workspace/loop/service/mailbox-{mac,phone}.token` (0600, git-ignored). The
+  deposit key is `loop/service/mailbox.key` (0600). The loop service was
+  restarted in place (same identity); its collector is running.
+- **Phones:** Collect and Live received the home server by themselves; both
+  run the final builds.
+- **Device validation** (real recordings resent as duplicates, nothing new
+  imported): Pi fallback, interrupted deposit and direct transfers,
+  collection on wake, cleanup, background retry. See the table at the end of
+  [COMMUNICATION.md](COMMUNICATION.md).
+- **Fixes found on the way:** a duplicate import no longer overwrites the
+  session record's original `archive_sha256`/`received_from`. The collector
+  removes its empty working folder after acknowledging. Cancelling a transfer
+  (app closed) is not counted as a failure.
+- **Not run on the device:** switching Wi-Fi, hotspot and cellular; recording
+  while the phone is offline; iOS choosing to run the background task on its
+  own.
+
+---
+
 # Checkpoint — November 9, 2026 (evening): Pi mailbox built and tested, not deployed
 
 - **What it does:** when the Mac doesn't answer, Collect seals the recording

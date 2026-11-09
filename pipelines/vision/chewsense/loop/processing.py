@@ -318,8 +318,13 @@ class Processor:
         if result.state == "duplicate" and record.get("processing") == "completed":
             # Everything already exists; finish the job without redoing work.
             job["steps_done"] = list(SESSION_STEPS[1:-1])
-        self._record(result.session_id, imported=True, archive_sha256=job["archive_sha256"],
-                     received_from=job["device"], processing="processing")
+        if result.state == "duplicate":
+            # Keep the original provenance; only note that a copy arrived again.
+            self._record(result.session_id, imported=True, processing="processing",
+                         last_duplicate_at=utc_now(), last_duplicate_from=job["device"])
+        else:
+            self._record(result.session_id, imported=True, archive_sha256=job["archive_sha256"],
+                         received_from=job["device"], processing="processing")
         if result.state in {"imported", "duplicate"}:
             # The verified original is retained under archives/; this is the upload copy.
             Path(job["archive"]).unlink(missing_ok=True)

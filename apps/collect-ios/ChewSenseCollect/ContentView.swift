@@ -66,11 +66,11 @@ struct ContentView: View {
             Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await services.synchronize() } }
+            if phase == .active, !CollectServices.isUnitTestHost { Task { await services.synchronize() } }
         }
         .task {
             // Light periodic sync while the app is open: catalog and upload status.
-            while !Task.isCancelled {
+            while !Task.isCancelled, !CollectServices.isUnitTestHost {
                 await services.synchronize()
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
             }

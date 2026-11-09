@@ -69,6 +69,9 @@ struct MacConnectionView: View {
                         if let last = connection.lastSync {
                             LabeledContent("Last sync", value: last.formatted(date: .omitted, time: .shortened))
                         }
+                        if let background = UserDefaults.standard.object(forKey: CollectServices.lastBackgroundSyncKey) as? Date {
+                            LabeledContent("Last background check", value: background.formatted(date: .abbreviated, time: .shortened))
+                        }
                     }
                     .font(.footnote)
                 }

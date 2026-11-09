@@ -130,7 +130,7 @@ def test_mac_collects_imports_then_acknowledges_and_publishes_status(tmp_path, m
     assert paths.source("MB-20990101-000001-AAAAAAAA").exists()
     assert pi.status["sessions"] == {"MB-20990101-000001-AAAAAAAA": "processed"}
     assert "routes" not in pi.status["status"] and "mailbox" not in pi.status["status"]
-    assert not folder.exists() or not any(folder.iterdir())
+    assert not folder.exists()
 
 
 def test_resent_recording_is_a_duplicate_and_bad_deposits_are_rejected(tmp_path, mac, video):
@@ -158,6 +158,11 @@ def test_resent_recording_is_a_duplicate_and_bad_deposits_are_rejected(tmp_path,
         pass
     service.mailbox.cycle()
     assert sorted(pi.acks) == [("dep_1", "imported"), ("dep_2", "duplicate"), ("dep_3", "rejected")]
+    # The duplicate leaves the original provenance in place.
+    record = json.loads(paths.session_record("MB-20990101-000002-BBBBBBBB").read_text())
+    first = next(j for j in service.processor.jobs() if j.get("import_state") == "imported")
+    assert record["archive_sha256"] == first["archive_sha256"] and record["processing"] == "completed"
+    assert record["last_duplicate_from"].endswith("(home server)")
     assert [p.name for p in paths.sources.iterdir() if not p.name.startswith(".")] == ["MB-20990101-000002-BBBBBBBB"]
     assert not list(paths.quarantine.iterdir())
 

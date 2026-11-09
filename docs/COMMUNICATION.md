@@ -191,7 +191,7 @@ choose:
 Until then the tailnet route is tried last and fails in under a second, so
 it costs nothing.
 
-### Pi mailbox (built and tested with synthetic recordings, Nov 9; not deployed)
+### Pi mailbox (deployed Nov 9, Home Services 0.4.9-20261109T142058Z)
 
 This is the answer to both remaining gaps: a sleeping Mac, and reaching home
 from another network (the Pi has a public Tailscale certificate, so no ATS
@@ -275,3 +275,21 @@ the iPhone's hotspot):
 
 Run: `tools/loop-e2e` (end to end, ~2 min after build); Collect
 `LoopLinkTests`; Live tests; `pytest pipelines/vision/tests/test_loop*.py`.
+
+### Deployed relay on the physical iPhone, Mac and Pi (Nov 9 2026, home Wi-Fi)
+
+Each test resent a real recording the Mac already held, checked byte for byte
+against its import receipt first, so nothing new entered the dataset. "Mac
+away" means its loop service was stopped.
+
+| Scenario | Evidence | Result |
+| --- | --- | --- |
+| Both apps received the home server from the Mac by themselves after launch, and reach the Pi with its public certificate (no ATS exception) | `build/Device-Relay-config.xcresult`, `build/Device-Status-Live.xcresult` | Pass |
+| Mac away: 158 MB recording sealed and deposited on the Pi (166 MB ciphertext); cut at 40 MB as if the app closed; a new outbox resumed at the Pi's offset; 0 failed attempts; 60 s, about 3 MB/s | `build/Device-Relay-deposit.xcresult` | Pass |
+| Pi held only ciphertext (`CSMB` header, no ZIP, QuickTime or JSON signatures) | inspected on the Pi | Pass |
+| Mac woke: collected 51 s later, verified, decrypted, recognized the duplicate, acknowledged; the Pi deleted its copy; source, receipt, archive and provenance unchanged; nothing quarantined | Mac and Pi state compared before and after | Pass |
+| Phone saw the receipt (processed) and removed only its temporary copies; the recording stayed | `build/Device-Relay-collect.xcresult` | Pass |
+| Mac reachable: 166 MB straight to it, cut at 40 MB, resumed at the Mac's offset, 12.6 s; no deposit on the Pi | `build/Device-Relay-direct.xcresult` | Pass |
+| Background retry: an item in the app's own queue deposited while the Mac was away; after the Mac collected it, only the registered background task (launched through the scheduler's development hook) brought it to processed | `build/Device-Relay-background-*.xcresult` | Pass |
+| iOS accepts the background task request (identifier and background mode) | `build/Device-Routes-Collect.xcresult` | Pass |
+| Switching Wi-Fi, hotspot and cellular; phone offline while recording; iOS choosing when to run the background task | needs hands on the phone, or time | Not run on the device |

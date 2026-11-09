@@ -81,7 +81,7 @@ struct LoopEndToEndTests {
         let recorder = RecorderController()
         let uploads = UploadManager(connection: connection, recorder: recorder,
                                     directory: scratch.appendingPathComponent("Uploads"))
-        folders.forEach(uploads.send)
+        folders.forEach { uploads.send($0) }
         for _ in 0..<3 { await uploads.run() }
         for folder in folders {
             let item = try #require(uploads.item(for: folder))

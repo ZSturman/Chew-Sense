@@ -278,6 +278,9 @@ class MailboxCollector:
         self._json("POST", f"deposits/{deposit['id']}/ack",
                    {"result": result, "session_id": deposit["session_id"], "detail": detail})
         entry.update(acknowledged=result, acknowledged_at=utc_now())
+        folder = self.paths.uploads / f"mailbox-{deposit['id']}"
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()  # the import already removed its copy; nothing else lives here
 
     def _download(self, deposit: dict) -> Path:
         folder = self.paths.uploads / f"mailbox-{deposit['id']}"
