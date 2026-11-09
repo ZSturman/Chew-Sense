@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end check of Collect's transfer code against an isolated Mac loop
 # service: pairing, finding the Mac after an address change, an unreachable
-# Mac, two queued recordings, processing, and a duplicate send.
+# Mac, two queued recordings, processing, and a duplicate send; with Home
+# Services available, also the home-server mailbox (Mac asleep, Pi outages,
+# interrupted deposits and direct transfers, collection on wake).
 # Synthetic recordings in a temporary folder only; the running service,
 # workspace/ and the wearer's pairings are not touched.
 #
@@ -17,6 +19,13 @@ HARNESS=
 trap 'if [[ -n "$HARNESS" ]]; then kill "$HARNESS" 2>/dev/null || true; fi; chmod -R u+w "$SCRATCH" 2>/dev/null; rm -rf "$SCRATCH"' EXIT
 
 export PYTHONPATH="$ROOT/pipelines/vision:$ROOT/pipelines/motion${PYTHONPATH:+:$PYTHONPATH}"
+# With a Home Services checkout, the home-server mailbox is tested too (isolated
+# fixture, never the Pi). HOME_SERVICES_SRC may point at a worktree.
+HS="${HOME_SERVICES:-$HOME/Workspace/Projects/Home Services}"
+if [[ -x "$HS/.venv/bin/python" && -z "${CHEWSENSE_E2E_NO_HOME:-}" ]]; then
+  export HOME_SERVICES_PYTHON="$HS/.venv/bin/python"
+  export HOME_SERVICES_SRC="${HOME_SERVICES_SRC:-$HS/src}"
+fi
 "$PYTHON" "$ROOT/pipelines/vision/tests/loop_e2e_harness.py" "$SCRATCH" > "$SCRATCH/harness.log" 2>&1 &
 HARNESS=$!
 for _ in $(seq 1 100); do [[ -f "$SCRATCH/fixture.json" ]] && break; sleep 0.2; done

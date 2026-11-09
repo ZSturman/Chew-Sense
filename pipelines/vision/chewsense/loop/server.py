@@ -31,6 +31,7 @@ from .experiments import ExperimentRegistry
 from .guided import write_json_atomic
 from .importer import sha256_file
 from .lmstudio import LMStudio
+from .mailbox import MailboxCollector, MailboxConfig
 from .pairing import DeviceRegistry, ServiceIdentity
 from .processing import Processor
 from .project_status import compute_project_status, project_status_path, write_project_status
@@ -76,6 +77,12 @@ class LoopService:
                                    on_session_done=lambda _sid: self._analysis_requested.set())
         # Set by serve() once the device port is known; tells paired phones how to find this Mac.
         self.routes: RouteReporter | None = None
+        # Optional home-server mailbox for recordings sent while this Mac was away (mailbox.py).
+        self.mailbox_config = MailboxConfig(paths.service)
+        self.mailbox = MailboxCollector(
+            paths, self.mailbox_config, enqueue=self.processor.enqueue_archive, jobs=self.processor.jobs,
+            status=self.shared_status, session_state=lambda sid: self.session_status(sid)["state"],
+        ) if self.mailbox_config.enabled else None
         if not paths.catalog.exists():
             self.analyze()
 
@@ -257,7 +264,16 @@ class LoopService:
         }
         return {"service": "chewsense-loop", "api_version": API_VERSION, "state": status.get("state"),
                 "pending": len(status.get("pending", [])), "catalog_version": catalog.get("catalog_version"),
-                "pipeline": pipeline, "routes": self.current_routes()}
+                "pipeline": pipeline, "routes": self.current_routes(),
+                # Paired phones learn the home-server mailbox here; null tells them to forget it.
+                "mailbox": self.mailbox_config.phone_offer()}
+
+    def shared_status(self) -> dict[str, Any]:
+        """The status phones may read from the home server: no routes, tokens or keys."""
+        status = self.phone_status()
+        status.pop("routes", None)
+        status.pop("mailbox", None)
+        return status
 
     def current_routes(self) -> list[dict[str, Any]]:
         return self.routes.routes() if self.routes else []
@@ -431,6 +447,8 @@ def serve(service: LoopService, *, host: str = "0.0.0.0", device_port: int | Non
     for target in (device.serve_forever, admin.serve_forever):
         threading.Thread(target=target, daemon=True).start()
     threading.Thread(target=service.processor.run_forever, args=(stop, service.periodic), daemon=True).start()
+    if service.mailbox is not None:
+        threading.Thread(target=service.mailbox.run_forever, args=(stop,), daemon=True, name="chewsense-mailbox").start()
     write_json_atomic(service.paths.service / "endpoint.json", {
         "device_port": device.server_address[1], "admin_port": admin.server_address[1],
         "fingerprint": service.identity.fingerprint, "started_at": utc_now()})

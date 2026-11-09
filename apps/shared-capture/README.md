@@ -15,4 +15,6 @@ certificate-pinned requests, the Mac's reported routes (LAN, `.local`,
 tailnet) and finding it again on another network, Bonjour, and the phone's
 network watch. `LoopPairingForm.swift` holds the shared pairing form and the
 **Details** view. `LoopServiceTrust.swift` holds pinning and the token's
-keychain entry. Rules: [docs/COMMUNICATION.md](../../docs/COMMUNICATION.md).
+keychain entry. `LoopMailbox.swift` is the home-server fallback (Pi mailbox:
+encrypted deposits while the Mac is away; learned from the Mac's status).
+Rules: [docs/COMMUNICATION.md](../../docs/COMMUNICATION.md).

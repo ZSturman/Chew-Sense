@@ -21,6 +21,7 @@ dependencies = [
     "webrtcvad>=2.0.10",
     "tqdm>=4.66",
     "click>=8.1",
+    "cryptography>=43",
 ]
 
 [project.optional-dependencies]

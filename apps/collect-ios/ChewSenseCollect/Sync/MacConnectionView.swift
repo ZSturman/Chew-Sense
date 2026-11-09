@@ -14,8 +14,14 @@ struct MacConnectionView: View {
                 Section("Your Mac") {
                     MacStatusRow(connection: connection)
                     if case .offline = connection.state {
-                        Text("Recordings are kept on this iPhone and sent automatically when your Mac is back. Nothing to do unless this lasts.")
+                        Text(connection.link.mailbox.isConfigured
+                             ? "Recordings go to your home server and your Mac collects them when it's on. Nothing to do."
+                             : "Recordings are kept on this iPhone and sent automatically when your Mac is back. Nothing to do unless this lasts.")
                             .font(.footnote).foregroundStyle(.secondary)
+                        if let at = connection.homeStatusAt {
+                            Text("Status from your home server, as of \(at.formatted(date: .omitted, time: .shortened)).")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                         Button {
                             Task { await tryAgain() }
                         } label: {
@@ -55,6 +61,7 @@ struct MacConnectionView: View {
                 }
                 Section {
                     DisclosureGroup("Details") {
+                        LabeledContent("Home server", value: connection.link.mailbox.config.flatMap { URL(string: $0.url)?.host } ?? "not offered by the Mac")
                         LoopConnectionDetails(pairing: paired) { address in
                             try await connection.updateAddress(host: address, port: paired.port)
                             await services.synchronize()

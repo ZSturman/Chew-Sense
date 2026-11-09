@@ -38,7 +38,8 @@ final class CollectServices: ObservableObject {
     func synchronize() async {
         guard !CollectionTestMode.isEnabled else { return }
         await connection.refresh()
-        if case .connected = connection.state { await uploads.run() }
+        // Sends to the Mac when it answers, to the home server when it doesn't, or waits.
+        await uploads.run()
         scheduleBackgroundSync()
     }
 

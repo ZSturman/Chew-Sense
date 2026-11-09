@@ -1,3 +1,4 @@
+import BackgroundTasks
 import Foundation
 import Testing
 @testable import ChewSenseCollect
@@ -28,6 +29,20 @@ struct DeviceRouteTests {
             }
         }
         #expect(link.pairing == before)
+        #endif
+    }
+
+    /// iOS accepts the background retry task (registered identifier and
+    /// background mode); the request is cancelled straight away.
+    @Test func iOSAcceptsTheBackgroundRetryTask() throws {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        let request = BGProcessingTaskRequest(identifier: CollectServices.backgroundSyncTask)
+        request.requiresNetworkConnectivity = true
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600)
+        try BGTaskScheduler.shared.submit(request)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: CollectServices.backgroundSyncTask)
         #endif
     }
 }

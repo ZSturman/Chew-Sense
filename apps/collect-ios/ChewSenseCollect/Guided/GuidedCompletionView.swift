@@ -100,6 +100,8 @@ struct UploadStatusView: View {
                 switch item.state {
                 case .uploading, .preparing:
                     ProgressView(value: item.progress) { Text("Sending to Mac…") }
+                case .deposited:
+                    Label(item.message ?? UploadManager.deposited, systemImage: "house")
                 case .received, .processing, .processed:
                     Label(item.message ?? "Received by the Mac", systemImage: item.state == .processed ? "checkmark.circle.fill" : "tray.and.arrow.down")
                 case .queued:

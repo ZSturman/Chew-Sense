@@ -108,6 +108,26 @@ def project_status_cmd():
     click.echo(f"Wrote {project_status_path(paths)}", err=True)
 
 
+@loop.command("mailbox-configure")
+@click.option("--url", required=True, help="Home Services base URL, e.g. https://kiosk-lab.<tailnet>.ts.net:8443")
+def mailbox_configure(url: str):
+    """Use the home server as a mailbox for recordings sent while this Mac is away.
+
+    Paste the two tokens created on the Pi with the chewsense-mac and
+    chewsense-phone presets. They are stored with mode 0600 in loop/service;
+    phones receive the phone token and the deposit key through their pinned
+    pairing. Restart the service afterwards.
+    """
+    from .mailbox import MailboxConfig
+
+    paths = _paths().ensure()
+    mac = click.prompt("Mac token (chewsense-mac)", hide_input=True)
+    phone = click.prompt("Phone token (chewsense-phone)", hide_input=True)
+    path = MailboxConfig.write(paths.service, url, mac, phone)
+    MailboxConfig(paths.service).key()
+    click.echo(f"Wrote {path}. Restart the service: launchctl kickstart -k gui/$(id -u)/com.chewsense.loop")
+
+
 @loop.command("retire-recording")
 @click.argument("session_id")
 @click.option("--category", required=True, type=click.Choice(sorted(__import__("chewsense.loop.retirement", fromlist=["CATEGORIES"]).CATEGORIES)))

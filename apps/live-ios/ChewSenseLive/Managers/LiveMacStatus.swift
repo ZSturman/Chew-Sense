@@ -80,6 +80,16 @@ final class LiveMacStatus: ObservableObject {
             state = .offline(LoopLink.isUnreachable(error)
                              ? "showing the last message"
                              : (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            // The Mac is away: use what it last published to the home server, if any.
+            if link.mailbox.isConfigured, let copy = try? await link.mailbox.status(),
+               let shared = (copy.status["pipeline"] as? [String: Any])?["project"],
+               let encoded = try? JSONSerialization.data(withJSONObject: shared),
+               let decoded = try? ProjectStatus.decode(encoded) {
+                project = decoded
+                defaults.set(encoded, forKey: Self.projectKey)
+                let at = LoopMailbox.date(copy.updatedAt).map { $0.formatted(date: .omitted, time: .shortened) }
+                state = .offline("Mac away · status from your home server\(at.map { " as of \($0)" } ?? "")")
+            }
         }
     }
 }

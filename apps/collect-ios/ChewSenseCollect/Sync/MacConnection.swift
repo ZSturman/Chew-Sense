@@ -27,6 +27,8 @@ final class MacConnection: NSObject, ObservableObject {
     /// The shared "where we are" message, also shown by Review and Live.
     /// Decoded separately so an unexpected shape never hides `pipeline`.
     @Published private(set) var project: ProjectStatus?
+    /// When the Mac is away: when it last published status to the home server.
+    @Published private(set) var homeStatusAt: Date?
 
     struct PipelineStatus: Decodable {
         struct Goal: Decodable, Identifiable {
@@ -133,23 +135,33 @@ final class MacConnection: NSObject, ObservableObject {
         if case .offline = state {} else if case .connected = state {} else { state = .connecting }
         do {
             let status = try await link.status()
-            if var summary = status["pipeline"] as? [String: Any] {
-                let shared = summary.removeValue(forKey: "project")
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                pipeline = try decoder.decode(PipelineStatus.self, from: JSONSerialization.data(withJSONObject: summary))
-                project = shared.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
-                    .flatMap { try? ProjectStatus.decode($0) }
-            }
+            try apply(status)
             let since = catalog.source == .bundledSeed ? nil : "since=\(catalog.catalog.catalogVersion)"
             let data = try await request("GET", "v1/catalog", query: since)
             if let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], object["unchanged"] == nil {
                 try catalog.apply(data)
             }
             lastSync = Date()
+            homeStatusAt = nil
             state = .connected(pending: status["pending"] as? Int ?? 0)
         } catch {
             state = .offline(Self.offlineDescription(error))
+            // The Mac is away: show what it last published to the home server, if any.
+            if link.mailbox.isConfigured, let copy = try? await link.mailbox.status(), !copy.status.isEmpty {
+                try? apply(copy.status)
+                homeStatusAt = LoopMailbox.date(copy.updatedAt) ?? Date()
+            }
         }
+    }
+
+    /// Status from the Mac, or the copy it published to the home server.
+    private func apply(_ status: [String: Any]) throws {
+        guard var summary = status["pipeline"] as? [String: Any] else { return }
+        let shared = summary.removeValue(forKey: "project")
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        pipeline = try decoder.decode(PipelineStatus.self, from: JSONSerialization.data(withJSONObject: summary))
+        project = shared.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+            .flatMap { try? ProjectStatus.decode($0) }
     }
 }

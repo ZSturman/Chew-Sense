@@ -1,3 +1,33 @@
+# Checkpoint — November 9, 2026 (evening): Pi mailbox built and tested, not deployed
+
+- **What it does:** when the Mac doesn't answer, Collect seals the recording
+  (AES-256-GCM, key from the Mac) and deposits it in a new Home Services
+  module. The Mac's loop service collects it when awake, verifies it, imports
+  it through the normal path and acknowledges; the Pi then deletes its copy.
+  Phones learn the mailbox from the Mac's pinned status (no setup screen), and
+  show the Mac's last published status while it sleeps. Direct to the Mac
+  stays first; recordings never use cellular for the mailbox. Design and
+  evidence: [COMMUNICATION.md](COMMUNICATION.md).
+- **Home Services:** branch `chewsense-mailbox` in the worktree
+  `~/Workspace/Projects/_worktrees/home-services-chewsense-mailbox`, from
+  `f308098`, **uncommitted**. Its patch applies cleanly onto the main working
+  tree, which still carries another session's uncommitted work. The full
+  suite passes. Regenerate `contracts/v1` after merging.
+- **Mac:** `loop/mailbox.py`, `loop mailbox-configure`; `cryptography` added to
+  the lock (only additions). The running service is unchanged until it is
+  configured and restarted. Without configuration it tells phones there is no
+  mailbox.
+- **Tests:** HS full suite pass; Python loop 87 passed; Collect unit 43 passed
+  (+4 opt-in); Live 42 passed (+1 device-only); `tools/loop-e2e` with
+  `HOME_SERVICES_SRC=<worktree>/src` passed both tests. Covered: Mac awake →
+  direct; Mac asleep → Pi; Pi outage mid-deposit → resume; neither reachable →
+  wait; Mac sleeps mid-transfer → resume; wake → collect and import. Result:
+  `build/LoopE2E-Collect.xcresult`.
+- **Needs you:** approve the Pi deployment (gateway-only restart) and token
+  creation; then `chewsense-vision loop mailbox-configure` and a service restart.
+
+---
+
 # Checkpoint — November 9, 2026: phone ↔ Mac communication redesigned
 
 Decision record and rules: [COMMUNICATION.md](COMMUNICATION.md). In short: the

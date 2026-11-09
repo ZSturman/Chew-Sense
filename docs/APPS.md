@@ -52,8 +52,10 @@ display names were unified.
 ```
 
 Recordings go to the Mac automatically whenever the phone can reach it (same
-Wi-Fi or the iPhone's hotspot, even after its address changes), and wait
-safely on the phone when it can't. See [COMMUNICATION.md](COMMUNICATION.md).
+Wi-Fi or the iPhone's hotspot, even after its address changes). When it can't,
+they go encrypted to the Home Services mailbox on the Pi once that is
+deployed, and the Mac collects them when it wakes. Otherwise they wait safely
+on the phone. See [COMMUNICATION.md](COMMUNICATION.md).
 
 Every app shows the same "Where we are" card from the loop service
 (`pipelines/vision/chewsense/loop/project_status.py`): the current stage

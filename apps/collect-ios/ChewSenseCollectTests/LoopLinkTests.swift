@@ -71,6 +71,30 @@ struct LoopLinkTests {
         #expect(!message.contains("172."))
     }
 
+    @Test func queueSavedByAnOlderBuildStillDecodes() throws {
+        let saved = #"{"x":{"folderName":"x","state":"received","bytesSent":10,"attempts":0,"updatedAt":0}}"#
+        let items = try JSONDecoder().decode([String: UploadManager.Item].self, from: Data(saved.utf8))
+        #expect(items["x"]?.state == .received)
+        #expect(items["x"]?.depositID == nil)
+    }
+
+    @Test func phoneAcceptsOnlyAValidHomeServerOfferAndForgetsIt() {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        #expect(LoopMailboxConfig.parse(["url": "http://pi:8790", "token": "t", "key": key]) == nil)
+        #expect(LoopMailboxConfig.parse(["url": "https://pi.ts.net:8443", "token": "t", "key": "c2hvcnQ="]) == nil)
+        let offer: [String: Any] = ["url": "https://pi.ts.net:8443", "token": "t", "key": key, "key_id": "ab"]
+        #expect(LoopMailboxConfig.parse(offer)?.symmetricKey != nil)
+        let mailbox = LoopMailbox(keychainService: "ChewSenseLoop.tests")
+        defer { mailbox.forget() }
+        mailbox.learn(offer)
+        #expect(LoopMailbox(keychainService: "ChewSenseLoop.tests").isConfigured)  // kept in the keychain
+        mailbox.learn(NSNull())
+        #expect(!mailbox.isConfigured)
+        #expect(!LoopMailbox(keychainService: "ChewSenseLoop.tests").isConfigured)
+        #expect(LoopMailbox.date("2026-11-09T12:00:00.123456Z") != nil)
+        #expect(LoopMailbox.date("2026-11-09T12:00:00Z") != nil)
+    }
+
     @Test func automaticSendingIsOnUnlessTurnedOff() {
         let key = "LoopAutoUpload"
         let saved = UserDefaults.standard.object(forKey: key)

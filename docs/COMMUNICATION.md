@@ -10,12 +10,13 @@ The iPhone is offline-first: a recording is complete and safe the moment it is
 saved on the phone, and nothing about recording depends on the Mac. The Mac is
 an **optional worker** that owns all processing, labelling and training. Phones
 reach it **by identity** (its pinned certificate), over whichever route the Mac
-reported that answers now. Today that is the same Wi-Fi or the iPhone's
-hotspot, even after the Mac's address changes. The tailnet route is reported
-too, but iOS refuses it until one decision is made (see *iOS refuses the
-tailnet route*). They never use a typed address. Every app reads one source of truth, the Mac's
-`workspace/loop/`. The phone keeps only its own outbox. When the Mac is asleep
-or away, work waits in the phone's outbox and resumes by itself.
+reported that answers now: the same Wi-Fi or the iPhone's hotspot, even after
+the Mac's address changes. They never use a typed address. **When the Mac
+doesn't answer**, Collect deposits the recording, encrypted on the phone, in
+the Home Services **mailbox** on the Pi. The Mac collects it when it wakes,
+and the Pi then deletes its copy. When neither answers, the recording waits on
+the phone and is retried automatically. Every app reads one source of truth,
+the Mac's `workspace/loop/`. The phone keeps only its own outbox.
 
 ## Rules for future changes
 
@@ -36,8 +37,9 @@ or away, work waits in the phone's outbox and resumes by itself.
 6. **Recordings cross cellular only to a Mac on the same local network**
    (`LoopNetwork.allowsRecordingTransfer`). Status and catalog are small and
    may use any route.
-7. **No new place for video without the wearer's approval.** That covers
-   CloudKit, iCloud Drive and the Pi. No ATS exceptions without approval
+7. **No new place for video without the wearer's approval.** The Pi mailbox
+   was approved (Nov 9) for phone-encrypted, temporary deposits only. CloudKit
+   and iCloud Drive were not. No ATS exceptions without approval
    either. See *iOS refuses the tailnet route* and *Pi mailbox* below.
 
 ## Before: what the audit found
@@ -95,6 +97,8 @@ flowchart LR
     K -- "1. last route that answered" --> S
     K -- "2. other routes it reported:<br/>LAN IP, .local name, tailnet IP" --> S
     K -- "3. Bonjour" --> S
+    K -. "Mac away: encrypted deposit" .-> H[(Pi mailbox<br/>Home Services)]
+    H -. "Mac awake: collect, verify, ack → copy deleted" .-> S
     S --> W
     R --> W
 ```
@@ -163,7 +167,7 @@ devices is eventual, which is why an outbox fits better than a live link.
 | App Groups / shared keychain between Collect and Live | Deferred | Would make one pairing serve both apps. Adopting a shared keychain group changes how both apps find their existing tokens, which risks the current pairings for a one-time convenience |
 | MultipeerConnectivity | Rejected | Needs both ends in the foreground and nearby; the Mac side is Python |
 | Background `URLSession` for the whole archive | Deferred | Would survive app termination mid-transfer, but needs a streaming upload path on the Mac (the service reads each chunk into memory). The background processing task plus resumable chunks cover the same need more simply |
-| **Pi mailbox (Home Services relay)** | Proposed, **needs approval** | See below |
+| **Pi mailbox (Home Services relay)** | Adopted as the fallback (built and tested; deployment waits for approval) | Covers a sleeping Mac and other networks without an ATS change. The Pi holds only ciphertext, and only until the Mac acknowledges. See below |
 
 ### iOS refuses the tailnet route (found on the iPhone, Nov 9)
 
@@ -174,7 +178,7 @@ addresses or `*.ts.net` names. An ATS exception for `ts.net` was blocked
 (it weakens TLS policy) and is **not** in the apps. Options, for the wearer to
 choose:
 
-1. **Pi mailbox (below).** The Pi already has a valid Tailscale certificate,
+1. **Pi mailbox (below, chosen and built).** The Pi already has a valid Tailscale certificate,
    so phone → Pi works from any network with no ATS change. Recommended,
    since it also covers a sleeping Mac.
 2. **Tailscale Serve on the Mac** with a Let's Encrypt certificate for its
@@ -187,55 +191,54 @@ choose:
 Until then the tailnet route is tried last and fails in under a second, so
 it costs nothing.
 
-### Pi mailbox (approved for design and synthetic testing, Nov 9)
+### Pi mailbox (built and tested with synthetic recordings, Nov 9; not deployed)
 
-Not deployed and not built yet. The wearer approved designing it and testing
-it with synthetic recordings. Deployment to the Pi needs another confirmation.
-Implementation is paused because the Home Services router, token presets and
-config (`api/app.py`, `auth.py`, `config.py`) carry another session's
-uncommitted changes, which this module must be wired into.
+This is the answer to both remaining gaps: a sleeping Mac, and reaching home
+from another network (the Pi has a public Tailscale certificate, so no ATS
+change is needed).
 
 ```mermaid
 sequenceDiagram
     participant P as Collect (iPhone)
     participant H as Home Services (Pi)
     participant M as Mac loop service
-    P->>M: try the Mac's routes first (fastest, no copy on the Pi)
-    alt Mac unreachable and network unmetered
-        P->>H: deposit (resumable, SHA-256 announced)
-        H-->>P: waiting · "Delivered to home server"
-        M->>H: pending? (every 60 s while awake)
-        M->>H: download (Range, resumable), verify SHA-256
-        M->>M: enqueue_archive → idempotent import
-        M->>H: ack imported | duplicate | rejected
-        H->>H: delete the copy, keep a receipt
-        P->>H: deposit state → acked → ask the Mac as usual
+    P->>M: 1. the Mac's routes (fastest; no copy anywhere else)
+    alt Mac doesn't answer, and the network isn't cellular or Low Data Mode
+        P->>P: seal the ZIP (AES-256-GCM, key from the Mac)
+        P->>H: deposit: announce hashes, upload resumably, complete (SHA-256 checked)
+        H-->>P: waiting · "Delivered to your home server"
+        M->>H: while awake, every 30 s: pending?
+        M->>H: download (Range resume), check sealed hash
+        M->>M: decrypt, check archive hash, enqueue_archive (same import as direct)
+        M->>H: ack imported | duplicate | rejected, only after the import result
+        H->>H: delete the copy
+        P->>H: deposit collected → "Received by the Mac"
     end
-    M->>H: publish status copy (headline, counts)
-    P->>H: read status while the Mac sleeps
+    M->>H: status copy (no routes, tokens or keys)
+    P->>H: show it while the Mac sleeps
 ```
 
-| Part | Design |
+| Part | Where |
 | --- | --- |
-| Home Services module | `chewsense.py`, `/api/v1/chewsense/…`, contract 1.5. Deposits: create `{session_id, archive_sha256, size_bytes}` (idempotent by hash), `PUT content` with `Upload-Offset` (≤ 16 MiB), `complete` verifies SHA-256. Mac: `pending`, `archive` (Range), `ack`. Status copy ≤ 1 MB. SQLite (WAL, `synchronous=FULL`, 0600) for metadata. Blobs on the UUID-guarded HDD, never the SD card. Fail closed if the disk is missing |
-| Scopes and presets | `chewsense:deposit` (phone: create/upload/own-deposit state/read status), `chewsense:collect` (Mac: pending/download/ack/publish status). Presets `chewsense-phone`, `chewsense-mac` |
-| Limits | 4 GB per deposit, 20 GB total, explicit 413/507. Deposits unacked after 30 days raise a notification and are not deleted |
-| Mac companion | Thread in the loop service. URL in `loop/service/mailbox.json`, token in a 0600 file. Download to `loop/uploads/<id>/` and verify, then the existing `enqueue_archive`. Ack only after the job's `import_state` is known, so the Pi keeps its copy until the Mac holds a verified original |
-| Phone | Home server URL and token in Keychain (one-time setup under Details). The outbox deposits only when no Mac route answers and the network is unmetered. The item shows "Delivered to your home server". Status falls back to the Pi's copy |
-| Privacy | Video on the Pi's exFAT HDD (not encrypted at rest) only between deposit and ack. Encrypting deposits with a key held by the Mac would remove even that; worth adding before production |
-| Tests | Home Services fixture tests (auth, resume, hash mismatch, quotas, guard failure, idempotence, ack deletes). Loop companion against the HS dev server. `tools/loop-e2e` extended: Mac route dead → deposit → companion import → ack → phone sees processed. Synthetic recordings only |
+| Home Services module (contract 1.5) | `chewsense.py`, `/api/v1/chewsense/…`, scopes `chewsense:deposit` (phone, cannot download) and `chewsense:collect` (Mac). Ciphertext only, on the guarded HDD. 4 GB per deposit, 20 GB held, partial deposits abandoned after 7 days. Branch `chewsense-mailbox` in the worktree `~/Workspace/Projects/_worktrees/home-services-chewsense-mailbox` (see its `docs/CHEWSENSE_MAILBOX.md`) |
+| Mac collector | `pipelines/vision/chewsense/loop/mailbox.py`, a thread in the loop service. Configured once with `chewsense-vision loop mailbox-configure`. Key `loop/service/mailbox.key` (0600). Always verifies a deposit itself, even when its announced hash is already known |
+| Phone | `apps/shared-capture/LoopMailbox.swift` (part of the one client). The address, token and key arrive inside the Mac's pinned `/v1/status`, so there is no setup on the phone. `UploadManager` tries the Mac, then the mailbox, then waits. The ZIP stays until the Mac's receipt; the recording folder is never deleted |
 
 ## Privacy and resources
 
-* Video and motion move only phone → Mac, over TLS pinned to the Mac's
-  certificate. No third-party storage, no ATS exceptions.
+* Video and motion go phone → Mac over TLS pinned to the Mac's certificate.
+  When the mailbox is used, they cross the Pi only as AES-256-GCM ciphertext
+  whose key the Pi never has, and only until the Mac acknowledges. There is
+  no third-party storage and no ATS exception.
 * Cellular: a recording is never sent over cellular or Low Data Mode unless
   the Mac is on the same local network (for example joined to the iPhone's
   hotspot, where the transfer stays local).
 * Battery: no persistent connection. Probes run only after a failure (at most
   every 30 s); the background task is scheduled only while work is pending.
-* Mac: unchanged. The route check runs `tailscale ip -4` at most once a minute.
-* iCloud and Pi storage: none used.
+* Mac: the route check runs `tailscale status --json` at most once a minute.
+  When the mailbox is configured, the collector polls it every 30 s while
+  awake.
+* Pi: at most 20 GB of ciphertext while the Mac is away. iCloud: none.
 
 ## Verification
 
@@ -249,6 +252,14 @@ sequenceDiagram
 | Queue lost, recording sent again → recognized as duplicate, no second import, nothing quarantined | `tools/loop-e2e` + harness checks | Pass |
 | Interrupted upload resumes from the Mac's offset; corrupted upload restarts | `test_end_to_end_pair_upload_resume_and_process`, `test_checksum_mismatch_restarts_upload` | Pass (Mac side) |
 | Mac restarts during processing | `test_pause_stop_resume_and_crash_recovery` | Pass (Mac side) |
+| Mailbox scopes (phone can't download), resume, checksum restart, idempotent re-announce, quota, missing disk, deletion after ack, abandoned partials, status copy | Home Services `tests/test_chewsense_mailbox.py` (full suite passes) | Pass |
+| Sealed format round trip; tampering, truncation and a foreign key rejected; resumed download; ack only after import; duplicate and rejected acks; no secrets in the status copy | `test_loop_mailbox.py` | Pass |
+| **Mac awake:** recording goes direct, never through the Pi | `tools/loop-e2e` (real Collect code, real Mac service, real Home Services module; isolated fixtures, synthetic recordings) | Pass |
+| **Mac asleep:** encrypted deposit on the Pi; Pi outage mid-deposit; resumes at the Pi's offset; 0 failed attempts | same | Pass |
+| **Neither reachable:** recording waits, 0 failed attempts; deposited when the Pi returns | same | Pass |
+| **Mac sleeps mid-transfer:** direct transfer resumes at the Mac's offset, not from zero | same | Pass |
+| **Mac wakes:** collects, decrypts, verifies, imports and acknowledges; phone shows processed; no copies left on the Pi; ZIPs removed only after receipt; recordings still on the phone | same | Pass |
+| Swift encryption ↔ Python decryption interoperate | same (two recordings imported via the Pi) | Pass |
 
 Physical iPhone 16 Pro Max, Nov 9 2026 (Mac on home Wi-Fi after a morning on
 the iPhone's hotspot):

@@ -104,6 +104,8 @@ final class LoopLink {
     var usesBonjour = true
 
     static let searchInterval: TimeInterval = 30
+    /// The home-server fallback the paired Mac offers (LoopMailbox.swift).
+    let mailbox: LoopMailbox
     private let trust = PinnedTrust()
     private let session: URLSession
     private let defaults: UserDefaults
@@ -120,6 +122,7 @@ final class LoopLink {
         self.deviceKey = deviceKey
         self.defaults = defaults
         self.keychainService = keychainService
+        mailbox = LoopMailbox(keychainService: keychainService)
         session = URLSession(configuration: .ephemeral, delegate: trust, delegateQueue: nil)
         if let data = defaults.data(forKey: pairingKey),
            let stored = try? JSONDecoder().decode(LoopPairing.self, from: data), token != nil {
@@ -174,6 +177,7 @@ final class LoopLink {
 
     func forget() {
         Keychain.delete(service: keychainService)
+        mailbox.forget()
         defaults.removeObject(forKey: pairingKey)
         pairing = nil
     }
@@ -203,6 +207,7 @@ final class LoopLink {
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let object else { throw Failure.invalidResponse }
         learnRoutes(LoopRoute.parse(object["routes"]))
+        if object.keys.contains("mailbox") { mailbox.learn(object["mailbox"]) }
         return object
     }
 

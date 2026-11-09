@@ -196,7 +196,9 @@ struct MacStatusRow: View {
         case .connected(let pending): pending > 0 ? "\(pending) recording(s) waiting to process" : "Ready to receive recordings"
         case .connecting: "Checking your Mac…"
         case .offline: connection.isSearching ? "Looking for your Mac…"
-            : "Recording works. New recordings are sent when the Mac is back."
+            : connection.link.mailbox.isConfigured
+                ? "Recording works. New recordings go to your home server until the Mac is back."
+                : "Recording works. New recordings are sent when the Mac is back."
         case .unpaired: "Pair once to send recordings and receive requests"
         }
     }
