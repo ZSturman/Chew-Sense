@@ -69,6 +69,82 @@ nonisolated struct ProjectStatus: Codable, Equatable, Sendable {
     }
 }
 
+/// Links between the Chew Sense apps. Each app registers its own scheme:
+/// `chewsense-collect://experiment/<id>` and `chewsense-collect://status` (iPhone),
+/// `chewsense-live://status` (iPhone), and
+/// `chewsense-review://session/<id>?workspace=blind|assisted` (Mac).
+/// Links only navigate: none starts a recording, a sensor or a model check.
+nonisolated enum ChewSenseLink: Equatable, Sendable {
+    case status
+    case experiment(String)
+    case session(String, workspace: String)
+
+    static let schemes = ["collect": "chewsense-collect", "live": "chewsense-live", "review": "chewsense-review"]
+
+    static func url(app: String, _ link: ChewSenseLink) -> URL? {
+        guard let scheme = schemes[app] else { return nil }
+        var parts = URLComponents()
+        parts.scheme = scheme
+        switch link {
+        case .status:
+            parts.host = "status"
+        case .experiment(let id):
+            parts.host = "experiment"
+            parts.path = "/" + id
+        case .session(let id, let workspace):
+            parts.host = "session"
+            parts.path = "/" + id
+            parts.queryItems = [URLQueryItem(name: "workspace", value: workspace)]
+        }
+        return parts.url
+    }
+
+    /// The app (`collect`, `live` or `review`) and link a URL names, if it is one of ours.
+    static func parse(_ url: URL) -> (app: String, link: ChewSenseLink)? {
+        guard let scheme = url.scheme?.lowercased(),
+              let app = schemes.first(where: { $0.value == scheme })?.key,
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        let value = parts.path.split(separator: "/").first.map(String.init)
+        switch parts.host {
+        case "status":
+            return (app, .status)
+        case "experiment":
+            guard let value, !value.isEmpty, app == "collect" else { return nil }
+            return (app, .experiment(value))
+        case "session":
+            let workspace = parts.queryItems?.first { $0.name == "workspace" }?.value ?? "assisted"
+            guard let value, !value.isEmpty, app == "review", ["assisted", "blind"].contains(workspace) else { return nil }
+            return (app, .session(value, workspace: workspace))
+        default:
+            return nil
+        }
+    }
+
+    /// Where a shared next step can be opened. Blind reviews open the blind workspace.
+    static func forStep(_ step: ProjectStatus.Step) -> (app: String, link: ChewSenseLink)? {
+        switch step.app {
+        case "collect":
+            return ("collect", step.experimentId.map { .experiment($0) } ?? .status)
+        case "live":
+            return ("live", .status)
+        case "review":
+            guard let id = step.sessionId else { return nil }
+            return ("review", .session(id, workspace: step.id.hasPrefix("blind-") ? "blind" : "assisted"))
+        default:
+            return nil
+        }
+    }
+
+    static func appName(_ app: String) -> String {
+        switch app {
+        case "collect": "Chew Sense Collect"
+        case "live": "Chew Sense Live"
+        case "review": "Chew Sense Review"
+        default: "the Mac"
+        }
+    }
+}
+
 /// Stage strip, headline, numbered next steps and the three readiness answers.
 struct ProjectStatusCard: View {
     let status: ProjectStatus
@@ -76,6 +152,8 @@ struct ProjectStatusCard: View {
     let app: String
     var stale: Bool = false
     var maxSteps: Int = 4
+    /// Returns an action when this app can open a step (in itself or in an installed companion app).
+    var opener: ((ProjectStatus.Step) -> (label: String, action: () -> Void)?)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -102,9 +180,16 @@ struct ProjectStatusCard: View {
                             Text(step.title).font(.subheadline.weight(.semibold))
                             Text(step.detail).font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(ProjectStatus.place(of: step.app, in: app))
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(step.app == app ? Color.accentColor : Color.secondary)
+                            if let open = opener?(step) {
+                                Button(open.label, action: open.action)
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                    .accessibilityIdentifier("open-step-\(step.id)")
+                            } else {
+                                Text(ProjectStatus.place(of: step.app, in: app))
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(step.app == app ? Color.accentColor : Color.secondary)
+                            }
                         }
                     }
                 }

@@ -10,5 +10,21 @@
 	<array>
 		<string>_chewsense._tcp</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.chewsense.collect</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>chewsense-collect</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Companion apps this app may open (Chew Sense links only navigate). -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>chewsense-live</string>
+	</array>
 </dict>
 </plist>

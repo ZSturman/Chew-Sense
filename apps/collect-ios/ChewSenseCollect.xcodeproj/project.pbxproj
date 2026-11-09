@@ -409,7 +409,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/Collect-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
+				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Collect finds and connects to the ChewSense service on your Mac to send recordings you choose and to receive recording requests. Nothing is sent elsewhere.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";
@@ -449,7 +449,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/Collect-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect and Label";
+				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Collect";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Collect finds and connects to the ChewSense service on your Mac to send recordings you choose and to receive recording requests. Nothing is sent elsewhere.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record training videos. The footage is saved as a .mov file on your device and is only used to synchronize with on-device motion data.";

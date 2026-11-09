@@ -277,6 +277,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/Live-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Live";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record review video alongside AirPods motion data. The video stays in the session bundle unless you choose to share it.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Live connects to the ChewSense service on your Mac only to show the current project step and next actions. It sends no recordings.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires microphone data access to determine if you're chewing or not";
@@ -319,6 +320,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/Live-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Chew Sense Live";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to record review video alongside AirPods motion data. The video stays in the session bundle unless you choose to share it.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Live connects to the ChewSense service on your Mac only to show the current project step and next actions. It sends no recordings.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires microphone data access to determine if you're chewing or not";

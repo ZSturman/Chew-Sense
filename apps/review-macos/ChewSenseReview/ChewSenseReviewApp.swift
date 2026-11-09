@@ -10,6 +10,12 @@ struct ChewSenseReviewApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .onOpenURL { url in
+                    // chewsense-review://session/<id>?workspace=blind|assisted
+                    if case .session(let id, let workspace)? = ChewSenseLink.parse(url).map({ $0.link }) {
+                        state.openSession(id, workspace: workspace)
+                    }
+                }
                 .environmentObject(state)
                 .environmentObject(playback)
                 .environmentObject(viewport)
@@ -23,13 +29,11 @@ struct ChewSenseReviewApp: App {
                 .environmentObject(state)
                 .environmentObject(playback)
         }
-        .keyboardShortcut("p", modifiers: [.command, .shift])
 
         Window("Training and Evaluation", id: "training") {
             TrainingStatusView()
                 .environmentObject(state)
         }
-        .keyboardShortcut("t", modifiers: [.command, .shift])
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .undoRedo) {
@@ -59,6 +63,17 @@ struct ChewSenseReviewApp: App {
                 }
                 .keyboardShortcut("m", modifiers: [.command])
             }
+            CommandMenu("Go") {
+                Button("Assisted Review") { state.openReviewWorkspace("assisted") }
+                    .keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Blind Review") { state.openReviewWorkspace("blind") }
+                    .keyboardShortcut("2", modifiers: [.command, .option])
+                Divider()
+                OpenWindowButton(title: "Pipeline and Next Steps", id: "pipeline")
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                OpenWindowButton(title: "Training and Evaluation", id: "training")
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
             CommandGroup(after: .appInfo) {
                 Button("Open Workspace…") {
                     NotificationCenter.default.post(name: .pickWorkspace, object: nil)
@@ -74,4 +89,15 @@ extension Notification.Name {
     static let toggleHelp = Notification.Name("ChewSense.toggleHelp")
     static let pickWorkspace = Notification.Name("ChewSense.pickWorkspace")
     static let toggleReviewQueue = Notification.Name("ChewSense.toggleReviewQueue")
+}
+
+/// Opens a single-instance window from a menu command.
+private struct OpenWindowButton: View {
+    let title: String
+    let id: String
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(title) { openWindow(id: id) }
+    }
 }

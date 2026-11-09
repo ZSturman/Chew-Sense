@@ -41,6 +41,14 @@ struct MainContentView: View {
             #endif
         }
         .sheet(isPresented: $showAirPods) { LiveAirPodsConnectionSheet(motionManager: motionManager) }
+        // chewsense-live://status (from Collect) shows the shared status at the top; it never
+        // starts a model check or the sensors.
+        .onOpenURL { url in
+            guard ChewSenseLink.parse(url)?.app == "live" else { return }
+            isComposingNew = false
+            selectedSessionURL = nil
+            Task { await mac.refresh() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { motionManager.endAirPodsConnectionCheck() }
         }

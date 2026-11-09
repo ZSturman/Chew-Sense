@@ -8,7 +8,7 @@ struct LiveProjectStatusSection: View {
     var body: some View {
         Section {
             if let project = mac.project {
-                ProjectStatusCard(status: project, app: "live", stale: !mac.isCurrent)
+                ProjectStatusCard(status: project, app: "live", stale: !mac.isCurrent, opener: opener)
                     .padding(.vertical, 4)
             } else {
                 Text("Pair Live with your Mac to see where the project is and what to do next. Collect and Review show the same message.")
@@ -32,6 +32,17 @@ struct LiveProjectStatusSection: View {
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+    }
+
+    /// Collect steps open Chew Sense Collect (at the experiment) when it is installed.
+    private func opener(_ step: ProjectStatus.Step) -> (label: String, action: () -> Void)? {
+        #if canImport(UIKit)
+        guard let (app, link) = ChewSenseLink.forStep(step), app == "collect",
+              let url = ChewSenseLink.url(app: app, link), UIApplication.shared.canOpenURL(url) else { return nil }
+        return ("Open in Chew Sense Collect", { UIApplication.shared.open(url) })
+        #else
+        return nil
+        #endif
     }
 
     private var connectionTitle: String {

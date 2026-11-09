@@ -166,6 +166,31 @@ final class ProjectStatusDecodingTests: XCTestCase {
         XCTAssertEqual(status.checks.count, 3)
     }
 
+    func testLinksRoundTripAndOnlyNavigate() throws {
+        let session = ChewSenseLink.session("Not-eating-20261026-174428-C27C9380", workspace: "blind")
+        let url = try XCTUnwrap(ChewSenseLink.url(app: "review", session))
+        XCTAssertEqual(url.absoluteString, "chewsense-review://session/Not-eating-20261026-174428-C27C9380?workspace=blind")
+        XCTAssertEqual(ChewSenseLink.parse(url)?.link, session)
+        let experiment = try XCTUnwrap(ChewSenseLink.url(app: "collect", .experiment("baseline-90s")))
+        XCTAssertEqual(ChewSenseLink.parse(experiment)?.app, "collect")
+        XCTAssertEqual(ChewSenseLink.parse(experiment)?.link, .experiment("baseline-90s"))
+        XCTAssertNil(ChewSenseLink.parse(URL(string: "chewsense-review://session/X?workspace=../../etc")!))
+        XCTAssertNil(ChewSenseLink.parse(URL(string: "chewsense-live://record")!))
+        XCTAssertNil(ChewSenseLink.parse(URL(string: "https://example.com/session/X")!))
+    }
+
+    func testSharedStepsOpenTheRightAppAndWorkspace() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/project_status_synthetic.json")
+        let status = try ProjectStatus.decode(Data(contentsOf: url))
+        let blind = try XCTUnwrap(status.steps.first { $0.id.hasPrefix("blind-") })
+        XCTAssertEqual(ChewSenseLink.forStep(blind)?.link, .session(blind.sessionId ?? "", workspace: "blind"))
+        let record = try XCTUnwrap(status.steps.first { $0.app == "collect" })
+        XCTAssertEqual(ChewSenseLink.forStep(record)?.link, .experiment(record.experimentId ?? ""))
+        let live = try XCTUnwrap(status.steps.first { $0.app == "live" })
+        XCTAssertEqual(ChewSenseLink.forStep(live)?.link, .status)
+    }
+
     func testFindsTheLoopFileFromAReviewWorkspace() {
         let loop = URL(fileURLWithPath: "/tmp/ws/loop")
         XCTAssertEqual(ProjectStatusStore.candidates(workspace: loop.appending(path: "blind")).first,

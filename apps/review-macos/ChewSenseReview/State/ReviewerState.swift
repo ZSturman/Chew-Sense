@@ -164,6 +164,35 @@ final class ReviewerState: ObservableObject {
         refreshSessions()
     }
 
+    /// The loop folder (`…/workspace/loop`) behind the current or remembered workspace.
+    var loopRoot: URL? {
+        ProjectStatusStore.candidates(workspace: workspaceRoot)
+            .map { $0.deletingLastPathComponent() }
+            .first { FileManager.default.fileExists(atPath: $0.appending(path: "assisted/sessions").path) }
+    }
+
+    /// Switches to the loop's `assisted` or `blind` workspace without a folder picker.
+    @discardableResult
+    func openReviewWorkspace(_ kind: String) -> Bool {
+        guard ["assisted", "blind"].contains(kind), let loop = loopRoot else {
+            statusMessage = "Choose the ChewSense workspace once (File → Open Workspace…) so Review can find the loop folder."
+            return false
+        }
+        let target = loop.appending(path: kind)
+        setWorkspaceRoot(target)
+        return workspaceRoot == target
+    }
+
+    /// Opens one recording in the right workspace (from a link or a shared next step).
+    func openSession(_ id: String, workspace kind: String) {
+        guard openReviewWorkspace(kind) else { return }
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            statusMessage = "\(id) is not in the \(kind) workspace yet."
+            return
+        }
+        if selectedSession?.id != id { loadSession(session) }
+    }
+
     func refreshSessions() {
         guard let root = workspaceRoot else { sessions = []; return }
         sessions = SessionDiscovery(paths: WorkspacePaths(root: root)).listSessions()

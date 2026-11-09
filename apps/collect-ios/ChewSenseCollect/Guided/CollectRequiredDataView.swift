@@ -1,8 +1,10 @@
 import SwiftUI
+import UIKit
 
 /// "Collect Required Data": the experiments the Mac currently needs.
 struct CollectRequiredDataView: View {
     @ObservedObject var services: CollectServices
+    @State private var openedExperiment: String?
 
     var body: some View {
         List {
@@ -18,7 +20,7 @@ struct CollectRequiredDataView: View {
                 if let pipeline = services.connection.pipeline {
                     VStack(alignment: .leading, spacing: 8) {
                         if let project = services.connection.project {
-                            ProjectStatusCard(status: project, app: "collect", stale: isOffline)
+                            ProjectStatusCard(status: project, app: "collect", stale: isOffline, opener: opener)
                         } else {
                             Text(pipeline.nextAction).font(.callout.weight(.semibold))
                         }
@@ -109,9 +111,29 @@ struct CollectRequiredDataView: View {
                 Text(catalogFooter)
             }
         }
+        .navigationDestination(item: $openedExperiment) { id in
+            if let entry = services.catalog.catalog.entries.first(where: { $0.definition.experimentID == id }) {
+                ExperimentPreparationView(services: services, entry: entry)
+            }
+        }
         .navigationTitle("Collect Required Data")
         .refreshable { await services.synchronize() }
         .task { await services.synchronize() }
+    }
+
+    /// Collect steps open their experiment here; Live steps open Live when it is installed.
+    private func opener(_ step: ProjectStatus.Step) -> (label: String, action: () -> Void)? {
+        guard let (app, link) = ChewSenseLink.forStep(step) else { return nil }
+        switch (app, link) {
+        case ("collect", .experiment(let id)):
+            guard services.catalog.catalog.entries.contains(where: { $0.definition.experimentID == id }) else { return nil }
+            return ("Prepare in this app", { openedExperiment = id })
+        case ("live", _):
+            guard let url = ChewSenseLink.url(app: "live", link), UIApplication.shared.canOpenURL(url) else { return nil }
+            return ("Open Chew Sense Live", { UIApplication.shared.open(url) })
+        default:
+            return nil
+        }
     }
 
     private var isOffline: Bool {

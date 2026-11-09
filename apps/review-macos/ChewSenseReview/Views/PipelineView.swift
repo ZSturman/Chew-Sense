@@ -357,7 +357,7 @@ struct ProjectStatusBox: View {
     var body: some View {
         GroupBox {
             if let status = project.status {
-                ProjectStatusCard(status: status, app: "review")
+                ProjectStatusCard(status: status, app: "review", opener: opener)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("No shared status yet. It appears once the loop service is running (tools/loop-service start) or after `chewsense-vision loop project-status`.")
@@ -369,6 +369,12 @@ struct ProjectStatusBox: View {
         }
         .onAppear { project.start(workspace: state.workspaceRoot) }
         .onChange(of: state.workspaceRoot) { _, root in project.start(workspace: root) }
+    }
+
+    /// Review steps open their recording in the right workspace; other steps happen on the iPhone.
+    private func opener(_ step: ProjectStatus.Step) -> (label: String, action: () -> Void)? {
+        guard case .session(let id, let workspace)? = ChewSenseLink.forStep(step).map({ $0.link }) else { return nil }
+        return ("Open \(workspace == "blind" ? "blind review" : "recording")", { state.openSession(id, workspace: workspace) })
     }
 }
 

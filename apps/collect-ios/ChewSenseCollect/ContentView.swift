@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var selectedFolder: URL?
     @State private var showAirPods = false
     @State private var hasAcceptedDisclaimer = UserDefaults.standard.bool(forKey: "hasAcceptedDisclaimer")
+    /// A `chewsense-collect://` link opened from Live or the shared status card.
+    @State private var linked: LinkedRoute?
     
     init() {
         let recorder = RecorderController()
@@ -32,6 +34,33 @@ struct ContentView: View {
         .environmentObject(controller)
         .environmentObject(services)
         .sheet(isPresented: $showAirPods) { AirPodsConnectionSheet(controller: controller) }
+        // Links open over the current screen; closing returns to it. They never start recording.
+        .sheet(item: $linked) { route in
+            NavigationStack {
+                Group {
+                    switch route.link {
+                    case .experiment(let id):
+                        if let entry = services.catalog.catalog.entries.first(where: { $0.definition.experimentID == id }) {
+                            ExperimentPreparationView(services: services, entry: entry)
+                        } else {
+                            ContentUnavailableView("Experiment not available", systemImage: "questionmark.folder",
+                                                   description: Text("Sync with the Mac to receive the current requests."))
+                        }
+                    default:
+                        CollectRequiredDataView(services: services)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Close") { linked = nil } }
+                }
+            }
+            .environmentObject(controller)
+            .environmentObject(services)
+        }
+        .onOpenURL { url in
+            guard hasAcceptedDisclaimer, let parsed = ChewSenseLink.parse(url), parsed.app == "collect" else { return }
+            linked = LinkedRoute(link: parsed.link)
+        }
         .alert(item: $controller.alert) { a in
             Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
         }
@@ -170,3 +199,8 @@ struct ContentView: View {
 //        }
 //    }
 //}
+
+struct LinkedRoute: Identifiable {
+    let id = UUID()
+    let link: ChewSenseLink
+}
