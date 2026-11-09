@@ -154,6 +154,70 @@ struct DeviceRelayTests {
         report(["archive_bytes": item.size ?? 0, "cut_at": cut, "seconds": Date().timeIntervalSince(started)])
     }
 
+    /// Lets the network watcher report the current path first.
+    private func metered() async throws -> Bool {
+        _ = LoopNetwork.shared
+        try await Task.sleep(for: .seconds(2))
+        return LoopNetwork.shared.isMetered
+    }
+
+    /// Sends until the Mac confirms, allowing for the 30-second search interval.
+    private func sendDirect(_ folder: URL) async throws -> (UploadManager, LoopLink, TimeInterval) {
+        let (uploads, link) = manager(fresh: true)
+        let started = Date()
+        await uploads.requeue(folder)?.value
+        for _ in 0..<4 where ![.received, .processing, .processed].contains(uploads.item(for: folder)?.state) {
+            try await Task.sleep(for: .seconds(31))
+            await uploads.run()
+        }
+        return (uploads, link, Date().timeIntervalSince(started))
+    }
+
+    /// iPhone on cellular only, Mac at home: the recording waits on the phone.
+    /// Nothing goes over cellular, neither to the Mac across the internet nor to the home server.
+    @Test func cellular() async throws {
+        guard Self.phase == "cellular" else { return }
+        let folder = try folder()
+        let onCellular = try await metered()
+        #expect(onCellular, "the iPhone is not on a metered (cellular) connection")
+        let (uploads, link) = manager(fresh: true)
+        await uploads.requeue(folder)?.value
+        let item = try #require(uploads.item(for: folder))
+        #expect(item.state == .queued)
+        #expect(item.depositID == nil)
+        #expect(item.attempts == 0)
+        #expect(item.bytesSent == 0)
+        report(["metered": onCellular, "message": item.message ?? "", "mac_route": link.pairing?.current.kind.rawValue ?? ""])
+    }
+
+    /// Mac joined to this iPhone's Personal Hotspot: the phone finds it at its new
+    /// address and sends directly, although the phone's own internet is cellular.
+    @Test func hotspot() async throws {
+        guard Self.phase == "hotspot" else { return }
+        let folder = try folder()
+        let onCellular = try await metered()
+        let (uploads, link, seconds) = try await sendDirect(folder)
+        let item = try #require(uploads.item(for: folder))
+        #expect([.received, .processing, .processed].contains(item.state))
+        #expect(item.depositID == nil)
+        report(["metered": onCellular, "mac_host": link.pairing?.host ?? "", "mac_route": link.pairing?.current.kind.rawValue ?? "",
+                "seconds": seconds, "state": item.state.rawValue])
+    }
+
+    /// Back on home Wi-Fi: straight to the Mac again.
+    @Test func wifi() async throws {
+        guard Self.phase == "wifi" else { return }
+        let folder = try folder()
+        let onCellular = try await metered()
+        #expect(!onCellular)
+        let (uploads, link, seconds) = try await sendDirect(folder)
+        let item = try #require(uploads.item(for: folder))
+        #expect([.received, .processing, .processed].contains(item.state))
+        #expect(item.depositID == nil)
+        report(["metered": onCellular, "mac_host": link.pairing?.host ?? "", "mac_route": link.pairing?.current.kind.rawValue ?? "",
+                "seconds": seconds, "state": item.state.rawValue])
+    }
+
     /// Mac away: put a resend in the app's own queue; it lands on the home server.
     @Test func backgroundDeposit() async throws {
         guard Self.phase == "background-deposit" else { return }

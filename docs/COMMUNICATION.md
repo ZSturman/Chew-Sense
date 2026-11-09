@@ -292,4 +292,8 @@ away" means its loop service was stopped.
 | Mac reachable: 166 MB straight to it, cut at 40 MB, resumed at the Mac's offset, 12.6 s; no deposit on the Pi | `build/Device-Relay-direct.xcresult` | Pass |
 | Background retry: an item in the app's own queue deposited while the Mac was away; after the Mac collected it, only the registered background task (launched through the scheduler's development hook) brought it to processed | `build/Device-Relay-background-*.xcresult` | Pass |
 | iOS accepts the background task request (identifier and background mode) | `build/Device-Routes-Collect.xcresult` | Pass |
-| Switching Wi-Fi, hotspot and cellular; phone offline while recording; iOS choosing when to run the background task | needs hands on the phone, or time | Not run on the device |
+| iPhone on cellular, Mac away: recording waits; nothing sent to the Mac or the Pi over cellular; 0 attempts | `build/Device-Network-cellular.xcresult`; Pi deposit count unchanged | Pass |
+| Mac joined to the iPhone's Personal Hotspot (phone's internet cellular): found the Mac at its hotspot address and sent 166 MB directly in 9.4 s; nothing via the Pi | `build/Device-Network-hotspot.xcresult` | Pass |
+| Both back on home Wi-Fi: direct again, 10.1 s | `build/Device-Network-wifi.xcresult` | Pass |
+| A USB cable gives the iPhone a local link to the Mac: with the Mac running, a cabled phone on cellular still sends directly over the cable (no cellular data), which is correct | `build/Device-Network-cellular.xcresult` (first run) | Observed |
+| Recording while the phone is offline; iOS choosing on its own when to run the background task | not run (needs a real take, or hours of waiting) | Not verified on the device |

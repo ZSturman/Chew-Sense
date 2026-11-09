@@ -19,9 +19,11 @@
   session record's original `archive_sha256`/`received_from`. The collector
   removes its empty working folder after acknowledging. Cancelling a transfer
   (app closed) is not counted as a failure.
-- **Not run on the device:** switching Wi-Fi, hotspot and cellular; recording
-  while the phone is offline; iOS choosing to run the background task on its
-  own.
+- **Network switching on the device** (guided with you): cellular with the Mac
+  away → waits, nothing over cellular; Mac on the iPhone's hotspot → direct to
+  its new address; back on Wi-Fi → direct. All passed; no Pi deposits.
+- **Not run on the device:** recording while the phone is offline; iOS choosing
+  to run the background task on its own.
 
 ---
 
