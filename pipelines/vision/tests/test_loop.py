@@ -174,6 +174,28 @@ def test_natural_meal_update_meets_marker_gate_without_rewriting_v1(loop):
     assert ex.definition_sha256(registry.load("natural-meal", 1)) == v1_digest
 
 
+@pytest.mark.parametrize("name", ["baseline-90s", "talking", "chewing-pace", "head-movement"])
+def test_one_nod_updates_meet_marker_gate_and_keep_activities(loop, name):
+    registry = registry_for(loop)
+    original = registry.load(name, 1)
+    v1_digest = ex.definition_sha256(original)
+    path = REPO / f"pipelines/vision/configs/experiment-updates/{name}-v2.json"
+    revised = registry.add(json.loads(path.read_text()))
+    markers = [a for a in revised.activities if a.sync_marker]
+    assert revised.version == 2 and revised.completion.required_sync_markers == MIN_MARKERS == len(markers)
+    assert all("Nod down once" in a.instruction or "one downward nod" in a.instruction for a in markers)
+
+    def core(definition):  # everything except nods and the stillness framing them
+        return [(a.id, a.kind, a.duration_s, a.intended_label) for a in definition.activities
+                if not a.sync_marker and not a.id.startswith("still-") or a.id in {"still-1", "still-2"}]
+    assert core(revised) == core(original)
+    registry.publish(name, 2, by="test")
+    catalog = LoopController(loop, loop_config()).publish_catalog({}, {})
+    entry = next(e for e in catalog["experiments"] if e["definition"]["experiment_id"] == name)
+    assert entry["definition"]["version"] == 2
+    assert ex.definition_sha256(registry.load(name, 1)) == v1_digest
+
+
 def test_bundled_ios_catalog_matches_seed_definitions():
     bundled = json.loads(BUNDLED_CATALOG.read_text())
     shipped = {e["definition"]["experiment_id"]: e["definition_sha256"] for e in bundled["experiments"]}
