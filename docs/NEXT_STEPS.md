@@ -14,7 +14,13 @@
   `pipelines/motion/tests/test_eating_detection.py` 26 passed.
   `LoopLinkTests/phoneAcceptsOnlyAValidHomeServerOfferAndForgetsIt` fails with
   and without this change (pre-existing).
-- **Not done:** no device install or real guided take; Review was not changed
+- **Installed:** Collect 1.2 (9) (`cbf2fee`) development build on the iPhone 16 Pro Max.
+  Archived and signature-verified in `build/StoreRefresh/chew-ios-1.2-9/` (receipt
+  included). **TestFlight upload failed** again: "exportArchive Failed to Use Accounts"
+  (Xcode has no signed-in Apple account). TestFlight still serves 1.2 (7).
+  To upload: sign in under Xcode → Settings → Accounts with the account that has App
+  Store Connect access to team MF8J7AY2X3, then Organizer → 1.2 (9) → Distribute.
+- **Not done:** no real guided take on the device yet; Review was not changed
   (instructed spans appear there as phone labels).
 
 ---
