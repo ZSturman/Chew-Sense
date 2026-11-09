@@ -1,3 +1,22 @@
+# Checkpoint — November 8, 2026 (close): cleanup and Collect 1.2 (8)
+
+- Removed, with your approval, the four empty legacy iPhone apps after re-checking their
+  bundle IDs and data (only data: a 3 KB idle log, backup verified byte-identical).
+  On the phone now: Chew Sense Collect 1.2 (8), Chew Sense Live 1.0 (1), and Xcode's UI-test runner.
+- Collect 1.2 (8) (`125b0df`): archived and signature-verified
+  (`build/StoreRefresh/chew-ios-1.2-8/`, receipt included); development build installed on the
+  iPhone; recordings still present. **TestFlight upload failed:** Xcode has no signed-in
+  Apple account ("App Store Connect access for MF8J7AY2X3 is required"). TestFlight
+  still serves 1.2 (7). Internal-group assignment waits on the upload.
+- Device checks after reinstall (no other project using the phone): Live fetched the
+  shared status with its existing pairing; Collect showed the card; Collect → experiment
+  and Collect → Live links passed.
+- Cleanup: removed six uncited simulator result bundles and a stale Oct 26 Collect build
+  in Xcode's default build folder (~612 MB). Kept cited results, release archives, stable build folders,
+  `ChewSense copy/` and `ChewSense Collection/`.
+
+---
+
 # Checkpoint — November 8, 2026 (late): one ecosystem — names, links, installs
 
 Full inventory and how to move between apps: [APPS.md](APPS.md).

@@ -9,7 +9,7 @@ documentation alone.
 
 | App | Platform | Purpose | Installed at | Version | Status |
 | --- | --- | --- | --- | --- | --- |
-| **Chew Sense Collect** | iOS | Guided recordings (video + AirPods motion), Mac pairing, upload, "What happens next" | iPhone (development build, commit `b079810`) | 1.2 (7) | Active; TestFlight 1.2 (7) is the same version without the Nov 8 links |
+| **Chew Sense Collect** | iOS | Guided recordings (video + AirPods motion), Mac pairing, upload, "What happens next" | iPhone (development build of `125b0df`) | 1.2 (8) | Active. TestFlight still 1.2 (7); 1.2 (8) archived in `build/StoreRefresh/chew-ios-1.2-8/`, upload pending an Xcode account sign-in |
 | **Chew Sense Live** | iOS | AirPods-only model checks (ChewNet + experimental eating detector in shadow mode), "Where we are" | iPhone (development build, `b079810`) | 1.0 (1) | Active, experimental model |
 | **Chew Sense Review** | macOS | Blind and assisted labelling, chewing spans, Pipeline and Training & Evaluation windows | `/Applications/Chew Sense Review.app` (Release, Apple Development signed, `b079810`) | 1.0 (1) | Active |
 | **Chew Sense loop service** | macOS background (LaunchAgent `com.chewsense.loop`) | Receives uploads, runs Vision (offline sandbox) and proposals, review tasks, catalog, shared status, phone API on port 48765 (Bonjour `_chewsense._tcp`) | Runs from the repository `.venv` (`chewsense-vision loop serve`) | repo `HEAD` | Active; restarted Nov 8 |
@@ -83,14 +83,14 @@ Links (only navigate; none starts a recording, sensor or model check):
 
 | Item | Where | Assessment |
 | --- | --- | --- |
-| Chew Sense Collect and Label 1.1 (6), `com.chewsense.archive.ChewSense-DataCollectionAndLabeling` | iPhone | Installed by the Oct 5 automated audit; same display name as the real Collect; empty Documents. **Remove.** |
-| ChewSense 1.0, `com.chewsense.archive.ChewSense` | iPhone | Hello-world placeholder from the audit; no data. **Remove.** |
-| ChewSense Model 1.0, `com.chewsense.archive.ChewSense-Model` | iPhone | Pre-Live debugging app from the audit; 3 KB idle log, backed up to `workspace/backups/iphone-legacy-apps-20261108/`. **Remove.** |
-| HowsMyEating_DataCollection, `com.audit.howsmyeating.20261006…` | iPhone | 2024 prototype installed by the audit; empty. **Remove.** |
+| Chew Sense Collect and Label 1.1 (6), `com.chewsense.archive.ChewSense-DataCollectionAndLabeling` | iPhone | Installed by the Oct 5 automated audit; same display name as the real Collect; empty Documents. **Removed Nov 8** (with your approval). |
+| ChewSense 1.0, `com.chewsense.archive.ChewSense` | iPhone | Hello-world placeholder from the audit; no data. **Removed Nov 8** (with your approval). |
+| ChewSense Model 1.0, `com.chewsense.archive.ChewSense-Model` | iPhone | Pre-Live debugging app from the audit; 3 KB idle log, backed up to `workspace/backups/iphone-legacy-apps-20261108/`. **Removed Nov 8** (with your approval). |
+| HowsMyEating_DataCollection, `com.audit.howsmyeating.20261006…` | iPhone | 2024 prototype installed by the audit; empty. **Removed Nov 8** (with your approval). |
 | ChewSenseCollectUITests-Runner | iPhone | Xcode UI-test runner; reinstalled by every device UI test. Harmless; remove after testing if unwanted. |
 | Review Debug / Release builds | `ChewSense/build/DerivedData-mac/Build/Products/` | Development builds; unregistered from Launch Services so links and Spotlight open `/Applications`. Regenerable. |
-| Collect 1.1 (6) build, Oct 26 | `~/Library/Developer/Xcode/DerivedData/ChewSenseCollect-…` (101 MB) | Stale default-location build artifact; safe to regenerate/delete. |
-| Collect 1.2 (7) archive | `ChewSense/build/StoreRefresh/chew-ios/ChewSenseCollect.xcarchive` | TestFlight archive; **keep** (release record). |
+| Collect 1.1 (6) build, Oct 26 | `~/Library/Developer/Xcode/DerivedData/ChewSenseCollect-…` | Deleted Nov 8 (stale, regenerable). |
+| Collect 1.2 (7) and 1.2 (8) archives | `ChewSense/build/StoreRefresh/chew-ios*/` | Release records; **kept**. |
 | `ChewSense copy/` (7.1 GB) | workspace root | Older snapshot of the pre-monorepo tree (CycleReviewer, RealTime, Demo projects). Not installed anywhere. Keep until you decide; not part of the active system. |
 | `ChewSense Collection/` | workspace root | Archived legacy projects (ChewTracker, HowsMyEating, VideoIMURecorder, sandboxes) with `com.chewsense.archive.*` IDs. Archive only. |
 | `~/Library/Preferences/com.zsdynamics.ChewTracker.plist` | Mac | 2023 ChewTracker settings; app not installed. Left alone. |
