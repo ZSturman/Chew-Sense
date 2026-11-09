@@ -12,6 +12,7 @@ struct HUDTop: View {
     let toggleSignals: () -> Void
 
     @State private var showExperiment = false
+    @State private var showFinish = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -41,12 +42,17 @@ struct HUDTop: View {
                     Button("Review chews", systemImage: "checklist") { toggleReviewQueue() }
                     Button(state.isBlindReview ? "Benchmark tools" : "Review tools", systemImage: "timer") { showExperiment.toggle() }
                         .popover(isPresented: $showExperiment) { ExperimentReviewPanel() }
-                    Button(state.overrides.fullVideoPassCompleted ? "Full pass checked" : "Full pass", systemImage: "film") {
-                        state.toggleFullVideoPassCompleted()
+                    if state.overrides.verified {
+                        Label("Finished", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .help("Saved as reviewed. Undo (⌘Z) before the Mac locks it in if you need to change something.")
+                    } else {
+                        Button("Finish review", systemImage: "checkmark.seal") { showFinish = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(state.finishBlocker != nil)
+                            .help(state.finishBlocker ?? "Confirm you watched the whole recording and marked every chew you saw.")
+                            .accessibilityIdentifier("finishReview")
                     }
-                    Button(state.overrides.verified ? "Verified" : "Verify", systemImage: "checkmark.seal") { state.toggleVerified() }
-                        .disabled(!state.overrides.verified && !state.canFinalizeReview)
-                        .help(state.completionStatus)
                     Menu {
                         Button("Rotate video right") { playback.rotateDisplay(by: 1) }
                         Button("Rotate video left") { playback.rotateDisplay(by: -1) }
@@ -62,6 +68,13 @@ struct HUDTop: View {
             Text(state.statusMessage).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .controlSize(.small)
+        .confirmationDialog("Finish this review?", isPresented: $showFinish) {
+            Button("Finish and save") { state.finishReview() }
+        } message: {
+            Text(state.isBlindReview
+                 ? "You watched the whole recording and marked every chew you saw, or there were none. It is saved as independent truth."
+                 : "You watched the whole recording and every suggested chew is accepted, fixed or rejected. It is saved as reviewed labels.")
+        }
         .padding(12)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
@@ -127,7 +140,7 @@ private struct ExperimentReviewPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(state.isBlindReview ? "Independent blind annotation" : "Assisted annotation").font(.headline)
-            Text("Count each chew at its closed end. Mark invisible or uncertain ranges before completing the full pass.")
+            Text("Count each chew at its closed end. Mark invisible or uncertain ranges, then press Finish review.")
                 .font(.caption).fixedSize(horizontal: false, vertical: true)
             Button(state.reviewTimerRunning ? "Pause labeling timer" : "Start labeling timer") { state.toggleReviewTimer() }
             Text("Saved active time: \(Int(state.overrides.reviewContext?.activeSeconds ?? 0)) s").font(.caption)

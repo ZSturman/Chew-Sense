@@ -190,7 +190,9 @@ final class ReviewContractTests: XCTestCase {
 
     func testGuidanceNamesTheRequiredReviewHandoff() {
         XCTAssertEqual(ReviewGuidanceStage.workspace.title, "Open a review workspace")
-        XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("finalize-session"))
+        // One confirmation; the Mac service freezes finished reviews (auto_finalize_verified_drafts).
+        XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("Finish review"))
+        XCTAssertTrue(ReviewGuidanceStage.finalize.nextStep.contains("automatically"))
         XCTAssertEqual(
             ReviewGuidanceStage.decisions(remainingStatus: "2 candidates remain").doneWhen,
             "Done when 2 candidates remain."
@@ -416,6 +418,26 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertEqual(samples.map(\.continuitySegment), [0, 0, 1])
         XCTAssertEqual(samples[0].accelerationMagnitude, 1.0, accuracy: 1e-9)
         XCTAssertEqual(samples[1].rotationMagnitude, 3.0, accuracy: 1e-9)
+    }
+
+    @MainActor
+    func testFinishReviewIsOneStepAndExplainsWhatBlocksIt() throws {
+        let fixture = try makeSessionFixture(chews: [chew("ch_0001", 0.10, 0.20, 0.30)])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        XCTAssertEqual(state.finishBlocker?.contains("1 suggested chew first"), true)
+        state.finishReview()
+        XCTAssertFalse(state.overrides.verified)  // blocked: nothing set, nothing saved as finished
+
+        state.acceptChew(id: "ch_0001")
+        XCTAssertNil(state.finishBlocker)
+        state.finishReview()
+        XCTAssertTrue(state.overrides.verified && state.overrides.fullVideoPassCompleted)
+        XCTAssertFalse(state.isDirty)
+        let saved = try XCTUnwrap(OverridePersistence.loadIfPresent(fixture.session.overridesURL))
+        // Exactly what the Mac's automatic lock-in requires (verified + full pass).
+        XCTAssertTrue(saved.verified && saved.fullVideoPassCompleted)
     }
 
     @MainActor

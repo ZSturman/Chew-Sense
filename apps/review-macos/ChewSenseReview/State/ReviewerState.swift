@@ -348,7 +348,7 @@ final class ReviewerState: ObservableObject {
             overrides = draft
             isDirty = false
             statusMessage = draft.verified
-                ? "Saved verified decision draft; run finalize-session to freeze it"
+                ? "Review finished and saved. The Mac locks it in automatically."
                 : "Saved review draft linked to \(shortHash(currentHash))"
             refreshSessions()
         } catch {
@@ -391,6 +391,35 @@ final class ReviewerState: ObservableObject {
     private func invalidateCompletion() {
         overrides.verified = false
         overrides.fullVideoPassCompleted = false
+    }
+
+    /// Why "Finish review" is not available yet; nil when it is.
+    var finishBlocker: String? {
+        if let candidateIntegrityError { return "This recording's files don't match (\(candidateIntegrityError))." }
+        guard let candidates else { return "Open a recording first." }
+        if candidates.requiresFullCoarseReview { return "Label the chewing sections first (Chewing spans)." }
+        let decidedChews = Set(overrides.chewDecisions.map(\.candidateID))
+        let chews = candidates.chews.filter { !decidedChews.contains($0.id) }.count
+        if chews > 0 { return "Accept, fix or reject the \(chews) suggested chew\(chews == 1 ? "" : "s") first (Review chews)." }
+        let decidedEntries = Set(overrides.foodEntryDecisions.map(\.candidateID))
+        let entries = candidates.foodEntries.filter { !decidedEntries.contains($0.id) }.count
+        if entries > 0 { return "Decide the \(entries) suggested food entr\(entries == 1 ? "y" : "ies") first (Review chews)." }
+        return nil
+    }
+
+    /// One confirmation replaces the separate full-pass and verify toggles:
+    /// "I watched the whole recording and marked every chew I saw (or none)."
+    /// Sets both, then saves; the Mac freezes finished reviews automatically.
+    func finishReview() {
+        if let finishBlocker {
+            statusMessage = finishBlocker
+            return
+        }
+        pushUndo()
+        overrides.fullVideoPassCompleted = true
+        overrides.verified = true
+        isDirty = true
+        saveOverrides()
     }
 
     var canFinalizeReview: Bool {

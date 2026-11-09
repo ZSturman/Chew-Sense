@@ -1,3 +1,18 @@
+# Checkpoint — November 8, 2026 (review simplification)
+
+- Review: **Finish review** replaces the separate Full pass and Verify toggles. One
+  confirmation ("you watched the whole recording and marked every chew you saw, or
+  none") sets both flags the Mac requires and saves; the loop service then freezes it
+  (`auto_finalize_verified_drafts: true`). The button explains what blocks it
+  ("Accept, fix or reject the 3 suggested chews first"). Instructions above the video
+  now say what to do in one line. Review 31/31 (+1 opt-in skip); reinstalled in
+  `/Applications` and reopened on the blind Not-eating review (draft unchanged).
+- TestFlight upload of Collect 1.2 (8) still fails after you signed in: "App Store
+  Connect access for MF8J7AY2X3 is required" (also outside the shell sandbox). The
+  signed-in account is not seen as having App Store Connect access for that team.
+
+---
+
 # Checkpoint — November 8, 2026 (close): cleanup and Collect 1.2 (8)
 
 - Removed, with your approval, the four empty legacy iPhone apps after re-checking their

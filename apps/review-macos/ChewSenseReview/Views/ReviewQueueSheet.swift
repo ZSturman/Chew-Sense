@@ -449,7 +449,7 @@ struct ReviewQueuePanel: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Food-entry events").font(.headline)
-                Text("No food-entry candidates. Use the full-video pass to add any missed events.")
+                Text("No food-entry candidates. Add any missed events while watching the whole recording.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button {
                     state.addBite(at: playback.currentTime)
@@ -463,26 +463,17 @@ struct ReviewQueuePanel: View {
 
     private var finalPassPane: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Final full-video pass").font(.headline)
-            Text(state.completionStatus)
+            Text("Finish").font(.headline)
+            Text(state.overrides.verified ? "Finished and saved."
+                 : state.finishBlocker ?? "Watch the whole recording, then press Finish review at the top.")
                 .font(.caption)
-                .foregroundStyle(state.canFinalizeReview ? .green : .secondary)
-            HStack {
-                Button {
-                    playback.clearLoop()
-                    playback.seekToStart()
-                    playback.play()
-                } label: {
-                    Label("Watch full video", systemImage: "film")
-                }
-                Toggle(
-                    "Pass complete",
-                    isOn: Binding(
-                        get: { state.overrides.fullVideoPassCompleted },
-                        set: { _ in state.toggleFullVideoPassCompleted() }
-                    )
-                )
-                .toggleStyle(.checkbox)
+                .foregroundStyle(state.overrides.verified || state.finishBlocker == nil ? .green : .secondary)
+            Button {
+                playback.clearLoop()
+                playback.seekToStart()
+                playback.play()
+            } label: {
+                Label("Watch whole recording", systemImage: "film")
             }
         }
     }

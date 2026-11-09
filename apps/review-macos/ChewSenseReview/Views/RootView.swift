@@ -144,8 +144,8 @@ struct RootView: View {
             Text(showAssist
                  ? "Play each clip and label what you see."
                  : state.isBlindReview
-                 ? "Independent benchmark: add actual chews in the phone-labeled sections, then check for misses elsewhere. Routine recordings use automatic proposals."
-                 : "Phone intervals are already imported. Jump to a section, check the automatic proposals, and correct mistakes. Instructions are navigation context, not labels.")
+                 ? "Play the recording and press Add chew for each chew you see (none is a valid answer). Then press Finish review."
+                 : "Check the suggested chews (Review chews): accept, fix or reject each, add any missed. Then press Finish review.")
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             GeometryReader { geometry in
@@ -421,7 +421,7 @@ enum ReviewGuidanceStage: Equatable {
         switch self {
         case .workspace: "Open a review workspace"
         case .decisions: "Review every proposed event"
-        case .finalize: "Freeze this completed review"
+        case .finalize: "Finish this review"
         }
     }
 
@@ -430,9 +430,9 @@ enum ReviewGuidanceStage: Equatable {
         case .workspace:
             "Choose the workspace containing sessions/raw and derived/vision. Then select a session with an immutable candidate revision."
         case .decisions:
-            "Use Review Queue to accept, edit, reject, or mark each chew and food-entry candidate uncertain or unobservable; then complete the full-video pass."
+            "Accept, fix or reject each suggested chew (Review chews), add any it missed, watch the whole recording, then press Finish review."
         case .finalize:
-            "Save Overrides, run audit-session, then run finalize-session for this exact candidate revision. Do not edit candidate files."
+            "Press Finish review. Recordings from the Mac service are checked and locked in automatically; a hand-prepared workspace still needs finalize-session."
         }
     }
 
