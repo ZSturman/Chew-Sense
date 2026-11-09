@@ -1,3 +1,25 @@
+# Note — November 9, 2026: why Vision misses chews at the start of a bout
+
+Seen by the wearer in the 90-Second Baseline (Nov 2) while reviewing; diagnosed
+from Vision's own `mouth_states.csv` / `mouth_cycles.json` (not the blind gold).
+- The cycle detector cuts a chew only at a **closed** state (opening score ≤ 0.5 z
+  and nearly still). Right after food goes in (24.2 s), chewing is fast and the jaw
+  turns from closing straight into the next opening. Consecutive chews then merge.
+- Examples: 26.14–27.97 s is read as one 1.83 s cycle and 29.90–31.87 s as one 1.97 s
+  cycle. Both exceed `cycle.max_duration_s` (1.5 s) and are discarded, about three
+  chews each. 24.0–26.1 s (food entering, hand at mouth) never reaches "closed".
+  The face is visible throughout.
+- **Not changed:** this recording is locked test, so tuning on it would invalidate
+  the evaluation. Candidate fix, to pre-register and develop on development
+  recordings with hand-marked chews: split over-long runs at closing→opening
+  turning points instead of dropping them.
+
+Review also gained an **Add food entry** button (B) in Watch and finish and a
+"Food in" flash on the video; entries within 0.3 s of another are refused so the
+draft stays valid.
+
+---
+
 # Checkpoint — November 9, 2026 (retired the mimed-chewing recording)
 
 - **Retired** `Not-eating-20261026-174428-C27C9380` (mimed chewing, no food) at the wearer's

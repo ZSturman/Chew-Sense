@@ -222,7 +222,7 @@ struct ChewDecisionCard: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button("Add a missed food entry at the playhead") { state.addBite(at: playback.currentTime) }
+            Button("Add a missed food entry at the playhead") { state.addFoodEntryChecked(at: playback.currentTime) }
                 .buttonStyle(.link).padding(.top, 6)
         }
         .padding(.top, 6)

@@ -28,7 +28,8 @@ are in the header's ⋯ menu. ⌘0 returns to Up next, ⌘1 shows all recordings
 Every marked chew flashes on the video itself (a glow and "Chew n of N" that
 peak when the mouth is open widest and fade at both closed ends, so back-to-back
 chews stay distinct; grey suggestion, green accepted, orange fixed, blue added;
-rejected and unclear chews never flash). The eye button on the video hides it.
+rejected and unclear chews never flash). Marked food entries show "Food in";
+Watch and finish has **Add food entry** (B) for missed ones. The eye button on the video hides it.
 In a blind review only your own marks flash. A speed control (¼× to 2×, also
 `<` / `>`) sits in every step and is remembered.
 

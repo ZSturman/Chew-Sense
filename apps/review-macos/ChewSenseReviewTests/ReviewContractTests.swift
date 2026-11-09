@@ -573,6 +573,30 @@ final class ReviewContractTests: XCTestCase {
     }
 
     @MainActor
+    func testFoodEntriesCanBeAddedAndFlashUnlessRejected() throws {
+        let fixture = try makeSessionFixture(chews: [], foodEntries: [
+            ["id": "fe_0000", "food_entry_ts": 1.0, "confidence": 0.9, "evidence": [String: Any]()],
+            ["id": "fe_0001", "food_entry_ts": 3.0, "confidence": 0.8, "evidence": [String: Any]()],
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        XCTAssertEqual(state.bites.count, 2)
+        XCTAssertFalse(state.addFoodEntryChecked(at: 1.1))   // already marked here
+        XCTAssertTrue(state.statusMessage.contains("already marked"))
+        XCTAssertTrue(state.addFoodEntryChecked(at: 2.0))
+        XCTAssertEqual(state.overrides.addedFoodEntries.map(\.foodEntryTS), [2.0])
+        state.rejectBite(id: "fe_0001")
+        state.saveOverrides()
+        XCTAssertNil(state.candidateIntegrityError)          // the draft still validates and saves
+        let flash = { (t: Double) in ChewOverlay.foodEntry(at: t, entries: state.bites, disposition: state.foodEntryDisposition(for:))?.id }
+        XCTAssertEqual(flash(1.2), "fe_0000")
+        XCTAssertNotNil(flash(2.1))
+        XCTAssertNil(flash(3.0))                              // rejected: no flash
+        XCTAssertNil(flash(5.0))
+    }
+
+    @MainActor
     func testPlaybackSpeedStepsAndIsRemembered() {
         let saved = UserDefaults.standard.object(forKey: PlaybackController.rateKey)
         defer { UserDefaults.standard.set(saved, forKey: PlaybackController.rateKey) }
@@ -994,7 +1018,8 @@ final class ReviewContractTests: XCTestCase {
         return url
     }
 
-    private func makeSessionFixture(chews: [[String: Any]], requiresFullCoarseReview: Bool = false,
+    private func makeSessionFixture(chews: [[String: Any]], foodEntries: [[String: Any]] = [],
+                                    requiresFullCoarseReview: Bool = false,
                                     loopWorkspace: String? = nil) throws -> (root: URL, session: Session) {
         var root = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -1004,7 +1029,8 @@ final class ReviewContractTests: XCTestCase {
         try FileManager.default.createDirectory(at: raw, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: derived, withIntermediateDirectories: true)
         let candidateURL = derived.appending(path: "candidates-v0001.json")
-        try makeCandidateArtifact(chews: chews, requiresFullCoarseReview: requiresFullCoarseReview).write(to: candidateURL)
+        try makeCandidateArtifact(chews: chews, foodEntries: foodEntries,
+                                  requiresFullCoarseReview: requiresFullCoarseReview).write(to: candidateURL)
         return (root, Session(
             id: "golden_session", rawDir: raw, derivedDir: derived,
             videoURL: nil, annotatedVideoURL: nil, framePredictionsCSV: nil,

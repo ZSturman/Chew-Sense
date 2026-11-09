@@ -869,6 +869,17 @@ final class ReviewerState: ObservableObject {
         isDirty = true
     }
 
+    /// Add a missed food entry (food going into the mouth) unless one is already marked here.
+    @discardableResult
+    func addFoodEntryChecked(at time: Double) -> Bool {
+        if let near = bites.first(where: { abs($0.ts - time) < 0.3 }) {
+            statusMessage = "Add blocked: a food entry (\(near.id)) is already marked within 0.3 s."
+            return false
+        }
+        addBite(at: time)
+        return true
+    }
+
     func addBite(at time: Double) {
         pushUndo()
         invalidateCompletion()

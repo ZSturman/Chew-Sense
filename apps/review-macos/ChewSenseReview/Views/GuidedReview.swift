@@ -392,13 +392,20 @@ struct GuidePanel: View {
                 Text(state.chews.isEmpty ? "You marked no chews." : "You marked \(state.chews.count) chew\(state.chews.count == 1 ? "" : "s").")
             } else {
                 StepHeading(number: stepNumber, title: "Watch for missed chews",
-                            detail: "Play the whole recording. Every marked chew flashes on the video. A chew with no flash is missed: pause where the mouth is open widest and press A (Add chew).")
+                            detail: "Play the whole recording. Every marked chew flashes on the video. A chew with no flash is missed: pause where the mouth is open widest and press A (Add chew). Food going into the mouth shows \"Food in\"; if it doesn't, pause there and press B (Add food entry).")
                 Text(decisionSummary).foregroundStyle(.secondary)
             }
             HStack {
                 playButton(fromStart: watched == 0).modifier(Prominence(primary: watched < 0.9 && state.finishBlocker == nil))
                 if !state.isBlindReview {
                     Button("Add chew", systemImage: "plus") { addChewAtPlayhead() }
+                        .help("Add a missed chew centred on the playhead (A)")
+                    Button("Add food entry", systemImage: "fork.knife") {
+                        playback.pause()
+                        state.addFoodEntryChecked(at: playback.currentTime)
+                    }
+                    .help("Mark the moment food goes into the mouth (B). Pause where it enters first.")
+                    .accessibilityIdentifier("addFoodEntry")
                 }
             }
             SpeedControl()
@@ -439,6 +446,8 @@ struct GuidePanel: View {
         var parts = ["\(accepted) accepted", "\(fixed) fixed", "\(rejected) rejected"]
         if unclear > 0 { parts.append("\(unclear) unclear") }
         parts.append("\(state.overrides.addedChews.count) added")
+        let food = state.bites.filter { state.foodEntryDisposition(for: $0.id) != .rejected }.count
+        parts.append("\(food) food entr\(food == 1 ? "y" : "ies")")
         return parts.joined(separator: " · ")
     }
 
@@ -678,7 +687,36 @@ struct ChewOverlay: View {
                      intensity: min(1, max(0.15, intensity)), disposition: chew.disposition)
     }
 
+    /// A marked food entry within 0.4 s of `time` (rejected or unclear ones are not shown).
+    static func foodEntry(at time: Double, entries: [ReviewFoodEntry],
+                          disposition: (String) -> ReviewDisposition?) -> ReviewFoodEntry? {
+        entries.filter {
+            let d = disposition($0.id)
+            return d == nil || d?.contributesPhaseSupervision == true
+        }
+        .first { abs($0.ts - time) <= 0.4 }
+    }
+
     var body: some View {
+        ZStack {
+            chewFlash
+            if Self.foodEntry(at: playback.currentTime, entries: state.bites,
+                              disposition: state.foodEntryDisposition(for:)) != nil {
+                Label("Food in", systemImage: "fork.knife")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.purple.opacity(0.85), in: Capsule())
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chewFlash: some View {
         if let flash = Self.flash(at: playback.currentTime, chews: state.chews) {
             let color = Self.color(flash.disposition)
             ZStack(alignment: .topLeading) {

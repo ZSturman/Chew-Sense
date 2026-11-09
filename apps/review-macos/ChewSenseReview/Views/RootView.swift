@@ -359,7 +359,7 @@ struct RootView: View {
             }
             return nil
         case ("b", _), ("B", _):
-            state.addBite(at: playback.currentTime); return nil
+            state.addFoodEntryChecked(at: playback.currentTime); return nil
         case ("n", _), ("N", _):
             if let c = state.selectNextChew() { playback.seek(to: c.startTS) }; return nil
         case ("p", _), ("P", _):
