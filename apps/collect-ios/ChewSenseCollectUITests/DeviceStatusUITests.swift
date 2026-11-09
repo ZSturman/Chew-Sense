@@ -29,4 +29,38 @@ final class DeviceStatusUITests: XCTestCase {
         add(shot)
         #endif
     }
+
+    /// Links between the installed apps: Collect opens an experiment's preparation
+    /// (never Start), and the Live link brings Chew Sense Live to the front.
+    @MainActor
+    func testLinksOpenTheRightInstalledApp() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("needs the paired physical device with Collect and Live installed")
+        #else
+        guard ProcessInfo.processInfo.environment["CHEWSENSE_DEVICE_LINKS"] == "1" else {
+            throw XCTSkip("CHEWSENSE_DEVICE_LINKS not set")
+        }
+        let collect = XCUIApplication()
+        collect.launch()
+        XCUIDevice.shared.system.open(URL(string: "chewsense-collect://experiment/talking")!)
+        let close = collect.buttons["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 15), "link did not open the experiment sheet")
+        let prompt = collect.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Nod down once")).firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "Talking preparation not shown")
+        XCTAssertFalse(collect.buttons["Stop"].exists)  // preparation only, nothing recording
+        let shot = XCTAttachment(screenshot: collect.screenshot())
+        shot.name = "collect-link-talking"
+        shot.lifetime = .keepAlways
+        add(shot)
+        close.tap()
+
+        let live = XCUIApplication(bundleIdentifier: "zachary-sturman.ChewSenseDebuggingModel")
+        XCUIDevice.shared.system.open(URL(string: "chewsense-live://status")!)
+        XCTAssertTrue(live.wait(for: .runningForeground, timeout: 15), "Chew Sense Live did not open")
+        let liveShot = XCTAttachment(screenshot: live.screenshot())
+        liveShot.name = "live-from-link"
+        liveShot.lifetime = .keepAlways
+        add(liveShot)
+        #endif
+    }
 }

@@ -60,6 +60,8 @@ dashboard:
 .venv/bin/chewsense-motion eating-export --install-live && .venv/bin/chewsense-motion eating-parity
 ```
 
+**Apps and how to move between them:** [docs/APPS.md](docs/APPS.md) lists every Chew Sense app, where it is installed, and the links between Collect, Live and Review (Review is installed in `/Applications/Chew Sense Review.app`).
+
 **Where we are (same message in every app, November 8).** The loop service
 computes one status: the current step (Collect → Label → Train → Test), the
 numbered next steps with the app each happens in, and plain answers to "Can I
