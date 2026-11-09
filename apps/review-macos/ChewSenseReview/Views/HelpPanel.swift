@@ -51,7 +51,7 @@ struct HelpPanel: View {
                     }
 
                     section(title: "Check suggestions") {
-                        bullet("The current suggestion loops automatically; the timeline zooms to fit it. Replay (R) starts it over; Play/Pause (Space) pauses or resumes.")
+                        bullet("The current suggestion loops automatically; the timeline zooms to fit it. Replay (R) starts it over; Play/Pause (Space) pauses or resumes. Turn Loop off to play each clip once and pause at its end.")
                         bullet("Yes (Return) accepts it and moves on. Not a chew rejects it. Can't tell marks it unclear or hidden.")
                         bullet("Fix the timing nudges each marker by a frame, or sets it to the paused video position.")
                         bullet("Hold S, P, or E and tap ← / → to nudge that marker by one frame (⇧ for 5 frames).")

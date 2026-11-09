@@ -104,7 +104,7 @@ final class ReviewContractTests: XCTestCase {
     }
 
     @MainActor
-    func testSuggestionClipReplaysAndResumesAsALoop() async throws {
+    func testSuggestionClipReplaysResumesAndOptionallyLoops() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -141,6 +141,22 @@ final class ReviewContractTests: XCTestCase {
         ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
         XCTAssertEqual(playback.currentTime, clip.start, accuracy: 0.001)
         XCTAssertTrue(playback.isLooping)
+        playback.pause()
+
+        // Loop off: the clip plays once and waits at its end; Play then starts it over.
+        let savedLoop = UserDefaults.standard.object(forKey: ChewCue.loopKey)
+        defer { UserDefaults.standard.set(savedLoop, forKey: ChewCue.loopKey) }
+        UserDefaults.standard.set(false, forKey: ChewCue.loopKey)
+        ChewCue.loop(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertFalse(playback.isLooping)
+        try await waitForPlayback("paused at clip end, \(playback.currentTime)") { !playback.isPlaying }
+        XCTAssertEqual(playback.currentTime, clip.end, accuracy: 0.05)
+        ChewCue.toggle(chew, state: state, playback: playback, viewport: viewport)
+        XCTAssertTrue(playback.isPlaying)
+        XCTAssertEqual(playback.currentTime, clip.start, accuracy: 0.001)
+        // Switching Loop on mid-clip takes effect without restarting.
+        playback.setLooping(true)
+        XCTAssertTrue(playback.isLooping && playback.isPlaying)
         playback.pause()
     }
 
