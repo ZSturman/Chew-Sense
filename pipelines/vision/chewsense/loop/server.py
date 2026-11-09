@@ -1,6 +1,9 @@
-"""Local service connecting Collect (iPhone) and Review (Mac).
+"""Local service connecting Collect and Live (iPhone) with Review (Mac).
 
-* Device API — HTTPS on the LAN, bearer token from explicit pairing.
+* Device API — HTTPS on every interface (local network and, when Tailscale
+  is running, the tailnet), bearer token from explicit pairing. Paired phones
+  receive the Mac's current routes (``routes.py``) so they find it again after
+  it changes network.
 * Admin API  — plain HTTP bound to 127.0.0.1 only, authenticated with the
   token in ``loop/service/admin.token`` (mode 0600), used by Review.
 
@@ -33,6 +36,7 @@ from .processing import Processor
 from .project_status import compute_project_status, project_status_path, write_project_status
 from .review_tasks import review_state
 from .requirements import build_requirements
+from .routes import RouteReporter
 from .store import LoopPaths, read_json
 from .training import launch
 
@@ -70,6 +74,8 @@ class LoopService:
                                          trainer=trainer if trainer is not None else self.schedule_training)
         self.processor = Processor(paths, config, vision_runner=vision_runner, proposer=proposer,
                                    on_session_done=lambda _sid: self._analysis_requested.set())
+        # Set by serve() once the device port is known; tells paired phones how to find this Mac.
+        self.routes: RouteReporter | None = None
         if not paths.catalog.exists():
             self.analyze()
 
@@ -251,7 +257,10 @@ class LoopService:
         }
         return {"service": "chewsense-loop", "api_version": API_VERSION, "state": status.get("state"),
                 "pending": len(status.get("pending", [])), "catalog_version": catalog.get("catalog_version"),
-                "pipeline": pipeline}
+                "pipeline": pipeline, "routes": self.current_routes()}
+
+    def current_routes(self) -> list[dict[str, Any]]:
+        return self.routes.routes() if self.routes else []
 
 
 def _make_handler(service: LoopService, *, admin: bool):
@@ -316,7 +325,8 @@ def _make_handler(service: LoopService, *, admin: bool):
                 device_id, name, proof = body.get("device_id"), body.get("device_name", "iPhone"), body.get("proof")
                 if not (isinstance(device_id, str) and _SESSION.match(device_id) and isinstance(proof, str)):
                     raise ValueError("device_id and proof are required")
-                return self._send(200, service.devices.pair(device_id, str(name), proof))
+                reply = service.devices.pair(device_id, str(name), proof)
+                return self._send(200, {**reply, "routes": service.current_routes()})
             auth = service.devices.authenticate(self._token())
             if auth is None:
                 return self._send(401, {"error": "pair this iPhone with the Mac first"})
@@ -415,6 +425,8 @@ def serve(service: LoopService, *, host: str = "0.0.0.0", device_port: int | Non
     device = _Server((host, device_port), _make_handler(service, admin=False))
     device.socket = service.identity.ssl_context().wrap_socket(device.socket, server_side=True)
     admin = _Server(("127.0.0.1", admin_port), _make_handler(service, admin=True))
+    if service.routes is None:
+        service.routes = RouteReporter(device.server_address[1])
     stop = threading.Event()
     for target in (device.serve_forever, admin.serve_forever):
         threading.Thread(target=target, daemon=True).start()

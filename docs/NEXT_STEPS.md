@@ -1,3 +1,79 @@
+# Checkpoint — November 9, 2026: phone ↔ Mac communication redesigned
+
+Decision record and rules: [COMMUNICATION.md](COMMUNICATION.md). In short: the
+phone is offline-first, and the Mac is an optional worker reached by identity
+(pinned certificate) over the routes it reports, never by a typed address.
+
+- **Mac:** `loop/routes.py` reports routes (LAN address, `.local` name, tailnet
+  MagicDNS name) to paired devices in the pairing reply and `/v1/status`. The
+  service was restarted in place with your approval. Certificate, key, admin
+  token, the three pairings, ports and catalog v13 were unchanged.
+- **Phones:** one shared client, `apps/shared-capture/LoopLink.swift`, with the
+  shared pairing form and Details view in `LoopPairingForm.swift`. Collect's
+  `MacConnection` and Live's `LiveMacStatus` are thin wrappers, so Live now
+  re-finds the Mac too.
+- **Outbox:** sending is on by default. A Mac that is away never fails a
+  recording (stays queued, offset kept). Nothing is sent during a recording.
+  Recordings never cross cellular over the tailnet route. The app keeps sending
+  briefly after it closes, and a background task (`com.chewsense.collect.sync`)
+  retries. The Mac screen shows status and one action; addresses are under
+  Details.
+- **Tests:** Python loop 81 passed (route tests added). Collect unit 41 passed
+  (+2 opt-in). Collect UI 11 passed (+2 device-only). Live 42 passed
+  (+1 device-only). `tools/loop-e2e` passed: real Collect code against an
+  isolated service with synthetic recordings (stale address, Mac unreachable,
+  two queued recordings, processing, duplicate re-send). Results:
+  `build/LoopE2E-Collect.xcresult`, `build/Connectivity-*.xcresult`.
+- **iPhone:** Collect left the stale hotspot address and found the Mac on home
+  Wi-Fi by itself; a real recording showed "Processed on the Mac". Live, which
+  timed out this morning, fetched the status. See
+  `build/Device-Routes-Collect.xcresult` and `build/Device-Status-Live.xcresult`.
+  Development builds of both apps are installed.
+- **Blocked:** the tailnet route. iOS ATS rejects the self-signed certificate
+  on `100.x`/`*.ts.net` (`-9802`). An ATS exception was refused as weakening
+  TLS and is not in the apps. Options are in COMMUNICATION.md. The
+  recommendation is the Pi mailbox.
+- **Pi mailbox:** approved for design and synthetic testing; designed in
+  COMMUNICATION.md, not built. It waits for the Home Services working tree
+  (another session's uncommitted router/auth/config edits). Deployment needs
+  another confirmation.
+- Not verified on the device: Mac asleep, iPhone offline, hotspot with the new
+  build, interrupted device transfer, background task timing.
+- Nothing committed.
+
+---
+
+# Checkpoint — November 9, 2026: Collect lighting and Mac reconnect
+
+**Lighting.** Brightness is now measured on the detected face, not the whole
+frame, so a dark background no longer counts against a lit face. Dim light
+never pauses a guided run while the face is still detected. It is only a
+blocking issue (`low_light` plus `face_missing`) when the face cannot be
+found. Dim time is still reported as `low_light_fraction`. When a dim frame
+shows no face, detection is retried on a brightened copy. The recorded video
+is unchanged. The new **Screen light** (bulb button / preflight toggle) draws
+a white frame and sets the display to full brightness while recording. The
+front camera also enables the system low-light boost where supported. The
+`min_brightness` catalog value (0.15) is unchanged but now applies to face
+luma. Thresholds still need checking in real dim rooms.
+
+**Mac not reachable.** The pairing saved a fixed IP, and the app never looked
+again, so it failed whenever the Mac changed networks (on Nov 9 the Mac was on
+the iPhone's Personal Hotspot, 172.20.10.13). Collect now searches over
+Bonjour and the Mac's `.local` name when the saved address fails (at most
+every 30 s). It switches addresses only when the Mac presents the pinned
+certificate and accepts the token. The Mac Connection screen offers
+**Find my Mac again**, a new-address field (no re-pairing), and fix-it steps.
+Live has its own connection code and was not changed.
+
+Validation: `GuidedCollectionTests` 21/21 on the iPhone 17 Pro simulator
+(2 new lighting tests); development build installed on the iPhone. After
+launch the iPhone reconnected on its own (`devices.json` last_seen moved from
+02:28 to 11:14:47 UTC, no re-pairing). A dim-room recording still needs
+confirming on the device.
+
+---
+
 # Note — November 9, 2026: why Vision misses chews at the start of a bout
 
 Seen by the wearer in the 90-Second Baseline (Nov 2) while reviewing; diagnosed

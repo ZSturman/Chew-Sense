@@ -6,6 +6,16 @@
 	<false/>
 	<!-- Merged with the generated Info.plist. Arrays cannot be expressed as
 	     INFOPLIST_KEY_ build settings, so Bonjour discovery lives here. -->
+	<!-- Lets iOS resume sending queued recordings to the Mac while the app is
+	     closed (CollectServices.backgroundSyncTask). No entitlement involved. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.chewsense.collect.sync</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_chewsense._tcp</string>

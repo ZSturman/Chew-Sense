@@ -799,12 +799,14 @@ class _Client:
         return response.status, payload
 
 
-def test_end_to_end_pair_upload_resume_and_process(tmp_path, video):
+def test_end_to_end_pair_upload_resume_and_process(tmp_path, video, monkeypatch):
     from chewsense.loop.server import LoopService, serve
 
     paths = LoopPaths(tmp_path / "loop")
     config = loop_config(**{"service.max_chunk_bytes": 4096, "roles.boosted_evaluation_fraction": 1.0})
     service = LoopService(paths, config, vision_runner=fake_vision(), trainer=lambda _p: None, proposer=fake_proposer())
+    monkeypatch.setattr("chewsense.loop.routes.DEFAULT_PROBES", {
+        "lan": lambda: "192.168.1.20", "local": lambda: None, "tailnet": lambda: "mac.tail1.ts.net"})
     device, admin, stop = serve(service, host="127.0.0.1", device_port=0, admin_port=0, advertise=False)
     try:
         client = _Client(device.server_address[1])
@@ -818,7 +820,13 @@ def test_end_to_end_pair_upload_resume_and_process(tmp_path, video):
                                                     "proof": pairing_proof(code, "phone-1", fingerprint)})
         assert status == 200
         assert paired["server_proof"] == server_proof(code, "phone-1", fingerprint, paired["device_token"])
+        # Paired phones learn every route to this Mac; none is offered before pairing.
+        port = device.server_address[1]
+        assert paired["routes"] == [{"kind": "lan", "host": "192.168.1.20", "port": port},
+                                    {"kind": "tailnet", "host": "mac.tail1.ts.net", "port": port}]
+        assert "routes" not in client("GET", "/v1/hello")[1]
         client = _Client(device.server_address[1], fingerprint, paired["device_token"])
+        assert client("GET", "/v1/status")[1]["routes"] == paired["routes"]
         catalog = client("GET", "/v1/catalog")[1]
         assert catalog["schema_version"] == "guided-catalog/1"
         assert len(catalog["experiments"]) == len(list(ex.SEED_DIR.glob("*.json")))
@@ -883,6 +891,46 @@ def test_checksum_mismatch_restarts_upload(tmp_path):
     assert service.processor.jobs() == []
     with pytest.raises(ValueError):
         service.append_chunk(upload["upload_id"], 0, b"abcdef")
+
+
+def test_routes_are_cached_and_survive_broken_probes(monkeypatch):
+    from chewsense.loop import routes as rt
+
+    calls = []
+
+    def lan():
+        calls.append("lan")
+        return "10.0.0.5"
+
+    def broken():
+        raise OSError("tailscale missing")
+
+    reporter = rt.RouteReporter(48765, ttl_s=60, probes={"lan": lan, "local": lambda: None, "tailnet": broken})
+    assert reporter.routes() == [{"kind": "lan", "host": "10.0.0.5", "port": 48765}]
+    reporter.routes()
+    assert calls == ["lan"]  # cached; status polling never shells out each time
+
+
+def test_tailnet_name_is_read_from_the_tailscale_cli(monkeypatch):
+    from types import SimpleNamespace
+
+    from chewsense.loop import routes as rt
+
+    def status(code=0, **body):
+        out = SimpleNamespace(returncode=code, stdout=json.dumps(body))
+        monkeypatch.setattr(rt.subprocess, "run", lambda *a, **k: out)
+
+    monkeypatch.setattr(rt, "_tailscale", lambda: "/usr/local/bin/tailscale")
+    status(BackendState="Running", Self={"DNSName": "mac.tailef7acc.ts.net."})
+    assert rt.tailnet_name() == "mac.tailef7acc.ts.net"
+    status(BackendState="Stopped", Self={"DNSName": "mac.tailef7acc.ts.net."})
+    assert rt.tailnet_name() is None
+    status(BackendState="Running", Self={"DNSName": ""})  # MagicDNS off: the 100.x address fails ATS
+    assert rt.tailnet_name() is None
+    status(code=1)
+    assert rt.tailnet_name() is None
+    monkeypatch.setattr(rt, "_tailscale", lambda: None)
+    assert rt.tailnet_name() is None
 
 
 SWIFT_SIDECAR = REPO / "build/contract/guided_session.swift.json"

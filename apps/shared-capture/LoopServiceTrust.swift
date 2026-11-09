@@ -40,8 +40,9 @@ nonisolated final class PinnedTrust: NSObject, URLSessionDelegate, @unchecked Se
 }
 
 /// The device token for the loop service, in this app's own keychain.
+/// Tests pass their own `service` so they never touch the real pairing.
 nonisolated enum Keychain {
-    private static let service = "ChewSenseLoop"
+    static let defaultService = "ChewSenseLoop"
     private static let account = "device-token"
 
     struct StoreError: LocalizedError {
@@ -49,8 +50,8 @@ nonisolated enum Keychain {
         var errorDescription: String? { "Could not store the pairing token (\(status))." }
     }
 
-    static func save(token: String) throws {
-        delete()
+    static func save(token: String, service: String = defaultService) throws {
+        delete(service: service)
         let status = SecItemAdd([
             kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
@@ -59,7 +60,7 @@ nonisolated enum Keychain {
         guard status == errSecSuccess else { throw StoreError(status: status) }
     }
 
-    static func token() -> String? {
+    static func token(service: String = defaultService) -> String? {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
@@ -69,7 +70,7 @@ nonisolated enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete() {
+    static func delete(service: String = defaultService) {
         SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service,
                        kSecAttrAccount: account] as CFDictionary)
     }

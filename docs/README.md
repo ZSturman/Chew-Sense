@@ -2,6 +2,7 @@
 
 - [START_HERE](../START_HERE.md): apps, sequence, and smoke test.
 - [ARCHITECTURE](ARCHITECTURE.md): ownership and data flow.
+- [COMMUNICATION](COMMUNICATION.md): how the iPhone apps and the Mac exchange data (offline-first, Mac found by identity on any network). Read before changing networking.
 - [RUNBOOK](RUNBOOK.md): operating commands and troubleshooting.
 - [DATA_CONTRACT](DATA_CONTRACT.md): canonical bundle and annotation schema `2.0.0`.
 - [LOCAL_DATA_RECOVERY](LOCAL_DATA_RECOVERY.md): checksums, cold storage, and safe pruning.

@@ -17,6 +17,14 @@ flowchart LR
     J -. "only after independent gate" .-> I
 ```
 
+## Communication between apps
+
+Phones are offline-first and reach the Mac by identity (pinned certificate)
+over whichever route it reports that answers (same Wi-Fi or hotspot today;
+the tailnet route waits on an ATS decision). They never use a typed address. The Mac's `workspace/loop/` is the single source of truth. All
+phone ↔ Mac networking is `apps/shared-capture/LoopLink.swift`. Rules and the
+decision record: [COMMUNICATION.md](COMMUNICATION.md).
+
 ## Ownership
 
 | Component | Owns | Does not own |

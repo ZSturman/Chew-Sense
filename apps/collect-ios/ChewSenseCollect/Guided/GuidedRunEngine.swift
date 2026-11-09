@@ -27,7 +27,7 @@ nonisolated enum QualityIssue: String, CaseIterable, Sendable {
         case .motionMissing: "Reconnect your AirPods"
         case .faceMissing: "Bring your face back into frame"
         case .jawNotVisible: "Move back so your jaw is visible"
-        case .lowLight: "Improve lighting"
+        case .lowLight: "Too dark to see your face — tap the bulb for Screen light"
         case .phoneMoving: "Keep the iPhone still"
         }
     }
@@ -379,11 +379,14 @@ nonisolated final class GuidedRunEngine {
         if !quality.captureRunning { return [.captureInterrupted] }
         if activity.requiresMotion && !quality.motionFresh { issues.append(.motionMissing) }
         if activity.requiresFace {
-            if quality.faceVisible == false { issues.append(.faceMissing) }
-            else if definition.camera.jawRequired && quality.jawVisible == false { issues.append(.jawNotVisible) }
-            if let brightness = quality.brightness, brightness < definition.camera.minBrightness {
-                issues.append(.lowLight)
-            }
+            // Dim light alone never blocks: while the face is still found it is
+            // usable, and the dim time is reported as low_light_fraction.
+            if quality.faceVisible == false {
+                if let brightness = quality.brightness, brightness < definition.camera.minBrightness {
+                    issues.append(.lowLight)
+                }
+                issues.append(.faceMissing)
+            } else if definition.camera.jawRequired && quality.jawVisible == false { issues.append(.jawNotVisible) }
             if let motion = quality.phoneMotionG, motion > definition.camera.maxPhoneMotionG {
                 issues.append(.phoneMoving)
             }

@@ -6,13 +6,13 @@ import Network
 /// Guided experiment parsing, timing semantics, interruption policies,
 /// validation and the sidecar contract shared with the Mac.
 struct GuidedCollectionTests {
-    @Test func deniedLocalNetworkDiscoveryExplainsTheProtectedPermission() {
-        let denied = MacConnection.discoveryFailureDescription(.dns(-65570))
-        #expect(denied.contains("Local Network access is blocked"))
+    @MainActor @Test func deniedLocalNetworkDiscoveryExplainsTheProtectedPermission() {
+        let denied = LoopDiscovery.failureDescription(.dns(-65570), appName: "Chew Sense Collect")
+        #expect(denied.contains("Local Network access is off"))
         #expect(denied.contains("Settings"))
-        let unreachable = MacConnection.discoveryFailureDescription(.posix(.ENETDOWN))
-        #expect(unreachable.contains("same Wi-Fi"))
-        #expect(!unreachable.contains("access is blocked"))
+        #expect(denied.contains("Chew Sense Collect"))
+        let unreachable = LoopDiscovery.failureDescription(.posix(.ENETDOWN), appName: "Chew Sense Collect")
+        #expect(!unreachable.contains("access is off"))
     }
 
     @Test func staleHeadphoneStreamRetriesWithoutACapabilityChange() {
@@ -302,6 +302,32 @@ struct GuidedCollectionTests {
         #expect(engine.attempts.last?.outcome == "abandoned")
         let repeatRun = GuidedRunEngine(definition: definition, onlyActivityIDs: ["chew-2", "talk-1"])
         #expect(repeatRun.plan.map { definition.activities[$0].id } == ["nod-start", "chew-2", "talk-1", "nod-end"])
+    }
+
+    @Test func dimLightWithVisibleFaceNeverPauses() throws {
+        let definition = try entry("baseline-90s").definition
+        let engine = GuidedRunEngine(definition: definition)
+        _ = run(engine) { _ in
+            var q = QualitySnapshot.good
+            q.brightness = 0.05
+            return q
+        }
+        #expect(engine.phase == .finished)
+        #expect(engine.invalidIntervals.isEmpty)
+        #expect(!engine.events.contains { $0.type == "activity_paused" })
+        #expect(engine.lowLightSeconds > 80)
+    }
+
+    @Test func darknessHidingTheFaceAsksForLight() throws {
+        let definition = try entry("baseline-90s").definition
+        let engine = GuidedRunEngine(definition: definition)
+        _ = run(engine, limit: 30) { t in
+            var q = QualitySnapshot.good
+            if t > 25 { q.faceVisible = false; q.brightness = 0.05 }
+            return q
+        }
+        #expect(engine.activeIssues.first == .lowLight)
+        #expect(engine.invalidIntervals.contains { $0.reasons.isSuperset(of: ["low_light", "face_missing"]) })
     }
 
     @Test func noTimerProgressWithoutRequiredEvidence() throws {

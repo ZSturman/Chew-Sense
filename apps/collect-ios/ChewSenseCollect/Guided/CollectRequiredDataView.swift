@@ -186,7 +186,7 @@ struct MacStatusRow: View {
         switch connection.state {
         case .connected: "Connected to \(connection.paired?.name ?? "Mac")"
         case .connecting: "Connecting…"
-        case .offline: "Mac not reachable"
+        case .offline: "Mac not reachable right now"
         case .unpaired: "Connect to your Mac"
         }
     }
@@ -194,8 +194,9 @@ struct MacStatusRow: View {
     private var detail: String {
         switch connection.state {
         case .connected(let pending): pending > 0 ? "\(pending) recording(s) waiting to process" : "Ready to receive recordings"
-        case .connecting: connection.paired?.host ?? ""
-        case .offline(let reason): "Recording still works offline. \(reason)"
+        case .connecting: "Checking your Mac…"
+        case .offline: connection.isSearching ? "Looking for your Mac…"
+            : "Recording works. New recordings are sent when the Mac is back."
         case .unpaired: "Pair once to send recordings and receive requests"
         }
     }

@@ -54,10 +54,20 @@ final class GuidedRecordingController: ObservableObject {
         if entry.definition.airpods.required && !recorder.isMotionAvailable { issues.append("Connect your AirPods") }
         let snap = quality.snapshot
         if entry.definition.camera.faceRequired && snap.faceVisible == false {
-            issues.append("Bring your face into the camera view")
+            if let b = snap.brightness, b < entry.definition.camera.minBrightness {
+                issues.append("Too dark to see your face — turn on Screen light or face a lamp")
+            } else {
+                issues.append("Bring your face into the camera view")
+            }
         }
-        if let b = snap.brightness, b < entry.definition.camera.minBrightness { issues.append("Improve lighting") }
         return issues
+    }
+
+    /// Dim but usable: shown as advice, never blocks.
+    var isDimButUsable: Bool {
+        let snap = quality.snapshot
+        guard entry.definition.camera.faceRequired, snap.faceVisible == true, let b = snap.brightness else { return false }
+        return b < entry.definition.camera.minBrightness
     }
 
     func prepare() {

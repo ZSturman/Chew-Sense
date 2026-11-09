@@ -7,6 +7,9 @@ struct GuidedRecordingView: View {
     @ObservedObject var controller: GuidedRecordingController
     @ObservedObject private var quality: QualityMonitor
     @State private var showAirPods = false
+    /// White frame around the preview with the display at full brightness, to light the face.
+    @AppStorage("GuidedScreenLight") private var screenLight = false
+    @State private var brightnessBeforeLight: CGFloat?
     /// Called with a follow-up run (repeat of affected segments) or nil to close.
     let onClose: (GuidedRecordingController?) -> Void
 
@@ -25,6 +28,10 @@ struct GuidedRecordingView: View {
             } else {
                 Color.black.ignoresSafeArea()
             }
+            if screenLight {
+                Rectangle().strokeBorder(.white, lineWidth: 56).ignoresSafeArea().allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             switch controller.stage {
             case .completed(let folder, let sessionID):
                 GuidedCompletionView(services: services, controller: controller, folder: folder,
@@ -35,8 +42,13 @@ struct GuidedRecordingView: View {
                 overlay
             }
         }
-        .onAppear { controller.prepare() }
+        .onAppear {
+            controller.prepare()
+            applyScreenLight(screenLight)
+        }
+        .onChange(of: screenLight) { _, on in applyScreenLight(on) }
         .onDisappear {
+            applyScreenLight(false)
             controller.teardown()
             controller.recorder.stopCameraPreview()
         }
@@ -68,6 +80,10 @@ struct GuidedRecordingView: View {
                 Text(controller.entry.definition.title).font(.headline)
                 if controller.isRepeat { Text("· repeat").font(.subheadline) }
                 Spacer()
+                Button("Screen light", systemImage: screenLight ? "lightbulb.fill" : "lightbulb") { screenLight.toggle() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered).tint(screenLight ? .yellow : .white)
+                    .accessibilityIdentifier("guidedScreenLightButton")
                 Button("AirPods", systemImage: "airpodspro") { showAirPods = true }
                     .buttonStyle(.bordered).tint(.white)
                     .accessibilityIdentifier("guidedAirPodsButton")
@@ -77,7 +93,8 @@ struct GuidedRecordingView: View {
             }
             ProgressView(value: controller.engine.progress).tint(.white)
                 .accessibilityIdentifier("guidedProgress")
-            QualityChips(snapshot: quality.snapshot, faceRequired: controller.entry.definition.camera.faceRequired)
+            QualityChips(snapshot: quality.snapshot, faceRequired: controller.entry.definition.camera.faceRequired,
+                         minBrightness: controller.entry.definition.camera.minBrightness)
         }
         .padding(12)
         .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
@@ -130,6 +147,11 @@ struct GuidedRecordingView: View {
             } else {
                 ForEach(issues, id: \.self) { Label($0, systemImage: "exclamationmark.triangle.fill").font(.headline) }
             }
+            if controller.isDimButUsable {
+                Text("Lighting is dim, but your face is visible, so you can record. Screen light can help.")
+                    .font(.footnote).multilineTextAlignment(.center)
+            }
+            Toggle("Screen light", isOn: $screenLight).tint(.yellow)
             Toggle("Sound and haptic cues", isOn: $controller.cuesEnabled).tint(.green)
             Button {
                 controller.begin()
@@ -163,6 +185,18 @@ struct GuidedRecordingView: View {
         .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
     }
 
+    private func applyScreenLight(_ on: Bool) {
+        guard let screen = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.screen }).first
+        else { return }
+        if on {
+            if brightnessBeforeLight == nil { brightnessBeforeLight = screen.brightness }
+            screen.brightness = 1
+        } else if let previous = brightnessBeforeLight {
+            screen.brightness = previous
+            brightnessBeforeLight = nil
+        }
+    }
+
     private func failure(_ message: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.orange)
@@ -178,12 +212,13 @@ struct GuidedRecordingView: View {
 struct QualityChips: View {
     let snapshot: QualitySnapshot
     let faceRequired: Bool
+    let minBrightness: Double
 
     var body: some View {
         HStack(spacing: 8) {
             if faceRequired {
                 chip("Face", "face.smiling", snapshot.faceVisible)
-                chip("Light", "sun.max", snapshot.brightness.map { $0 >= 0.15 })
+                lightChip
             }
             chip("AirPods", "airpodspro", snapshot.motionFresh)
             chip("Still", "iphone", snapshot.phoneMotionG.map { $0 <= 0.25 })
@@ -191,10 +226,24 @@ struct QualityChips: View {
         .font(.caption2.bold())
     }
 
-    private func chip(_ title: String, _ icon: String, _ ok: Bool?) -> some View {
+    /// Dim light is only a problem when it also hides the face.
+    @ViewBuilder
+    private var lightChip: some View {
+        if let brightness = snapshot.brightness, brightness < minBrightness {
+            if snapshot.faceVisible == false {
+                chip("Light", "sun.min", false)
+            } else {
+                chip("Dim", "sun.min", nil, color: .yellow, state: "dim but usable")
+            }
+        } else {
+            chip("Light", "sun.max", snapshot.brightness.map { _ in true })
+        }
+    }
+
+    private func chip(_ title: String, _ icon: String, _ ok: Bool?, color: Color? = nil, state: String? = nil) -> some View {
         Label(title, systemImage: icon)
             .padding(.horizontal, 8).padding(.vertical, 4)
-            .background((ok == nil ? Color.gray : ok! ? Color.green : Color.red).opacity(0.75), in: Capsule())
-            .accessibilityLabel("\(title) \(ok == nil ? "unknown" : ok! ? "good" : "problem")")
+            .background((color ?? (ok == nil ? Color.gray : ok! ? Color.green : Color.red)).opacity(0.75), in: Capsule())
+            .accessibilityLabel("\(title) \(state ?? (ok == nil ? "unknown" : ok! ? "good" : "problem"))")
     }
 }

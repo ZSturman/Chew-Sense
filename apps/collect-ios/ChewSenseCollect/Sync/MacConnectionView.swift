@@ -1,111 +1,93 @@
 import SwiftUI
 
-/// Pair once with the Mac service; afterwards status and settings.
+/// Pair once with the Mac; afterwards only status and one action. Recordings
+/// never wait on the Mac: they are kept here and sent when it answers.
 struct MacConnectionView: View {
     @ObservedObject var services: CollectServices
-    @State private var host = ""
-    @State private var port = "48765"
-    @State private var code = ""
-    @State private var name = "Mac"
-    @State private var busy = false
-    @State private var error: String?
+    @State private var searchResult: String?
 
     private var connection: MacConnection { services.connection }
 
     var body: some View {
         Form {
             if let paired = connection.paired {
-                Section("Paired Mac") {
+                Section("Your Mac") {
                     MacStatusRow(connection: connection)
-                    LabeledContent("Address", value: "\(paired.host):\(paired.port)")
-                    LabeledContent("Certificate", value: String(paired.fingerprint.prefix(16)) + "…")
-                    if let last = connection.lastSync {
-                        LabeledContent("Last sync", value: last.formatted(date: .omitted, time: .shortened))
+                    if case .offline = connection.state {
+                        Text("Recordings are kept on this iPhone and sent automatically when your Mac is back. Nothing to do unless this lasts.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button {
+                            Task { await tryAgain() }
+                        } label: {
+                            if connection.isSearching {
+                                HStack { ProgressView(); Text("Looking for your Mac…") }
+                            } else {
+                                Label("Try again now", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(connection.isSearching)
+                        .accessibilityIdentifier("findMacAgainButton")
+                        if let searchResult { Text(searchResult).font(.footnote).foregroundStyle(.orange) }
+                    } else {
+                        Button("Sync now") { Task { await services.synchronize() } }
                     }
-                    Button("Sync now") { Task { await services.synchronize() } }
                 }
                 Section {
                     Toggle("Send recordings automatically", isOn: Binding(
                         get: { services.uploads.autoUpload }, set: { services.uploads.autoUpload = $0 }))
                 } footer: {
-                    Text("Recordings upload after they are saved whenever the Mac is reachable. Interrupted transfers resume.")
+                    Text("Recordings go to your Mac after they are saved, whenever it can be reached. Interrupted transfers resume; nothing is sent twice.")
+                }
+                if case .offline = connection.state {
+                    Section {
+                        DisclosureGroup("If your Mac stays unreachable") {
+                            Text("""
+                            • Wake the Mac and open Chew Sense Review. Its Pipeline window shows whether the ChewSense service is running.
+                            • Put the iPhone and Mac on the same Wi-Fi, or join the Mac to this iPhone's Personal Hotspot. Recordings wait here until then.
+                            • Allow Local Network for this app in Settings.
+                            """)
+                            .font(.footnote)
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                            }
+                        }
+                    }
+                }
+                Section {
+                    DisclosureGroup("Details") {
+                        LoopConnectionDetails(pairing: paired) { address in
+                            try await connection.updateAddress(host: address, port: paired.port)
+                            await services.synchronize()
+                        }
+                        if let last = connection.lastSync {
+                            LabeledContent("Last sync", value: last.formatted(date: .omitted, time: .shortened))
+                        }
+                    }
+                    .font(.footnote)
                 }
                 Section {
                     Button("Forget this Mac", role: .destructive) { connection.forget() }
                 }
             } else {
-                Section {
-                    Text("On the Mac, open ChewSense Review → Pipeline → Pair iPhone (or run `chewsense-vision loop pair`). Then pick the Mac and enter the six-digit code.")
-                        .font(.footnote)
-                }
-                Section("Macs on this network") {
-                    if let discoveryError = connection.discoveryError {
-                        Text(discoveryError).font(.footnote).foregroundStyle(.red)
-                        Button("Open Settings") {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
-                        }
-                        Button("Retry discovery") {
-                            connection.stopDiscovery()
-                            connection.startDiscovery()
-                        }
-                    } else if connection.discovered.isEmpty {
-                        Label("Searching… make sure the Mac service is running", systemImage: "antenna.radiowaves.left.and.right")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(connection.discovered) { mac in
-                        Button {
-                            Task { await select(mac) }
-                        } label: {
-                            Label(mac.name, systemImage: host.isEmpty ? "desktopcomputer" : "checkmark")
-                        }
-                    }
-                }
-                Section("Address") {
-                    TextField("Mac IP address or hostname", text: $host)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    TextField("Port", text: $port).keyboardType(.numberPad)
-                }
-                Section("Pairing code") {
-                    TextField("123456", text: $code).keyboardType(.numberPad).font(.title2.monospacedDigit())
-                        .accessibilityIdentifier("pairingCodeField")
-                    Button {
-                        Task { await pair() }
-                    } label: {
-                        if busy { ProgressView() } else { Text("Pair") }
-                    }
-                    .disabled(busy || host.isEmpty || code.filter(\.isNumber).count != 6)
-                    if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+                LoopPairingForm(
+                    appName: "Chew Sense Collect",
+                    intro: "Pair once. On the Mac, open Chew Sense Review → Pipeline → Pair iPhone. Pick the Mac below and enter the six-digit code. After that the iPhone finds the Mac by itself whenever they share a network, even when its address changes.",
+                    codeFieldID: "pairingCodeField"
+                ) { host, port, code, name in
+                    try await connection.pair(host: host, port: port, code: code, name: name)
+                    await services.uploads.run()
                 }
             }
         }
         .navigationTitle("Mac Connection")
-        .onAppear { connection.startDiscovery() }
-        .onDisappear { connection.stopDiscovery() }
     }
 
-    private func select(_ mac: MacConnection.Discovered) async {
-        do {
-            let (resolvedHost, resolvedPort) = try await connection.resolve(mac)
-            host = resolvedHost
-            port = String(resolvedPort)
-            name = mac.name.replacingOccurrences(of: "ChewSense on ", with: "")
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func pair() async {
-        busy = true
-        defer { busy = false }
-        do {
-            try await connection.pair(host: host.trimmingCharacters(in: .whitespaces), port: Int(port) ?? 48765,
-                                      code: code, name: name)
-            error = nil
-            await services.uploads.run()
-        } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    private func tryAgain() async {
+        searchResult = nil
+        await connection.relocate()
+        await services.synchronize()
+        if case .offline = connection.state {
+            searchResult = "Still not reachable. Your recordings are safe here."
         }
     }
 }

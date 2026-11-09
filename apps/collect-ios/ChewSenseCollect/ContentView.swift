@@ -18,9 +18,10 @@ struct ContentView: View {
     @State private var linked: LinkedRoute?
     
     init() {
-        let recorder = RecorderController()
-        _controller = StateObject(wrappedValue: recorder)
-        _services = StateObject(wrappedValue: CollectServices(recorder: recorder))
+        // One shared set per process, so a background sync and the UI use the same queue.
+        let services = CollectServices.shared
+        _controller = StateObject(wrappedValue: services.recorder)
+        _services = StateObject(wrappedValue: services)
     }
 
     var body: some View {

@@ -50,7 +50,7 @@ struct LiveProjectStatusSection: View {
         case .unpaired: "Connect to your Mac"
         case .connecting: "Connecting to \(mac.paired?.name ?? "Mac")…"
         case .connected: "Connected to \(mac.paired?.name ?? "Mac")"
-        case .offline(let reason): "Mac not reachable · \(reason)"
+        case .offline(let reason): "Mac not reachable right now · \(reason)"
         }
     }
 }
@@ -59,21 +59,19 @@ struct LiveProjectStatusSection: View {
 struct LiveMacPairingView: View {
     @ObservedObject var mac: LiveMacStatus
     @Environment(\.dismiss) private var dismiss
-    @State private var host = ""
-    @State private var port = "48765"
-    @State private var code = ""
-    @State private var name = "Mac"
-    @State private var busy = false
-    @State private var error: String?
 
     var body: some View {
         Form {
             if let paired = mac.paired {
-                Section("Paired Mac") {
+                Section("Your Mac") {
                     LabeledContent("Mac", value: paired.name)
-                    LabeledContent("Address", value: "\(paired.host):\(paired.port)")
-                    LabeledContent("Certificate", value: String(paired.fingerprint.prefix(16)) + "…")
                     Button("Refresh now") { Task { await mac.refresh() } }
+                }
+                Section {
+                    DisclosureGroup("Details") {
+                        LoopConnectionDetails(pairing: paired)
+                    }
+                    .font(.footnote)
                 }
                 Section {
                     Button("Forget this Mac", role: .destructive) { mac.forget() }
@@ -81,89 +79,18 @@ struct LiveMacPairingView: View {
                     Text("Live only reads the project status. Recordings are sent from Collect.")
                 }
             } else {
-                Section {
-                    Text("On the Mac, open ChewSense Review → Pipeline → Pair iPhone (or run `chewsense-vision loop pair`). Then pick the Mac and enter the six-digit code. Live only reads status; it never sends recordings.")
-                        .font(.footnote)
-                }
-                Section("Macs on this network") {
-                    if let discoveryError = mac.discoveryError {
-                        Text(discoveryError).font(.footnote).foregroundStyle(.red)
-                        #if canImport(UIKit)
-                        Button("Open Settings") {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
-                        }
-                        #endif
-                        Button("Retry discovery") {
-                            mac.stopDiscovery()
-                            mac.startDiscovery()
-                        }
-                    } else if mac.discovered.isEmpty {
-                        Label("Searching… make sure the Mac service is running", systemImage: "antenna.radiowaves.left.and.right")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(mac.discovered) { found in
-                        Button {
-                            Task { await select(found) }
-                        } label: {
-                            Label(found.name, systemImage: host.isEmpty ? "desktopcomputer" : "checkmark")
-                        }
-                    }
-                }
-                Section("Address") {
-                    TextField("Mac IP address or hostname", text: $host)
-                        #if canImport(UIKit)
-                        .textInputAutocapitalization(.never).keyboardType(.URL)
-                        #endif
-                        .autocorrectionDisabled()
-                    TextField("Port", text: $port)
-                }
-                Section("Pairing code") {
-                    TextField("123456", text: $code).font(.title2.monospacedDigit())
-                        #if canImport(UIKit)
-                        .keyboardType(.numberPad)
-                        #endif
-                        .accessibilityIdentifier("livePairingCodeField")
-                    Button {
-                        Task { await pair() }
-                    } label: {
-                        if busy { ProgressView() } else { Text("Pair") }
-                    }
-                    .disabled(busy || host.isEmpty || code.filter(\.isNumber).count != 6)
-                    if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+                LoopPairingForm(
+                    appName: "Chew Sense Live",
+                    intro: "Pair once. On the Mac, open Chew Sense Review → Pipeline → Pair iPhone. Pick the Mac below and enter the six-digit code. Live only reads status; it never sends recordings.",
+                    codeFieldID: "livePairingCodeField"
+                ) { host, port, code, name in
+                    try await mac.pair(host: host, port: port, code: code, name: name)
                 }
             }
         }
         .navigationTitle("Mac Connection")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-        }
-        .onAppear { if mac.paired == nil { mac.startDiscovery() } }
-        .onDisappear { mac.stopDiscovery() }
-    }
-
-    private func select(_ found: LiveMacStatus.Discovered) async {
-        do {
-            let (resolvedHost, resolvedPort) = try await mac.resolve(found)
-            host = resolvedHost
-            port = String(resolvedPort)
-            name = found.name.replacingOccurrences(of: "ChewSense on ", with: "")
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func pair() async {
-        busy = true
-        defer { busy = false }
-        do {
-            try await mac.pair(host: host.trimmingCharacters(in: .whitespaces), port: Int(port) ?? 48765,
-                               code: code, name: name)
-            error = nil
-            mac.stopDiscovery()
-        } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 }

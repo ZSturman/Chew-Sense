@@ -386,6 +386,11 @@ final class VideoIMURecorder: NSObject,
             session.commitConfiguration()
             throw Err("No camera")
         }
+        // Brighter video in dim rooms where the hardware supports it.
+        if device.isLowLightBoostSupported, (try? device.lockForConfiguration()) != nil {
+            device.automaticallyEnablesLowLightBoostWhenAvailable = true
+            device.unlockForConfiguration()
+        }
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else {
             session.commitConfiguration()

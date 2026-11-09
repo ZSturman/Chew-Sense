@@ -1,13 +1,17 @@
 import Foundation
 import Combine
 import CryptoKit
+import UIKit
 
-/// One-tap and automatic "Send to Mac" with resumable, verified transfers.
+/// The phone's outbox: recordings go to the Mac automatically, with
+/// resumable, verified transfers.
 ///
 /// The archive is the same hash-checked ZIP that Share exports. Its SHA-256 is
 /// announced first; the Mac reports how many bytes it already holds, so an
 /// interrupted transfer resumes rather than restarts, and a completed one is
-/// never imported twice. Queue state survives app restarts.
+/// never imported twice. Queue state survives app restarts. The Mac being
+/// away (asleep, another network) is never a failure: items stay queued and
+/// resume when it answers. The recording stays on the phone either way.
 final class UploadManager: ObservableObject {
     struct Item: Codable, Identifiable, Equatable {
         enum State: String, Codable { case queued, preparing, uploading, received, processing, processed, needsAttention, failed }
@@ -43,7 +47,8 @@ final class UploadManager: ObservableObject {
         self.connection = connection
         self.recorder = recorder
         self.directory = directory
-        autoUpload = UserDefaults.standard.bool(forKey: "LoopAutoUpload")
+        // On unless the wearer turned it off.
+        autoUpload = UserDefaults.standard.object(forKey: "LoopAutoUpload") as? Bool ?? true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: stateURL),
            let decoded = try? JSONDecoder().decode([String: Item].self, from: data) {
@@ -67,6 +72,25 @@ final class UploadManager: ObservableObject {
 
     func item(for folder: URL) -> Item? { items[folder.lastPathComponent] }
 
+    private static let pendingStates: Set<Item.State> = [.queued, .preparing, .uploading]
+    private static let waitingForMac = "Saved on this iPhone. It will go to your Mac automatically when the Mac is reachable."
+    private static let waitingForWiFi = "Saved on this iPhone. It will go to your Mac on Wi-Fi (the Mac is only reachable over the internet right now)."
+
+    /// Recordings still to send, or sent and not yet processed.
+    var hasPendingWork: Bool {
+        items.values.contains { Self.pendingStates.contains($0.state) || [.received, .processing].contains($0.state) }
+    }
+
+    /// Marks unsent items as waiting, with a plain reason; does not reorder the
+    /// queue. The upload ID and offset are kept, so sending resumes where it stopped.
+    private func noteWaiting(_ message: String) {
+        for (name, item) in items where Self.pendingStates.contains(item.state) {
+            items[name]?.state = .queued
+            items[name]?.message = message
+        }
+        save()
+    }
+
     static func needsCoarseReview(_ folder: URL) -> Bool {
         FileManager.default.fileExists(atPath: folder.appendingPathComponent("guided_session.json").path)
             && !FileManager.default.fileExists(atPath: folder.appendingPathComponent("annotations/coarse_labels.json").path)
@@ -88,15 +112,27 @@ final class UploadManager: ObservableObject {
         if autoUpload { send(folder) }
     }
 
-    /// Processes the queue until empty or offline. Safe to call repeatedly.
+    /// Processes the queue until empty or the Mac is away. Safe to call repeatedly.
     func run() async {
-        guard !running, connection.paired != nil else { return }
+        guard !running, connection.paired != nil, !recorder.isRecording else { return }
         running = true
         defer { running = false }
-        while let next = items.values.filter({ [.queued, .preparing, .uploading].contains($0.state) })
+        // Leaving the app mid-transfer finishes the current chunk work instead of aborting it.
+        let assertion = BackgroundAssertion("Send recordings to your Mac")
+        defer { assertion.end() }
+        while let next = items.values.filter({ Self.pendingStates.contains($0.state) })
                 .sorted(by: { $0.updatedAt < $1.updatedAt }).first {
+            guard connection.mayTransferRecordings else {
+                noteWaiting(Self.waitingForWiFi)
+                break
+            }
+            guard !recorder.isRecording else { return }
             do {
                 try await transfer(next.folderName)
+            } catch let error where LoopLink.isUnreachable(error) {
+                // The Mac went away. Not a failure: the item keeps its place and offset.
+                noteWaiting(Self.waitingForMac)
+                return
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 update(next.folderName) {
@@ -216,5 +252,22 @@ final class UploadManager: ObservableObject {
         var hasher = SHA256()
         while case let data = handle.readData(ofLength: 1 << 20), !data.isEmpty { hasher.update(data: data) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Lets work started in the foreground finish after the app leaves the screen.
+final class BackgroundAssertion {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(_ name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
     }
 }
