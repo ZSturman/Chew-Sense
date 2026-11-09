@@ -1755,6 +1755,62 @@ def cmd_behavior_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eating_decoder_study(args: argparse.Namespace) -> int:
+    """Bout-decoder persistence: study on development data, pre-register, confirm once on the locked test."""
+
+    import subprocess
+
+    from pipeline.eating import decoder_study as study
+    from pipeline.eating.dataset import discover_sessions
+
+    workspace = get_workspace_root()
+    root = workspace / "experiments" / "eating"
+    out = root / "decoder-study"
+    out.mkdir(parents=True, exist_ok=True)
+    sessions, _ = discover_sessions(
+        canonical_roots=[workspace / "sessions" / "raw", workspace / "loop" / "assisted" / "sessions" / "raw"],
+        field_test_roots=[workspace / "sessions" / "field-tests"], loop_root=workspace / "loop")
+    if args.confirm:
+        prereg_path = Path(args.confirm)
+        prereg = json.loads(prereg_path.read_text())
+        done = out / f"confirmation-{prereg_path.stem}.json"
+        if done.exists():
+            print(f"Already confirmed once: {done}. A second look would be tuning on the locked test.")
+            return 1
+        latest = json.loads((root / "latest.json").read_text())
+        result = study.confirm_on_test(Path(latest["run_dir"]), sessions, prereg)
+        total = study.record_consultation(root, {
+            "kind": "decoder_confirmation", "preregistration": prereg_path.name,
+            "test_run_id": result["test_run_id"], "at": datetime.now().astimezone().isoformat()})
+        result.update(preregistration=prereg_path.name, test_consultations=total,
+                      generated_at=datetime.now().astimezone().isoformat())
+        done.write_text(json.dumps(result, indent=2, default=float) + "\n")
+        for name in ("current", "candidate"):
+            row = result[name]
+            print(f"locked test, {name} (min_start_windows {row['min_start_windows']}): detected "
+                  f"{row.get('detected_bouts')}/{row.get('reference_bouts')}, false bouts {row.get('false_bouts')} "
+                  f"({row.get('false_bouts_per_negative_hour')}/h), chewing time recall {row.get('chewing_time_recall')}")
+        print(f"Recorded test consultation #{total}. Wrote {done}")
+        return 0
+    run_dir = _eating_run_dir(root, args.run)
+    grid = study.development_grid(run_dir, sessions)
+    path = out / f"dev-{study.stamp()}.json"
+    if args.preregister is not None:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=get_repo_root(), capture_output=True, text=True).stdout.strip()
+        grid.update(candidate_min_start_windows=args.preregister, current_min_start_windows=3,
+                    preregistered_at=datetime.now().astimezone().isoformat(), git_commit=commit,
+                    rule="chosen on development out-of-fold predictions only; confirm once with --confirm")
+        path = out / f"preregistration-{study.stamp()}.json"
+    path.write_text(json.dumps(grid, indent=2, default=float) + "\n")
+    for row in grid["settings"]:
+        print(f"dev min_start_windows {row['min_start_windows']}: detected {row.get('detected_bouts')}/"
+              f"{row.get('reference_bouts')}, false bouts {row.get('false_bouts')} "
+              f"({row.get('false_bouts_per_negative_hour')}/h), chewing time recall {row.get('chewing_time_recall')}, "
+              f"median onset {row.get('onset_latency_median_s')} s")
+    print(f"Wrote {path}")
+    return 0
+
+
 def cmd_chew_count_eval(args: argparse.Namespace) -> int:
     """AirPods-only cadence and chew count versus frozen, independently hand-marked chews."""
 
@@ -2239,6 +2295,15 @@ Examples:
     )
     p_behavior.add_argument("--run", help="Eating run for out-of-fold predictions (default: latest)")
     p_behavior.set_defaults(func=cmd_behavior_eval)
+
+    p_decoder = subparsers.add_parser(
+        "eating-decoder-study",
+        help="Bout-decoder persistence on development predictions; --preregister N, then --confirm once on the locked test",
+    )
+    p_decoder.add_argument("--run", help="Run with development out-of-fold predictions (default: latest)")
+    p_decoder.add_argument("--preregister", type=int, help="Write down the chosen min_start_windows before any test look")
+    p_decoder.add_argument("--confirm", help="Pre-registration file to confirm once on the locked test")
+    p_decoder.set_defaults(func=cmd_eating_decoder_study)
 
     p_chew_count = subparsers.add_parser(
         "chew-count-eval",

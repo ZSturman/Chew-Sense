@@ -417,7 +417,9 @@ def run_experiment(
     }
     row["test_evaluated"] = config.evaluate_test
     index["runs"].append(row)
-    index["test_consultations"] = sum(1 for run in index["runs"] if run.get("test_evaluated", True))
+    # Decoder confirmations (decoder_study) also consult the locked test without a run.
+    index["test_consultations"] = (sum(1 for run in index["runs"] if run.get("test_evaluated", True))
+                                   + len(index.get("other_test_consultations") or []))
     _write_json(index_path, index)
     if config.evaluate_test:
         # The dashboards' "current model" is the latest run with a locked-test result;
