@@ -76,6 +76,7 @@ struct CoarseAssistPanel: View {
                 set: { playback.seek(to: $0) }
             ), in: item.start...item.end)
             .accessibilityLabel("Clip position")
+            SpeedControl()
 
             Text("Was there chewing in this clip?").font(.headline)
             HStack(spacing: 6) {

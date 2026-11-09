@@ -120,6 +120,7 @@ struct HelpPanel: View {
             ("P+← / P+→", "Nudge Maximum open ± 1 frame (⇧ for 5)"),
             ("E+← / E+→", "Nudge Closed end ± 1 frame (⇧ for 5)"),
             ("J / L", "−1 s / +1 s"),
+            ("< / >", "Slower / faster playback (¼× to 2×)"),
             ("R", "Replay the suggestion (Check suggestions); otherwise toggle loop on selected chew"),
             ("O", "Toggle Raw / Annotated reference video"),
             ("= / − / 0", "Zoom in / out / fit"),

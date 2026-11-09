@@ -15,6 +15,7 @@ struct RootView: View {
     @State private var showSidebar = false
     @State private var showHelp: Bool = false
     @State private var showSignals = false
+    @AppStorage("ChewSenseReview.videoOverlay") private var showChewOverlay = true
 
     private var plan: GuidedPlan { state.guidedPlan(spansPending: assist.needsReview) }
     /// The step on screen: the reviewer's choice if it is part of this review, else the recommended one.
@@ -142,7 +143,19 @@ struct RootView: View {
             }
             .background(Color.black).clipped()
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(alignment: .topTrailing) { rotateButton }
+            .overlay { if showChewOverlay && !isSpansStep { ChewOverlay() } }
+            .overlay(alignment: .topTrailing) {
+                HStack(spacing: 6) {
+                    videoButton(showChewOverlay ? "eye" : "eye.slash",
+                                help: showChewOverlay ? "Chews flash on the video. Click to hide the flashes."
+                                                      : "Show a flash on the video for each marked chew.") {
+                        showChewOverlay.toggle()
+                    }
+                    .accessibilityIdentifier("toggleChewOverlay")
+                    rotateButton
+                }
+                .padding(8)
+            }
             if showSignals && !state.isBlindReview && !isSpansStep {
                 CycleShapeChart()
                     .frame(height: 110)
@@ -156,20 +169,27 @@ struct RootView: View {
 
     /// Turns the picture a quarter turn clockwise; remembered for this recording.
     private var rotateButton: some View {
-        Button { playback.rotateDisplay(by: 1) } label: {
-            Image(systemName: "rotate.right")
+        videoButton("rotate.right",
+                    help: playback.rotationIsAutomatic
+                        ? "Turned automatically because the video is stored sideways. Click to turn it a quarter turn if it's still wrong; your choice is remembered."
+                        : "Turn the picture a quarter turn clockwise. Remembered for this recording; the video file isn't changed.") {
+            playback.rotateDisplay(by: 1)
+        }
+        .accessibilityLabel("Rotate video")
+        .accessibilityIdentifier("rotateVideo")
+    }
+
+    private func videoButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
                 .font(.body.weight(.semibold))
+                .frame(width: 18, height: 18)
                 .padding(7)
                 .background(.black.opacity(0.45), in: Circle())
                 .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
-        .padding(8)
-        .help(playback.rotationIsAutomatic
-              ? "Turned automatically because the video is stored sideways. Click to turn it a quarter turn if it's still wrong; your choice is remembered."
-              : "Turn the picture a quarter turn clockwise. Remembered for this recording; the video file isn't changed.")
-        .accessibilityLabel("Rotate video")
-        .accessibilityIdentifier("rotateVideo")
+        .help(help)
     }
 
     // MARK: - Helpers
@@ -253,6 +273,12 @@ struct RootView: View {
 
     private func handleKey(_ event: NSEvent, held: Set<String>) -> NSEvent? {
         guard state.selectedSession != nil else { return event }
+        // < and > change playback speed in every step.
+        let typed = event.charactersIgnoringModifiers ?? ""
+        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty, typed == "<" || typed == ">" {
+            playback.stepRate(by: typed == "<" ? -1 : 1)
+            return nil
+        }
         if state.retirement != nil {
             // Watch only: play/pause and frame or quarter-second steps.
             let mods = event.modifierFlags.intersection([.command, .control, .option])

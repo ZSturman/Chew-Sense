@@ -288,6 +288,7 @@ struct ChewDecisionCard: View {
     }
 
     /// Replay from the clip's start, pause/resume and loop on/off, right above the answers.
+    @ViewBuilder
     private func clipControls(replay: @escaping () -> Void, toggle: @escaping () -> Void) -> some View {
         HStack {
             Button(action: replay) {
@@ -312,6 +313,7 @@ struct ChewDecisionCard: View {
         }
         .controlSize(.large)
         .onChange(of: loopClips) { _, loop in playback.setLooping(loop) }
+        SpeedControl()
     }
 
     private func acceptAndAdvance(_ chew: ReviewChew) {

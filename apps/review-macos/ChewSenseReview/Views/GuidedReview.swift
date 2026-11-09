@@ -364,7 +364,11 @@ struct GuidePanel: View {
                 Button("Add chew", systemImage: "plus") { addChewAtPlayhead() }
                     .help("Add a chew centred on the playhead (A)")
             }
+            SpeedControl()
             WatchProgress()
+            Text("Each chew you mark flashes on the video, so you can tell which ones you already have.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(state.chews.isEmpty ? "No chews marked yet." : "\(state.chews.count) chew\(state.chews.count == 1 ? "" : "s") marked.")
                 .foregroundStyle(.secondary)
             Text("Suggestions stay hidden so this review is an independent check of the detector.")
@@ -388,7 +392,7 @@ struct GuidePanel: View {
                 Text(state.chews.isEmpty ? "You marked no chews." : "You marked \(state.chews.count) chew\(state.chews.count == 1 ? "" : "s").")
             } else {
                 StepHeading(number: stepNumber, title: "Watch for missed chews",
-                            detail: "Play the whole recording. If you see a chew without a marker, pause where the mouth is open widest and press A (Add chew).")
+                            detail: "Play the whole recording. Every marked chew flashes on the video. A chew with no flash is missed: pause where the mouth is open widest and press A (Add chew).")
                 Text(decisionSummary).foregroundStyle(.secondary)
             }
             HStack {
@@ -397,6 +401,7 @@ struct GuidePanel: View {
                     Button("Add chew", systemImage: "plus") { addChewAtPlayhead() }
                 }
             }
+            SpeedControl()
             WatchProgress()
             Divider()
             if let blocker = state.finishBlocker {
@@ -614,6 +619,91 @@ struct StepPills: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("step-\(step.rawValue)")
             }
+        }
+    }
+}
+
+/// Playback speed, shown wherever something plays. Shared and remembered; `<` / `>` step it.
+struct SpeedControl: View {
+    @EnvironmentObject var playback: PlaybackController
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "speedometer").foregroundStyle(.secondary)
+                .help("Playback speed. Slower for precise markers, faster to review quickly (< and > keys).")
+            Picker("Speed", selection: Binding(get: { playback.playbackRate }, set: { playback.setPlaybackRate($0) })) {
+                ForEach(PlaybackController.rates, id: \.self) { rate in
+                    Text(Self.label(rate)).tag(rate)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .accessibilityIdentifier("speedControl")
+    }
+
+    static func label(_ rate: Double) -> String {
+        switch rate {
+        case 0.25: "¼×"
+        case 0.5: "½×"
+        case 0.75: "¾×"
+        default: rate == rate.rounded() ? "\(Int(rate))×" : "\(rate)×"
+        }
+    }
+}
+
+/// Flashes each chew on the video itself, so the eye can stay on the face: a
+/// glow that peaks when the mouth is open widest and fades towards both closed
+/// ends (back-to-back chews stay distinct), with the chew's number.
+struct ChewOverlay: View {
+    @EnvironmentObject var state: ReviewerState
+    @EnvironmentObject var playback: PlaybackController
+
+    struct Flash: Equatable {
+        let chewID: String
+        let number: Int
+        let total: Int
+        let intensity: Double
+        let disposition: ReviewDisposition?
+    }
+
+    /// The chew under `time` (ignoring rejected and unclear ones) and how bright its flash is.
+    static func flash(at time: Double, chews: [ReviewChew]) -> Flash? {
+        let shown = chews.filter { $0.disposition == nil || $0.disposition?.contributesPhaseSupervision == true }
+        guard let index = shown.firstIndex(where: { $0.startTS <= time && time < $0.endTS }) else { return nil }
+        let chew = shown[index]
+        let rise = max(chew.peakTS - chew.startTS, 0.001), fall = max(chew.endTS - chew.peakTS, 0.001)
+        let intensity = time <= chew.peakTS ? (time - chew.startTS) / rise : (chew.endTS - time) / fall
+        return Flash(chewID: chew.id, number: index + 1, total: shown.count,
+                     intensity: min(1, max(0.15, intensity)), disposition: chew.disposition)
+    }
+
+    var body: some View {
+        if let flash = Self.flash(at: playback.currentTime, chews: state.chews) {
+            let color = Self.color(flash.disposition)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(color.opacity(flash.intensity), lineWidth: 10)
+                    .shadow(color: color.opacity(flash.intensity * 0.8), radius: 12)
+                Label("Chew \(flash.number) of \(flash.total)", systemImage: "circle.fill")
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(color.opacity(0.35 + 0.5 * flash.intensity), in: Capsule())
+                    .padding(16)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// Same colours as the timeline: grey suggestion, green accepted, orange fixed, blue added.
+    static func color(_ disposition: ReviewDisposition?) -> Color {
+        switch disposition {
+        case .accepted: .green
+        case .edited: .orange
+        case .added: .blue
+        default: .gray
         }
     }
 }

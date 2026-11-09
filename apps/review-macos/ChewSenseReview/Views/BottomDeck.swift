@@ -679,7 +679,7 @@ struct TransportBar: View {
                 .foregroundStyle(.white)
 
             Picker("Rate", selection: rateBinding) {
-                ForEach([0.25, 0.5, 0.75, 1.0, 1.5, 2.0], id: \.self) { r in
+                ForEach(PlaybackController.rates, id: \.self) { r in
                     Text(String(format: "%.2gx", r)).tag(r)
                 }
             }

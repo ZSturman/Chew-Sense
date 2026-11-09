@@ -10,7 +10,14 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var isPlaying = false
     @Published private(set) var isLooping = false
-    @Published var playbackRate: Double = 1.0
+    /// Speeds offered everywhere; slower helps place markers precisely, faster speeds up review.
+    static let rates: [Double] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
+    static let rateKey = "ChewSenseReview.playbackRate"
+    /// Remembered between launches; applies to clips and whole-recording playback alike.
+    @Published private(set) var playbackRate: Double = {
+        let saved = UserDefaults.standard.double(forKey: PlaybackController.rateKey)
+        return PlaybackController.rates.contains(saved) ? saved : 1.0
+    }()
     @Published private(set) var displayQuarterTurns = 0
     /// True while the display follows Vision's suggestion rather than a choice the reviewer made.
     @Published private(set) var rotationIsAutomatic = false
@@ -45,6 +52,10 @@ final class PlaybackController: ObservableObject {
 
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var readyObservation: NSKeyValueObservation?
+    /// Where the first picture is. Some Collect files begin with a few
+    /// milliseconds of empty edit, which would show a black frame at 0.
+    private(set) var firstFrameTime: Double = 0
     private var durationTask: Task<Void, Never>?
     private var rangeStart: Double?
     private var rangeEnd: Double?
@@ -69,6 +80,7 @@ final class PlaybackController: ObservableObject {
             url: url, recordingID: recordingID, suggested: suggestedQuarterTurns)
         currentTime = 0
         duration = 0
+        firstFrameTime = 0
         pendingSeek = nil
         queuedFrameSteps = 0
         durationTask?.cancel()
@@ -82,6 +94,15 @@ final class PlaybackController: ObservableObject {
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.didPlayToEnd() }
+        }
+        // The layer stays black until something seeks or plays; show the frame
+        // at the playhead as soon as the video can be displayed.
+        readyObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .readyToPlay else { return }
+            Task { @MainActor in
+                guard let self, self.player.currentItem === item, !self.isPlaying, self.pendingSeek == nil else { return }
+                self.seek(to: self.currentTime)
+            }
         }
         installTimeObserver()
         loadDuration(for: item.asset)
@@ -171,7 +192,14 @@ final class PlaybackController: ObservableObject {
 
     func setPlaybackRate(_ rate: Double) {
         playbackRate = rate
+        UserDefaults.standard.set(rate, forKey: Self.rateKey)
         if isPlaying { player.rate = Float(rate) }
+    }
+
+    /// One step slower (negative) or faster (positive) through `rates`.
+    func stepRate(by steps: Int) {
+        let index = Self.rates.firstIndex(of: playbackRate) ?? Self.rates.firstIndex(of: 1.0)!
+        setPlaybackRate(Self.rates[min(max(index + steps, 0), Self.rates.count - 1)])
     }
 
     func setLoop(start: Double, end: Double, enabled: Bool) {
@@ -246,6 +274,14 @@ final class PlaybackController: ObservableObject {
                 let seconds = CMTimeGetSeconds(loadedDuration)
                 guard !Task.isCancelled, seconds.isFinite, seconds > 0 else { return }
                 await MainActor.run { self?.duration = seconds }
+                let segments = try await asset.loadTracks(withMediaType: .video).first?.load(.segments) ?? []
+                let first = segments.first { !$0.isEmpty }?.timeMapping.target.start.seconds ?? 0
+                guard !Task.isCancelled, first.isFinite, first > 0, first < 1 else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.firstFrameTime = first
+                    if !self.isPlaying, self.pendingSeek == nil, self.currentTime < first { self.seek(to: first) }
+                }
             } catch {
                 await MainActor.run { self?.duration = 0 }
             }
@@ -253,7 +289,7 @@ final class PlaybackController: ObservableObject {
     }
 
     private func clampedTime(_ seconds: Double) -> Double {
-        let lowerBound = max(0, seconds)
+        let lowerBound = max(firstFrameTime, seconds)
         guard duration.isFinite, duration > 0 else { return lowerBound }
         return min(lowerBound, duration)
     }

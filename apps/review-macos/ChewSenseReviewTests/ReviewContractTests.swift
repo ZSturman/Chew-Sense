@@ -519,6 +519,77 @@ final class ReviewContractTests: XCTestCase {
         XCTAssertTrue(PlaybackController.initialRotation(url: url, recordingID: id, suggested: 1) == (2, false))
     }
 
+    @MainActor
+    func testChewFlashPeaksAtWidestOpeningAndKeepsBackToBackChewsApart() throws {
+        let fixture = try makeSessionFixture(chews: [
+            chew("ch_0001", 0.10, 0.20, 0.30), chew("ch_0002", 0.30, 0.40, 0.50), chew("ch_0003", 0.60, 0.70, 0.80),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let state = ReviewerState()
+        state.loadSession(fixture.session)
+        state.acceptChew(id: "ch_0001")
+        state.selectChew(id: "ch_0003")
+        state.deleteSelectedOrAt(videoTime: 0.7)   // rejected: never flashes
+        let peak = try XCTUnwrap(ChewOverlay.flash(at: 0.20, chews: state.chews))
+        XCTAssertEqual(peak.chewID, "ch_0001")
+        XCTAssertEqual(peak.intensity, 1, accuracy: 1e-9)
+        XCTAssertEqual(peak.disposition, .accepted)
+        XCTAssertEqual([peak.number, peak.total], [1, 2])
+        // Near the shared closed boundary the flash dims, then the next chew takes over.
+        XCTAssertLessThan(try XCTUnwrap(ChewOverlay.flash(at: 0.295, chews: state.chews)).intensity, 0.2)
+        XCTAssertEqual(ChewOverlay.flash(at: 0.30, chews: state.chews)?.chewID, "ch_0002")
+        XCTAssertNil(ChewOverlay.flash(at: 0.55, chews: state.chews))
+        XCTAssertNil(ChewOverlay.flash(at: 0.70, chews: state.chews))
+    }
+
+    @MainActor
+    func testFirstPictureIsShownWhenTheTrackStartsAfterZero() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = try await makeVideo(frames: 25, in: directory)
+        // Rebuild it with a 50 ms empty edit at the start, like some Collect files (5 ms).
+        let asset = AVURLAsset(url: source)
+        let composition = AVMutableComposition()
+        let track = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let sourceTracks = try await asset.loadTracks(withMediaType: .video)
+        let sourceTrack = try XCTUnwrap(sourceTracks.first)
+        let range = try await sourceTrack.load(.timeRange)
+        try track.insertTimeRange(range, of: sourceTrack, at: CMTime(value: 50, timescale: 1000))
+        let shifted = directory.appending(path: "shifted.mov")
+        let export = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough))
+        export.outputURL = shifted
+        export.outputFileType = .mov
+        await export.export()
+        XCTAssertEqual(export.status, .completed, export.error?.localizedDescription ?? "")
+
+        let playback = PlaybackController()
+        playback.load(url: shifted)
+        try await waitForPlayback("first frame, \(playback.firstFrameTime)") { playback.firstFrameTime > 0 }
+        XCTAssertEqual(playback.firstFrameTime, 0.05, accuracy: 0.002)
+        try await waitForPlayback("parked on first frame, \(playback.currentTime)") { playback.currentTime >= 0.049 }
+        playback.seekToStart()
+        XCTAssertEqual(playback.currentTime, 0.05, accuracy: 0.002)
+    }
+
+    @MainActor
+    func testPlaybackSpeedStepsAndIsRemembered() {
+        let saved = UserDefaults.standard.object(forKey: PlaybackController.rateKey)
+        defer { UserDefaults.standard.set(saved, forKey: PlaybackController.rateKey) }
+        let playback = PlaybackController()
+        playback.setPlaybackRate(1.0)
+        playback.stepRate(by: -1)
+        XCTAssertEqual(playback.playbackRate, 0.75)
+        playback.stepRate(by: -10)
+        XCTAssertEqual(playback.playbackRate, 0.25)
+        playback.stepRate(by: 10)
+        XCTAssertEqual(playback.playbackRate, 2.0)
+        playback.setPlaybackRate(0.5)
+        XCTAssertEqual(PlaybackController().playbackRate, 0.5)   // a new launch starts at the saved speed
+        XCTAssertEqual(SpeedControl.label(0.5), "½×")
+        XCTAssertEqual(SpeedControl.label(1.5), "1.5×")
+    }
+
     func testRecordingNamesAreReadable() {
         XCTAssertEqual(RecordingName.of("Guided-baseline-90s-20261102-171334-F83AB32C"), "Baseline 90s (Nov 2)")
         XCTAssertEqual(RecordingName.of("Not-eating-20261026-174428-C27C9380"), "Not eating (Oct 26)")

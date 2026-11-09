@@ -25,6 +25,13 @@ chewing spans, mismatched files: nothing is saved and details are under
 timer are under **More options**; signal charts, annotated video and rotation
 are in the header's ⋯ menu. ⌘0 returns to Up next, ⌘1 shows all recordings.
 
+Every marked chew flashes on the video itself (a glow and "Chew n of N" that
+peak when the mouth is open widest and fade at both closed ends, so back-to-back
+chews stay distinct; grey suggestion, green accepted, orange fixed, blue added;
+rejected and unclear chews never flash). The eye button on the video hides it.
+In a blind review only your own marks flash. A speed control (¼× to 2×, also
+`<` / `>`) sits in every step and is remembered.
+
 Videos stored sideways (portrait file, landscape picture, no rotation metadata)
 are turned automatically when Vision's face pose reads about ±90° across the
 recording (checked on the Nov 2 baseline; the other direction by symmetry).
