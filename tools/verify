@@ -50,15 +50,21 @@ run_fixture() {
 }
 
 select_simulator() {
+  local available_devices
+  available_devices="$(xcrun simctl list devices available)"
+
   if [[ -n "${CHEWSENSE_SIMULATOR_ID:-}" ]]; then
-    printf '%s\n' "$CHEWSENSE_SIMULATOR_ID"
-    return
+    if awk -F '[()]' -v wanted="$CHEWSENSE_SIMULATOR_ID" '$2 == wanted { found = 1 } END { exit found ? 0 : 1 }' <<<"$available_devices"; then
+      printf '%s\n' "$CHEWSENSE_SIMULATOR_ID"
+      return
+    fi
+    printf 'CHEWSENSE_SIMULATOR_ID=%s is unavailable on this runner; selecting an available iPhone simulator.\n' "$CHEWSENSE_SIMULATOR_ID" >&2
   fi
 
   local device_id
-  device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone.*Booted/{print $2; exit}')"
+  device_id="$(awk -F '[()]' '/iPhone.*Booted/{print $2; exit}' <<<"$available_devices")"
   if [[ -z "$device_id" ]]; then
-    device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')"
+    device_id="$(awk -F '[()]' '/iPhone/{print $2; exit}' <<<"$available_devices")"
     if [[ -z "$device_id" ]]; then
       printf 'No available iPhone simulator was found. Set CHEWSENSE_SIMULATOR_ID.\n' >&2
       exit 2
