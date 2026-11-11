@@ -4,6 +4,11 @@ Run commands from the repository root.
 
 ## Environment And Verification
 
+Requirements: Python 3.12, uv, and FFmpeg's `ffmpeg` and `ffprobe` commands.
+On macOS with Homebrew, install the video tools with `brew install ffmpeg`.
+The Python CI job installs them explicitly; they are not supplied by `uv sync`.
+Apple app checks also require Xcode and an available iPhone simulator.
+
 ```bash
 uv sync --locked
 ./tools/verify fast       # repository boundary + all Python tests

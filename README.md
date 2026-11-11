@@ -135,6 +135,18 @@ not source code and are ignored by Git.
 
 ## Documentation
 
+For development on macOS, install Xcode, Python 3.12, uv and FFmpeg
+(`brew install ffmpeg` supplies both video commands). Then, from this checkout:
+
+```sh
+uv sync --locked
+.venv/bin/python -m pytest pipelines/motion/tests/test_eating_validity.py -q
+```
+
+The focused tests use synthetic fixtures; real recordings and trained experiment
+outputs are intentionally excluded from Git. See the [runbook](docs/RUNBOOK.md)
+for app builds, broader checks and working with a local dataset.
+
 - [Start here](START_HERE.md)
 - [Documentation index](docs/README.md)
 - [Architecture](docs/ARCHITECTURE.md)

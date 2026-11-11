@@ -1,5 +1,17 @@
 # Publication review — November 10, 2026
 
+Published the active project to GitHub main (`c7210bd`) and deployed the updated
+portfolio (`4ae9716`). Its production marker matches, and the live project page
+passes 1440 px and 390 px checks for current text, source/study links, loaded
+images and no horizontal overflow, with analytics suppressed during QA.
+Portfolio validation also passed 34 focused tests and 33 desktop/mobile media
+checks (five fixture-dependent cases skipped).
+
+The first full GitHub Python run exposed missing runner video tools:
+`FileNotFoundError: ffmpeg` and missing `ffprobe` (256 tests passed). CI now
+installs the documented FFmpeg requirement before running the checks. No
+application code changes are needed for that runner setup failure.
+
 Reviewed Claude's validity-study changes and the stored development evidence.
 The initial focused motion checks passed (52 tests); after review fixes, the
 validity and related loop checks passed (25 tests). Targeted lint checks passed.

@@ -14,6 +14,15 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked
+      - name: Install video test tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            brew install ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
       - run: ./tools/verify fast
       - run: ./tools/verify fixture
 
