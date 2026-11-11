@@ -11,9 +11,10 @@ intervals because windows within one session are strongly correlated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
+from scipy.stats import beta
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from .dataset import CHEWING, NOT_CHEWING, EatingSession, _label_runs
@@ -85,6 +86,91 @@ def choose_threshold(y: np.ndarray, p: np.ndarray) -> float:
         if f1 >= best_f1:
             best_threshold, best_f1 = float(threshold), f1
     return best_threshold
+
+
+def nested_threshold_metrics(groups: np.ndarray, y: np.ndarray, p: np.ndarray) -> dict[str, Any]:
+    """Window metrics when each group's threshold is chosen on the other groups.
+
+    ``choose_threshold`` on all development predictions and scoring those same
+    predictions lets the threshold see the windows it is scored on.  Here every
+    held-out group (fold or sitting) is thresholded with the F1-optimal value
+    of the remaining groups. This removes direct threshold selection on the
+    scored group. It is not fully nested cross-validation: the other groups'
+    out-of-fold models can have trained on the scored group.
+    """
+
+    y = np.asarray(y).astype(int)
+    p = np.asarray(p, dtype=np.float64)
+    groups = np.asarray(groups)
+    predicted = np.zeros(len(y), dtype=bool)
+    thresholds: dict[str, float] = {}
+    for group in sorted(set(groups.tolist()), key=str):
+        held = groups == group
+        if len(np.unique(y[~held])) < 2:
+            return {"available": False, "reason": "a held-out group leaves only one class to choose a threshold on"}
+        thresholds[str(group)] = choose_threshold(y[~held], p[~held])
+        predicted[held] = p[held] >= thresholds[str(group)]
+    tp = int((predicted & (y == 1)).sum())
+    fp = int((predicted & (y == 0)).sum())
+    fn = int((~predicted & (y == 1)).sum())
+    tn = int((~predicted & (y == 0)).sum())
+    precision, recall = _safe_div(tp, tp + fp), _safe_div(tp, tp + fn)
+    return {
+        "available": True,
+        "thresholds": thresholds,
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "precision": precision,
+        "recall": recall,
+        "f1": _safe_div(2 * tp, 2 * tp + fp + fn),
+        "false_positive_rate": _safe_div(fp, fp + tn),
+    }
+
+
+def exact_interval(successes: int, trials: int, level: float = 0.95) -> list[float] | None:
+    """Clopper-Pearson interval for a proportion of independent recordings."""
+
+    if trials <= 0:
+        return None
+    alpha = 1.0 - level
+    low = 0.0 if successes == 0 else float(beta.ppf(alpha / 2, successes, trials - successes + 1))
+    high = 1.0 if successes == trials else float(beta.ppf(1 - alpha / 2, successes + 1, trials - successes))
+    return [low, high]
+
+
+def recording_level(
+    per_session: Mapping[str, Mapping[str, Any]], *, min_detected_s: float = 10.0
+) -> dict[str, Any]:
+    """One decision per recording: did the decoder report chewing in it?
+
+    ``per_session`` holds :func:`bout_metrics` results.  A recording counts as
+    flagged when its decoded bouts total at least ``min_detected_s`` seconds.
+    Eating recordings have human chewing time; non-eating recordings have
+    only human not-chewing time.  The intervals treat recordings as
+    independent, which recordings of one sitting are not.
+    """
+
+    rows = []
+    for session_id, item in sorted(per_session.items()):
+        detected = float(sum(b["end"] - b["start"] for b in item.get("predicted_bout_spans", [])))
+        kind = ("eating" if item.get("chewing_seconds", 0) > 0
+                else "non_eating" if item.get("negative_seconds", 0) > 0 else "unlabelled")
+        rows.append({"session_id": session_id, "kind": kind, "detected_chewing_s": round(detected, 2),
+                     "bouts": int(item.get("predicted_bouts", 0)), "flagged": detected >= min_detected_s})
+    eating = [r for r in rows if r["kind"] == "eating"]
+    other = [r for r in rows if r["kind"] == "non_eating"]
+    found, false = sum(r["flagged"] for r in eating), sum(r["flagged"] for r in other)
+    return {
+        "rule": f"decoded chewing bouts total at least {min_detected_s:g} s",
+        "eating_recordings": len(eating),
+        "eating_recordings_flagged": found,
+        "eating_recall": _safe_div(found, len(eating)),
+        "eating_recall_ci95": exact_interval(found, len(eating)),
+        "non_eating_recordings": len(other),
+        "non_eating_recordings_flagged": false,
+        "non_eating_false_positive_rate": _safe_div(false, len(other)),
+        "non_eating_false_positive_rate_ci95": exact_interval(false, len(other)),
+        "recordings": rows,
+    }
 
 
 def session_bootstrap(

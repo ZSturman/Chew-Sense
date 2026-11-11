@@ -9,7 +9,8 @@ For the first physical experiment, follow [Phase 0: recording and review](docs/P
 The software path has automated, synthetic-training and legacy-video smoke
 evidence. A new physical baseline has been captured; synchronization and
 detection accuracy still require independent annotation and timing checks.
-No wearer model has been trained or promoted.
+An experimental chewing-bout detector has been trained and bundled in Live;
+the personalized temporal chew-cycle model has not passed promotion gates.
 
 After Phase 0, the [guided collection loop](docs/GUIDED_LOOP.md) adds
 **Collect Required Data** on the iPhone, a Mac service (`tools/loop-service
@@ -33,6 +34,14 @@ evaluated the first motion-only chewing-bout detectors on real recordings:
 in `workspace/experiments/eating/`. These are pilot results; nothing was
 promoted or deployed.
 
+On November 10, a [validity study](docs/VALIDITY_2026-11-10.md) checked what
+those scores mean. Chewing is separated from pauses inside meals the model
+never saw, and the detector frozen on November 4 found all chewing in a
+recording made five days later. The detector responds to 5–25 Hz jaw
+vibration, not the chewing rhythm, so talking, gum and soft food are the open
+risks; dedicated confound and texture takes remain pending. One wearer; this
+study did not deploy a replacement detector.
+
 Phase 2 (November 3, [report](docs/PHASE2_2026-11-03.md)) added assisted
 labeling, an on-device version of the selected detector and a training
 dashboard:
@@ -53,6 +62,8 @@ dashboard:
 ```sh
 .venv/bin/chewsense-motion pipeline-status        # refresh what Review shows
 .venv/bin/chewsense-motion eating-experiment --dev-only   # retrain/check; locked test untouched
+.venv/bin/chewsense-motion eating-validity         # what the scores can be trusted to mean (development only)
+.venv/bin/chewsense-motion eating-prospective      # frozen Live detector on later recordings, scored once each
 .venv/bin/chewsense-motion assist-propose --loop   # chewing-span proposals for loop recordings
 .venv/bin/chewsense-motion assist-eval             # proposal accuracy against human labels
 .venv/bin/chewsense-motion behavior-eval           # bout, pause, cadence and alignment checks

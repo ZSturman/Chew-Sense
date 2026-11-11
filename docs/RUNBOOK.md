@@ -43,6 +43,8 @@ refuses to relabel rather than substituting the first motion row.
 chewsense-motion eating-experiment                 # CV + locked test + HTML report
 chewsense-motion eating-experiment --dev-only      # exploration; locked test untouched
 chewsense-motion eating-report                     # rebuild the latest report
+chewsense-motion eating-validity                   # what the scores can be trusted to mean; development only
+chewsense-motion eating-prospective                # frozen Live detector on later recordings, scored once each
 chewsense-motion video-teacher-eval --vision-root <folder of chewsense-vision run outputs>
 ```
 
@@ -52,6 +54,13 @@ there is permanent; delete it only to start a new, separately reported
 evaluation. Labels are human coarse chewing spans with provenance tiers
 (see `pipelines/motion/pipeline/eating/dataset.py`). Runs are experimental
 and are never registered or deployed.
+
+Development folds keep recordings of one sitting together (recordings that
+start within 45 minutes of the previous one's end), and intervals resample
+sittings. `--cv-grouping session` gives the per-recording folds of runs before
+2026-11-10. `--window-grid sample` ends each window on a measured sample; it
+is a comparison only until Live implements the same grid, and such runs
+cannot be exported. Background: [VALIDITY_2026-11-10](VALIDITY_2026-11-10.md).
 
 ## Vision And Review
 

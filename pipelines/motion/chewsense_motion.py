@@ -1381,6 +1381,8 @@ def cmd_eating_experiment(args: argparse.Namespace) -> int:
         tcn_epochs=args.tcn_epochs,
         seed=args.seed,
         evaluate_test=not args.dev_only,
+        cv_grouping=args.cv_grouping,
+        window_grid=args.window_grid,
         note=args.note or "",
     )
     try:
@@ -1394,6 +1396,68 @@ def cmd_eating_experiment(args: argparse.Namespace) -> int:
         print(f"Eating experiment failed: {exc}")
         return 1
     print(f"Report: {run_dir / 'report.html'}")
+    return 0
+
+
+def cmd_eating_validity(args: argparse.Namespace) -> int:
+    """Development-only checks of what the chewing-bout scores can be trusted to mean."""
+
+    from pipeline.eating.validity import run_validity_study
+
+    try:
+        run_dir = run_validity_study(
+            workspace=get_workspace_root(),
+            repo_root=get_repo_root(),
+            output_root=Path(args.output) if args.output else None,
+            permutations=args.permutations,
+            seed=args.seed,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(f"Validity study failed: {exc}")
+        return 1
+    print((run_dir / "summary.md").read_text())
+    print(f"Details: {run_dir / 'validity.json'}")
+    return 0
+
+
+def cmd_eating_prospective(args: argparse.Namespace) -> int:
+    """Score new development recordings once with the exported detector that predates them."""
+
+    from pipeline.eating.prospective import update_ledger
+    from pipeline.eating.runtime import load_spec
+    from pipeline.eating.validity import load_development
+
+    workspace = get_workspace_root()
+    root = _eating_root(args)
+    spec_path = Path(args.spec) if args.spec else get_repo_root() / LIVE_EATING_SPEC
+    try:
+        spec = load_spec(spec_path)
+        run_dir = root / "runs" / spec["provenance"]["run_id"]
+        metrics = json.loads((run_dir / "metrics.json").read_text())
+        manifest = json.loads((run_dir / "dataset_manifest.json").read_text())
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Cannot read the detector or its training run: {exc}")
+        return 1
+    _, sessions, split_of, _ = load_development(workspace, splits_path=root / "splits.json")
+    ledger = update_ledger(
+        spec=spec, sessions=sessions, split_of=split_of,
+        trained_ids={row["session_id"] for row in manifest["sessions"]},
+        model_finished_at=metrics["finished_at"],
+        ledger_path=root / "prospective" / f"{spec['model_id']}.json",
+    )
+    summary = ledger["summary"]
+    print(f"Detector {spec['model_id']} (finished {metrics['finished_at'][:10]}), threshold {spec['decision']['threshold']}")
+    print(f"Prospective development recordings: {summary['recordings']} "
+          f"({summary['recordings_with_chewing']} with chewing); added now: {ledger['added_now'] or 'none'}")
+    for entry in ledger["entries"]:
+        windows = entry.get("windows") or {}
+        print(f"  {entry['session_id']}: recall {windows.get('recall')}, false-positive rate "
+              f"{windows.get('false_positive_rate')}, bouts {entry['bouts']['detected_bouts']}/"
+              f"{entry['bouts']['reference_bouts']}, false bouts {entry['bouts']['false_bouts']}")
+    for context, block in summary["by_context"].items():
+        print(f"    {context}: recall {block['recall']}, false-positive rate {block['false_positive_rate']} "
+              f"({block['tp'] + block['fn']} chewing, {block['fp'] + block['tn']} other windows)")
+    print(f"Ledger: {root / 'prospective' / (spec['model_id'] + '.json')}")
     return 0
 
 
@@ -2229,8 +2293,31 @@ Examples:
     p_eating.add_argument("--note", help="Free-text note stored in the run index")
     p_eating.add_argument("--dev-only", action="store_true",
                           help="Exploratory run: development cross-validation only; the locked test set is not touched")
+    p_eating.add_argument("--cv-grouping", choices=["sitting", "session"], default="sitting",
+                          help="Keep back-to-back recordings (one sitting) in one development fold (default), "
+                               "or deal single recordings as runs before 2026-11-10 did")
+    p_eating.add_argument("--window-grid", choices=["nominal", "sample"], default="nominal",
+                          help="Resampling grid: 'nominal' matches the exported Live detector; 'sample' ends "
+                               "each window on a measured sample (see docs/VALIDITY_2026-11-10.md)")
     p_eating.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
     p_eating.set_defaults(func=cmd_eating_experiment)
+
+    p_validity = subparsers.add_parser(
+        "eating-validity",
+        help="Development-only validity study: sittings, leakage, mechanism, simple baselines (locked test untouched)",
+    )
+    p_validity.add_argument("--permutations", type=int, default=500, help="Time-shift permutations for the within-meal null")
+    p_validity.add_argument("--seed", type=int, default=0)
+    p_validity.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
+    p_validity.set_defaults(func=cmd_eating_validity)
+
+    p_prospective = subparsers.add_parser(
+        "eating-prospective",
+        help="Score development recordings made after the exported detector, once each (locked test untouched)",
+    )
+    p_prospective.add_argument("--spec", help="Detector specification (default: the one bundled in Live)")
+    p_prospective.add_argument("--output", help="Experiment root (default: <workspace>/experiments/eating)")
+    p_prospective.set_defaults(func=cmd_eating_prospective)
 
     p_eating_report = subparsers.add_parser(
         "eating-report",

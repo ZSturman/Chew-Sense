@@ -12,6 +12,14 @@ changes split, so the test set stays untouched by model development:
 
 Only one wearer exists, so participant-level holdout is impossible; the
 report says so instead of implying cross-person generalization.
+
+Recordings are not independent of each other either.  Several were captured
+back to back in one *sitting* (same meal, same AirPods fit, same posture):
+the four ``Eating-20251203-06*`` recordings are one meal.  Development folds
+therefore keep a sitting together by default, and uncertainty is resampled
+over sittings.  The locked ``splits.json`` itself is per recording and is
+never rewritten; test recordings that share a sitting with development data
+are listed in every run instead (:func:`shared_sittings`).
 """
 
 from __future__ import annotations
@@ -19,9 +27,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .dataset import EatingSession
 
@@ -29,6 +37,8 @@ from .dataset import EatingSession
 SPLIT_VERSION = 1
 TEST = "test"
 DEV = "dev"
+CV_GROUPINGS = ("sitting", "session")
+SITTING_GAP_MINUTES = 45.0
 
 
 def _stratum(session: EatingSession) -> str:
@@ -119,16 +129,88 @@ def assign_splits(
     return payload
 
 
-def development_folds(sessions: Sequence[EatingSession], k: int = 5) -> dict[str, int]:
-    """Stratified chronological round-robin assignment of dev sessions to folds."""
+def _capture_time(session: EatingSession) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(str(session.created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return stamp.replace(tzinfo=None)
 
+
+def sitting_groups(
+    sessions: Sequence[EatingSession], *, gap_minutes: float = SITTING_GAP_MINUTES
+) -> dict[str, str]:
+    """Map each recording to its sitting: a run of back-to-back captures.
+
+    A recording joins the previous one's sitting when it starts within
+    ``gap_minutes`` of that recording's end.  A recording without a readable
+    capture time is its own sitting.  The key names the sitting's first
+    recording time, so it is stable when later recordings are added.
+    """
+
+    gap = timedelta(minutes=gap_minutes)
+    groups: dict[str, str] = {}
+    timed = [(stamp, s) for s in sessions if (stamp := _capture_time(s)) is not None]
+    current: str | None = None
+    last_end: datetime | None = None
+    for stamp, session in sorted(timed, key=lambda item: (item[0], item[1].session_id)):
+        if last_end is None or stamp - last_end > gap:
+            current = stamp.strftime("sitting-%Y%m%d-%H%M")
+        groups[session.session_id] = str(current)
+        end = stamp + timedelta(seconds=max(float(session.duration_s), 0.0))
+        last_end = end if last_end is None else max(last_end, end)
+    for session in sessions:
+        groups.setdefault(session.session_id, f"sitting-{session.session_id}")
+    return groups
+
+
+def shared_sittings(
+    sittings: Mapping[str, str], split_of: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    """Test recordings captured in the same sitting as development recordings."""
+
+    dev_by_sitting: dict[str, list[str]] = {}
+    for session_id, sitting in sittings.items():
+        if split_of.get(session_id) == DEV:
+            dev_by_sitting.setdefault(sitting, []).append(session_id)
+    return [
+        {"session_id": session_id, "sitting": sitting, "development_recordings": sorted(dev_by_sitting[sitting])}
+        for session_id, sitting in sorted(sittings.items())
+        if split_of.get(session_id) == TEST and sitting in dev_by_sitting
+    ]
+
+
+def development_folds(
+    sessions: Sequence[EatingSession],
+    k: int = 5,
+    *,
+    grouping: str = "session",
+    sittings: Mapping[str, str] | None = None,
+) -> dict[str, int]:
+    """Stratified chronological round-robin assignment of dev sessions to folds.
+
+    ``grouping="sitting"`` deals whole sittings, so recordings of one meal are
+    never split between fitting and held-out folds.  ``"session"`` deals single
+    recordings (the rule every run before 2026-11-10 used).
+    """
+
+    if grouping not in CV_GROUPINGS:
+        raise ValueError(f"cv grouping must be one of {CV_GROUPINGS}")
+    if grouping == "sitting":
+        sittings = sittings if sittings is not None else sitting_groups(sessions)
+        members_of: dict[str, list[EatingSession]] = {}
+        for session in sessions:
+            members_of.setdefault(sittings[session.session_id], []).append(session)
+    else:
+        members_of = {session.session_id: [session] for session in sessions}
+    units = [
+        (min((m.created_at, m.session_id) for m in members), any(m.has_chewing for m in members), members)
+        for members in members_of.values()
+    ]
     folds: dict[str, int] = {}
-    for stratum in ("contains_chewing", "negative_only"):
-        members = sorted(
-            (s for s in sessions if _stratum(s) == stratum),
-            key=lambda s: (s.created_at, s.session_id),
-        )
-        offset = 0 if stratum == "contains_chewing" else 2
-        for index, session in enumerate(members):
-            folds[session.session_id] = (index + offset) % k
+    for chewing, offset in ((True, 0), (False, 2)):
+        stratum = sorted((u for u in units if u[1] == chewing), key=lambda u: u[0])
+        for index, (_, _, members) in enumerate(stratum):
+            for session in members:
+                folds[session.session_id] = (index + offset) % k
     return folds

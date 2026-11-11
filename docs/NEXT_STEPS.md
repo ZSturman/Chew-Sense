@@ -1,3 +1,82 @@
+# Publication review — November 10, 2026
+
+Reviewed Claude's validity-study changes and the stored development evidence.
+The initial focused motion checks passed (52 tests); after review fixes, the
+validity and related loop checks passed (25 tests). Targeted lint checks passed.
+The stored study reports zero locked-test windows and three test consultations
+before and after; this review did not rerun training or the real-data study.
+Native builds, device recognition and TestFlight upload were not repeated.
+Corrected a lint error,
+clarified that threshold-from-other-folds is not fully nested cross-validation,
+and fixed prospective eligibility: filename times are local, whereas model
+completion is UTC. New ledger entries require an absolute capture time after
+training; unknown times and legacy migration dates cannot establish this.
+Existing prospective entries and raw recordings are preserved.
+
+The public README and current status now distinguish the experimental detector
+already bundled in Live from the unpromoted temporal chew-cycle model. The
+portfolio update uses the active repository and study, states the one-wearer
+limits, and retains existing media. No model export, app install or service
+restart is part of this publication.
+
+Next device work is unchanged: record the five confound/texture takes below,
+then a complete Natural Meal on another day. Run
+`.venv/bin/chewsense-motion eating-prospective` from this repository before
+retraining. Expect each eligible development take to be scored once; the
+locked test and detector remain unchanged. Aligning Live's grid and changing
+split policy remain separate decisions.
+
+---
+
+# Checkpoint — November 10, 2026: validity study of the AirPods chewing detector
+
+Full write-up: [VALIDITY_2026-11-10.md](VALIDITY_2026-11-10.md). Development
+recordings only; the locked test was not consulted (still 3). Nothing was
+deployed, exported or restarted during the study. The publication review above
+records subsequent source and documentation checks.
+
+- **What the scores mean.** Chewing is separated from pauses inside meals the
+  model never saw (AUC-ROC 0.965; a time-shift null never exceeded 0.64). No
+  recording-context shortcut was detected in this dataset. Splitting one meal across folds did not
+  inflate results. The in-sample threshold did, slightly: development F1 is
+  0.855 with the threshold from other folds, not 0.880. Development is 12
+  sittings, 5 with chewing, so intervals are wide (F1 0.73–0.93).
+- **Forward test.** Live's detector (frozen Nov 4) scored the Nov 9 baseline
+  once: 50 of 50 chewing windows, 0 of 88 false, 2 of 2 bouts. One recording.
+  Ledger: `workspace/experiments/eating/prospective/`.
+- **Mechanism.** The detector responds to 5–25 Hz jaw vibration, not the
+  chewing rhythm. Talking has half of chewing's amplitude in that band. Soft
+  food, gum and drinking are untested.
+- **Defect found.** The resampling grid damps that band by up to 2× depending
+  on a sub-sample offset that drifts in Live (about one cycle per 10 minutes).
+  Predicted effect in Live: false-positive rate between 3.3% and 7.2% at the
+  same threshold. Training can now use a sample-aligned grid
+  (`--window-grid sample`); Live cannot yet, and export refuses such runs.
+- **Pipeline changes.** `eating-validity`, `eating-prospective`; folds and
+  intervals by sitting (default; `--cv-grouping session` for the old rule);
+  threshold-from-other-folds F1 and one-decision-per-recording results in every
+  run and report; the Training dashboard no longer lists the retired recording
+  for span review.
+- **Runs.** Reference `eating-20261110-151121` (identical to `-102927`):
+  gradient boosting AUC-PR 0.945, 19/19 bouts, 9 false bouts, 8/8 eating and
+  1/15 no-food recordings flagged. Comparisons: `-103640` (folds by recording),
+  `-103712` (sample grid). `splits.json` gained the Nov 9 baseline as
+  development; no other entry changed.
+- **Tests.** Motion suite 107 passed (13 new); loop tests that read experiment
+  results 16 passed. Stored predictions of `eating-20261108-105237` reproduced
+  to 1e-16.
+
+**Your next steps:**
+1. iPhone, Collect, one sitting (about 15 minutes): Soft Food, Crunchy Food,
+   Talking, Drinking, Gum Chewing. On another day: one complete Natural Meal.
+2. Then, on the Mac: `chewsense-motion eating-prospective`. It scores each
+   new development take with the frozen Live detector before any retraining.
+3. Decide: align Live's grid (needs a re-export, so your approval), and
+   whether takes from one sitting should share a split
+   ([details](VALIDITY_2026-11-10.md), §7).
+
+---
+
 # Checkpoint — November 9, 2026 (late): guided takes label themselves
 
 - **Collect:** a finished guided take saves its schedule as the chewing labels

@@ -36,13 +36,15 @@ from .evaluate import (
     bout_metrics,
     choose_threshold,
     grouped_window_metrics,
+    nested_threshold_metrics,
+    recording_level,
     session_bootstrap,
     threshold_sweep,
     window_metrics,
 )
 from .features import compute_features, feature_names
 from .models import MODEL_NAMES, fit_model, inference_latency_ms, make_model, predict
-from .splits import DEV, TEST, assign_splits, development_folds
+from .splits import DEV, TEST, assign_splits, development_folds, shared_sittings, sitting_groups
 
 
 @dataclass
@@ -60,6 +62,12 @@ class ExperimentConfig:
     evaluation_tiers: tuple[str, ...] = EVALUATION_TIERS
     bootstrap_resamples: int = 1000
     evaluate_test: bool = True
+    # "sitting" keeps recordings of one sitting in one fold and resamples sittings for
+    # the intervals; "session" is the per-recording rule of runs before 2026-11-10.
+    cv_grouping: str = "sitting"
+    # Where the resampling grid sits; see dataset.build_windows.  "nominal" matches
+    # the exported Live detector and every earlier run.
+    window_grid: str = "nominal"
     note: str = ""
     label_target: str = field(default="human_coarse_chewing_bout", init=False)
 
@@ -178,12 +186,14 @@ def run_experiment(
         stride_s=config.stride_s,
         guard_s=config.guard_s,
         min_valid_fraction=config.min_valid_fraction,
+        grid=config.window_grid,
     )
     features = compute_features(windows.X)
     split_payload = assign_splits(sessions, output_root / "splits.json", test_fraction=config.test_fraction)
     split_of = {sid: split_payload["assignments"][sid]["split"] for sid in by_id}
     dev_sessions = [s for s in sessions if split_of[s.session_id] == DEV]
-    fold_of = development_folds(dev_sessions, k=config.folds)
+    sittings = sitting_groups(sessions)
+    fold_of = development_folds(dev_sessions, k=config.folds, grouping=config.cv_grouping, sittings=sittings)
 
     frame = pd.DataFrame({
         "session_id": windows.session_id,
@@ -195,6 +205,7 @@ def run_experiment(
         "valid_fraction": windows.valid_fraction,
     })
     frame["split"] = frame["session_id"].map(split_of)
+    frame["sitting"] = frame["session_id"].map(sittings)
     frame["fold"] = frame["session_id"].map(fold_of).fillna(-1).astype(int)
     train_tier = frame["tier"].isin(config.training_tiers).to_numpy()
     eval_tier = frame["tier"].isin(config.evaluation_tiers).to_numpy()
@@ -208,6 +219,9 @@ def run_experiment(
         k: v for k, v in asdict(config).items()
         if k in {"window_s", "stride_s", "guard_s", "min_valid_fraction", "training_tiers"}
     }
+    if config.window_grid != "nominal":
+        # Only a non-default grid enters the fingerprint, so earlier runs keep theirs.
+        fingerprint_config["window_grid"] = config.window_grid
     fingerprint = dataset_fingerprint(sessions, fingerprint_config)
     models = [m for m in config.models if not (m == "tcn" and abs(config.window_s - 3.0) > 1e-9)]
     if len(models) != len(config.models):
@@ -270,16 +284,27 @@ def run_experiment(
                 entry[split_name] = None
                 continue
             metrics = window_metrics(y, p, threshold)
+            resample_units = (
+                frame.loc[rows, "sitting"].to_numpy() if config.cv_grouping == "sitting" else sids
+            )
             ci = {}
             for metric in ("f1", "recall", "false_positive_rate", "auc_pr"):
                 ci[metric] = session_bootstrap(
-                    sids, y, p,
+                    resample_units, y, p,
                     lambda yy, pp, m=metric: window_metrics(yy, pp, threshold)[m],
                     n_resamples=config.bootstrap_resamples,
                     seed=config.seed,
                 )
             metrics["ci95"] = ci
+            metrics["ci95_resampled_over"] = config.cv_grouping
             metrics["sessions"] = int(len(np.unique(sids)))
+            metrics["sittings"] = int(frame.loc[rows, "sitting"].nunique())
+            metrics["sittings_with_chewing"] = int(frame.loc[rows & (frame["label"] == 1), "sitting"].nunique())
+            if split_name == "dev_oof":
+                # The threshold above was chosen on these same predictions; this block is
+                # the estimate with the threshold chosen on the other folds only.
+                metrics["nested_threshold"] = nested_threshold_metrics(
+                    frame.loc[rows, "fold"].to_numpy(), y, p)
             metrics["by_context"] = grouped_window_metrics(frame.loc[rows, "context"].to_numpy(), y, p, threshold)
             metrics["by_tier"] = grouped_window_metrics(frame.loc[rows, "tier"].to_numpy(), y, p, threshold)
             metrics["by_session"] = grouped_window_metrics(sids, y, p, threshold)
@@ -296,6 +321,7 @@ def run_experiment(
                 )
             metrics["bouts"] = aggregate_bouts(list(per_session.values()))
             metrics["bouts_by_session"] = per_session
+            metrics["recordings"] = recording_level(per_session)
             entry[split_name] = metrics
         entry["inference_latency_ms"] = float(frame[f"latency_ms_{name}"].iloc[0])
         results[name] = entry
@@ -318,6 +344,7 @@ def run_experiment(
         session_rows.append({
             **session.summary(),
             "split": split_of[session.session_id],
+            "sitting": sittings[session.session_id],
             "fold": fold_of.get(session.session_id),
             "windows_total": int(mask.sum()),
             "windows_labelled": int((mask & (frame["label"] >= 0)).sum()),
@@ -328,6 +355,7 @@ def run_experiment(
         "artifact_type": "eating_detection_dataset",
         "fingerprint": fingerprint,
         "label_target": config.label_target,
+        "window_grid": config.window_grid,
         "label_tiers": list(LABEL_TIERS),
         "never_labels": [
             "guided instructions", "vision proposals", "automatic sources",
@@ -367,6 +395,16 @@ def run_experiment(
                 1 for s in sessions for i in s.intervals if i.label == "chewing"
             )),
             "motion_samples": int(sum(len(s.motion_t) for s in sessions)),
+        },
+        "independence": {
+            "cv_grouping": config.cv_grouping,
+            "sitting_rule": "recordings that start within 45 minutes of the previous recording's end",
+            "development_sittings": len({sittings[s.session_id] for s in dev_sessions}),
+            "development_sittings_with_chewing": len({
+                sittings[s.session_id] for s in dev_sessions if s.has_chewing}),
+            "test_sittings": len({sittings[sid] for sid in by_id if split_of[sid] == TEST}),
+            "test_recordings_sharing_a_development_sitting": shared_sittings(
+                {sid: sittings[sid] for sid in by_id}, split_of),
         },
         "results": results,
         "explanations": explanations,

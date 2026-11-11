@@ -119,9 +119,10 @@ def _proposal_state(session_id: str, workspace: Path) -> dict[str, Any] | None:
 
 
 def _never_trainable(row: Mapping[str, Any]) -> bool:
-    """Rejected for a reason a label cannot fix: incomplete guided take or diagnostic role."""
+    """Rejected for a reason a label cannot fix: incomplete guided take, diagnostic role or retirement."""
     reason = str(row.get("reason") or "")
-    return row.get("role") == "diagnostic" or reason.startswith(("guided recording incomplete", "loop diagnostic role"))
+    return row.get("role") == "diagnostic" or reason.startswith(
+        ("guided recording incomplete", "loop diagnostic role", "retired"))
 
 
 def _saved_reviews(workspace: Path) -> list[Path]:
@@ -258,7 +259,9 @@ def build_status(*, workspace: Path, repo: Path) -> dict[str, Any]:
             continue
         candidate_dir = eating_root / "runs" / run_id
         candidate_metrics = _read(candidate_dir / "metrics.json")
-        if candidate_metrics:
+        # Runs on another resampling grid are comparisons; Live's detector and
+        # the fingerprints below belong to the nominal grid.
+        if candidate_metrics and (candidate_metrics.get("config") or {}).get("window_grid", "nominal") == "nominal":
             run_dir, metrics = candidate_dir, candidate_metrics
             break
 

@@ -442,6 +442,38 @@ def write_report(
             w(f"<div class=tile><div class=v>{_fmt(dev[key], percent=percent)}</div><div class=k>{label} (development)</div>{_ci(dev, key, percent)}</div>")
         w("</div>")
 
+    independence = summary.get("independence") or {}
+    if selected and independence:
+        dev = results[selected]["dev_oof"]
+        nested = dev.get("nested_threshold") or {}
+        w("<h2>How independent is the evidence?</h2>")
+        w(f"<p>Recordings made back to back share a meal, an AirPods fit and a posture, so they are one "
+          f"<i>sitting</i>, not separate tests. Development has {independence['development_sittings']} sittings, "
+          f"{independence['development_sittings_with_chewing']} of them with chewing. Folds were dealt by "
+          f"<b>{_e(independence['cv_grouping'])}</b>, and the intervals resample the same unit.</p>")
+        if nested.get("available"):
+            w(f"<p>The development threshold was chosen on the predictions it is scored on. With each fold's "
+              f"threshold chosen on the other folds instead, development F1 is <b>{_fmt(nested['f1'])}</b> "
+              f"(recall {_fmt(nested['recall'])}, false-positive rate {_fmt(nested['false_positive_rate'], percent=True)}) "
+              f"against {_fmt(dev['f1'])} with the in-sample threshold. This reduces direct threshold selection "
+              f"on scored windows; it is not fully nested cross-validation because the other folds' models "
+              f"can have trained on the scored fold.</p>")
+        shared = independence.get("test_recordings_sharing_a_development_sitting") or []
+        if shared:
+            w("<p>Locked-test recordings captured in the same sitting as development recordings (their scores "
+              "are not a new-sitting test): " + ", ".join(_e(item["session_id"]) for item in shared) + ".</p>")
+        w("<table><tr><th>Split</th><th>Eating recordings flagged</th><th>Non-eating recordings flagged</th>"
+          "<th class=l>Rule</th></tr>")
+        for split in ("dev_oof", "test"):
+            block = (results[selected].get(split) or {}).get("recordings")
+            if not block:
+                continue
+            w(f"<tr><td>{SPLIT_LABELS[split]}</td>"
+              f"<td>{block['eating_recordings_flagged']}/{block['eating_recordings']}</td>"
+              f"<td>{block['non_eating_recordings_flagged']}/{block['non_eating_recordings']}</td>"
+              f"<td class=l>{_e(block['rule'])}</td></tr>")
+        w("</table>")
+
     # ------------------------------------------------------------------ data
     w("<h2>Data used</h2>")
     w(f"<p>{counts['sessions']} recordings ({counts['dev_sessions']} development, {counts['test_sessions']} locked test), "

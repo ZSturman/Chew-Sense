@@ -128,6 +128,11 @@ def export_spec(run_dir: Path, *, model: str | None = None) -> dict[str, Any]:
         raise ValueError(f"only the gradient-boosting model is exportable, not {name!r}")
     if abs(float(config["window_s"]) - WINDOW_S) > 1e-9:
         raise ValueError("the runtime contract requires 3-second windows")
+    if config.get("window_grid", "nominal") != "nominal":
+        # Live and run_stream place the grid at the nominal window end.  A model
+        # trained on sample-aligned windows would meet differently damped
+        # 12-25 Hz content there (docs/VALIDITY_2026-11-10.md).
+        raise ValueError("this run used the sample-aligned grid; the Live runtime only implements the nominal grid")
     model_path = run_dir / "models" / f"{name}.joblib"
     model_bytes = model_path.read_bytes()
     wrapper = joblib.load(model_path)

@@ -4,6 +4,12 @@
 > now automates transfer, working copies, Vision, finalization of verified drafts
 > and evaluation; use its 90-Second Baseline experiment for the first recording.
 
+> November 10, 2026: a [validity study](VALIDITY_2026-11-10.md) of the chewing-bout
+> detector found it responds to 5–25 Hz jaw vibration, and that the resampling
+> grid damps that band by an amount that drifts in Live. Experiment folds now
+> keep recordings of one sitting together. Next recordings: talking, drinking,
+> gum, soft and crunchy food.
+
 Updated October 26, 2026. **Ready for a device preflight and first experimental
 recording. Physical synchronization and recognition accuracy are not validated.**
 No model was trained or promoted. Existing recordings remain legacy diagnostics.

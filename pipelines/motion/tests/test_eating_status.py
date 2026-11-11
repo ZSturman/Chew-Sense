@@ -71,6 +71,18 @@ def test_status_tracks_data_model_and_changes(tmp_path):
     assert new_row["split"].startswith("unassigned")
 
 
+def test_status_ignores_comparison_runs_on_another_grid(tmp_path):
+    from dataclasses import replace
+
+    workspace = synthetic_workspace(tmp_path / "workspace")
+    config = ExperimentConfig(models=("prior", "logreg"), folds=2, bootstrap_resamples=20)
+    reference = run_experiment(workspace=workspace, config=config)
+    run_experiment(workspace=workspace, config=replace(config, window_grid="sample", evaluate_test=False))
+    status = build_status(workspace=workspace, repo=tmp_path / "no-repo")
+    assert status["model"]["run_id"] == reference.name
+    assert status["model"]["trained_on_current_data"]
+
+
 def test_review_fixture_matches_status_schema(tmp_path):
     workspace = synthetic_workspace(tmp_path / "workspace")
     run_experiment(workspace=workspace, config=ExperimentConfig(models=("prior", "logreg"), folds=2,

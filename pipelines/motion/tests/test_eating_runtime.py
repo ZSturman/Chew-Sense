@@ -105,6 +105,16 @@ def test_stream_matches_experiment_windows_and_masks_gaps(tmp_path):
     assert (gapped.loc[invalid, "decoder_input"] == 0.0).all()
 
 
+def test_sample_grid_runs_are_not_exportable_until_live_implements_the_grid(tmp_path):
+    run, _, _ = _fake_run(tmp_path)
+    config = json.loads((run / "config.json").read_text())
+    (run / "config.json").write_text(json.dumps({**config, "window_grid": "sample"}))
+    with pytest.raises(ValueError, match="sample-aligned grid"):
+        export_spec(run)
+    (run / "config.json").write_text(json.dumps({**config, "window_grid": "nominal"}))
+    assert export_spec(run)["input"]["window_s"] == 3.0
+
+
 def test_stream_end_times_have_no_drift():
     t = np.arange(0, 100, 0.02) + 291953.157447375
     ends = stream_end_times(t, 0.5)

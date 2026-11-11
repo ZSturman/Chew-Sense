@@ -654,6 +654,18 @@ def discover_sessions(
     return sessions, rejected
 
 
+WINDOW_GRIDS = ("nominal", "sample")
+
+
+def sample_aligned_end(timestamps: np.ndarray, end: float, sample_rate_hz: int = 50) -> float:
+    """The last sample time at or before ``end``, if within one sample period; else ``end``."""
+
+    index = int(np.searchsorted(timestamps, end, side="right")) - 1
+    if index >= 0 and end - float(timestamps[index]) <= 1.0 / sample_rate_hz + 1e-6:
+        return float(timestamps[index])
+    return float(end)
+
+
 @dataclass
 class WindowSet:
     """All causal windows of all sessions; ``label == -1`` means unlabelled."""
@@ -712,6 +724,7 @@ def build_windows(
     guard_s: float = 1.0,
     min_valid_fraction: float = 0.9,
     sample_rate_hz: int = 50,
+    grid: str = "nominal",
 ) -> WindowSet:
     """Cut causal windows ``[t - window_s, t]`` every ``stride_s`` seconds.
 
@@ -720,10 +733,21 @@ def build_windows(
     marking imprecision at transitions, so boundary windows are excluded
     rather than guessed.  Windows with insufficient measured motion are
     excluded too.  Excluded windows are kept for timeline replay.
+
+    ``grid`` chooses where the 50 Hz resampling grid sits.  ``"nominal"``
+    ends it exactly at ``t`` (every run before 2026-11-10, and the exported
+    Live detector).  AirPods samples arrive on a steady 20 ms clock, so that
+    grid falls a fixed fraction of a sample between measurements, and linear
+    interpolation then damps 12-25 Hz content by up to half depending on that
+    arbitrary fraction.  ``"sample"`` ends the grid on the last sample at or
+    before ``t`` (never more than one sample period earlier), which keeps the
+    measured values.  Labels and ``t_end`` are the same for both.
     """
 
     if window_s <= 0 or stride_s <= 0 or guard_s < 0:
         raise ValueError("window and stride must be positive; guard non-negative")
+    if grid not in WINDOW_GRIDS:
+        raise ValueError(f"window grid must be one of {WINDOW_GRIDS}")
     samples = int(round(window_s * sample_rate_hz))
     parts: dict[str, list[np.ndarray]] = {k: [] for k in (
         "X", "label", "t_end", "session_id", "tier", "context", "exclusion", "valid_fraction"
@@ -740,10 +764,12 @@ def build_windows(
         reasons = np.empty(len(ends), dtype=object)
         valid = np.zeros(len(ends), dtype=np.float32)
         for index, end in enumerate(ends):
+            grid_end = float(end) if grid == "nominal" else sample_aligned_end(
+                session.motion_t, float(end), sample_rate_hz)
             window, _ = resample_motion_window(
                 session.motion_t,
                 session.imu,
-                end_timestamp=float(end),
+                end_timestamp=grid_end,
                 sample_rate_hz=sample_rate_hz,
                 context_seconds=window_s,
             )

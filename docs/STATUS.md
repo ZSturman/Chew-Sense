@@ -1,5 +1,27 @@
 # Current Status
 
+## November 10, 2026 — validity study and publication review
+
+The [validity study](VALIDITY_2026-11-10.md) checks the experimental chewing-bout
+detector on development recordings only: 23 recordings, 12 sittings, five
+with chewing, all from one wearer. Within-meal AUC-ROC was 0.965 on held-out
+sittings. The frozen November 4 detector found both bouts in one later
+recording (50/50 labelled chewing windows, 0/88 false-positive windows).
+These remain pilot results, not evidence for other wearers or daily use.
+
+Development folds and uncertainty estimates now group recordings by sitting.
+The report adds threshold-from-other-folds sensitivity and recording-level
+decisions. The threshold estimate is not fully nested cross-validation.
+Prospective scoring now compares absolute capture times with the model's UTC
+training cutoff; ambiguous times and legacy migration dates are excluded.
+
+The detector responds to jaw vibration in the 5–25 Hz band. Resampling can
+damp that band; sample-aligned training runs cannot be exported until Live
+supports the same grid. No replacement model was deployed. Next: dedicated
+confound/texture takes, then a natural meal on another day, scored with the
+frozen detector before retraining. Device and TestFlight handoff details
+remain in [NEXT_STEPS.md](NEXT_STEPS.md).
+
 ## November 3, 2026 — first real training and evaluation
 
 See the [independent audit](AUDIT_2026-11-03.md). A motion-only chewing-bout
