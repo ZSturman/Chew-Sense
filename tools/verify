@@ -146,21 +146,24 @@ run_xcode_test() {
 }
 
 run_apps() {
-  local simulator_id
-  simulator_id="$(select_simulator)"
-  local simulator_destination="platform=iOS Simulator,id=$simulator_id"
-
   run_xcode_test \
     "apps/review-macos" \
     "ChewSenseReview.xcodeproj" \
     "ChewSenseReview" \
     "platform=macOS"
 
+  local simulator_id
+  local simulator_destination
+  simulator_id="$(select_simulator)"
+  simulator_destination="platform=iOS Simulator,id=$simulator_id"
   run_xcode_test \
     "apps/collect-ios" \
     "ChewSenseCollect.xcodeproj" \
     "ChewSenseCollect" \
     "$simulator_destination"
+
+  simulator_id="$(select_simulator)"
+  simulator_destination="platform=iOS Simulator,id=$simulator_id"
   run_xcode_test \
     "apps/live-ios" \
     "ChewSenseLive.xcodeproj" \
