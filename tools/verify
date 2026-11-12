@@ -50,15 +50,38 @@ run_fixture() {
 }
 
 select_simulator() {
+  local project_dir="${1:-}"
+  local project="${2:-}"
+  local scheme="${3:-}"
+  local available_devices
+  available_devices="$(xcrun simctl list devices available)"
+  local scheme_destinations=""
+
+  if [[ -n "$project_dir" && -n "$project" && -n "$scheme" ]]; then
+    scheme_destinations="$(
+      xcodebuild \
+        -project "$ROOT/$project_dir/$project" \
+        -scheme "$scheme" \
+        -showdestinations 2>/dev/null || true
+    )"
+  fi
+
   if [[ -n "${CHEWSENSE_SIMULATOR_ID:-}" ]]; then
-    printf '%s\n' "$CHEWSENSE_SIMULATOR_ID"
-    return
+    if awk -F '[()]' -v wanted="$CHEWSENSE_SIMULATOR_ID" '$2 == wanted { found = 1 } END { exit found ? 0 : 1 }' <<<"$available_devices" &&
+      { [[ -z "$scheme_destinations" ]] || grep -Eq "platform:iOS Simulator.*id:${CHEWSENSE_SIMULATOR_ID}(,|})" <<<"$scheme_destinations"; }; then
+      printf '%s\n' "$CHEWSENSE_SIMULATOR_ID"
+      return
+    fi
+    printf 'CHEWSENSE_SIMULATOR_ID=%s is unavailable on this runner; selecting an available iPhone simulator.\n' "$CHEWSENSE_SIMULATOR_ID" >&2
   fi
 
   local device_id
-  device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone.*Booted/{print $2; exit}')"
+  device_id="$(sed -nE 's/.*platform:iOS Simulator.*id:([^,]+),.*name:iPhone.*/\1/p' <<<"$scheme_destinations" | head -n1)"
   if [[ -z "$device_id" ]]; then
-    device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')"
+    device_id="$(awk -F '[()]' '/iPhone.*Booted/{print $2; exit}' <<<"$available_devices")"
+  fi
+  if [[ -z "$device_id" ]]; then
+    device_id="$(awk -F '[()]' '/iPhone/{print $2; exit}' <<<"$available_devices")"
     if [[ -z "$device_id" ]]; then
       printf 'No available iPhone simulator was found. Set CHEWSENSE_SIMULATOR_ID.\n' >&2
       exit 2
@@ -140,21 +163,24 @@ run_xcode_test() {
 }
 
 run_apps() {
-  local simulator_id
-  simulator_id="$(select_simulator)"
-  local simulator_destination="platform=iOS Simulator,id=$simulator_id"
-
   run_xcode_test \
     "apps/review-macos" \
     "ChewSenseReview.xcodeproj" \
     "ChewSenseReview" \
     "platform=macOS"
 
+  local simulator_id
+  local simulator_destination
+  simulator_id="$(select_simulator "apps/collect-ios" "ChewSenseCollect.xcodeproj" "ChewSenseCollect")"
+  simulator_destination="platform=iOS Simulator,id=$simulator_id"
   run_xcode_test \
     "apps/collect-ios" \
     "ChewSenseCollect.xcodeproj" \
     "ChewSenseCollect" \
     "$simulator_destination"
+
+  simulator_id="$(select_simulator "apps/live-ios" "ChewSenseLive.xcodeproj" "ChewSenseLive")"
+  simulator_destination="platform=iOS Simulator,id=$simulator_id"
   run_xcode_test \
     "apps/live-ios" \
     "ChewSenseLive.xcodeproj" \
