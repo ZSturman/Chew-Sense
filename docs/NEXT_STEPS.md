@@ -1040,3 +1040,9 @@ recipient behavior remain untested. No independently measured CV accuracy,
 annotation time savings or physical synchronization accuracy is claimed. Full
 Live and full application/UI suites were not run. This phase prepares a pilot,
 not model training or promotion.
+
+## TestFlight build 9 — November 17, 2026
+
+The signed Chew Sense Collect 1.2 (9) archive from `cbf2fee` was uploaded using the App Store Connect API key. Apple reports VALID and IN_BETA_TESTING. Builds 8 and 9 both appear in the existing Personal TestFlight group. Build 9 adds guided-take labels derived from the recording instructions.
+
+In TestFlight, update Chew Sense Collect to 1.2 (9), finish a guided take and confirm that the editable labels appear before closing the review screen. This physical check remains open. Public App Store distribution is separate.
